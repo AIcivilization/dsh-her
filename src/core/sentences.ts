@@ -17,6 +17,15 @@ const SOFT_PAUSES = new Set(['，', '、', '；', '：', ',', ';'])
 /** Characters after which a run without a terminator is cut at its last soft pause. */
 export const SOFT_CUT_AT = 48
 
+/**
+ * How long a sentence takes to say or read, for showing it when there is no
+ * audio to time it by: about 4.5 Chinese characters a second, at least 1.2 s.
+ */
+export function readingMs(text: string): number {
+  const chars = [...text].filter(ch => /[\p{L}\p{N}]/u.test(ch)).length
+  return Math.max(1200, Math.round(chars * 220))
+}
+
 function isSpeakable(text: string): boolean {
   return /[\p{L}\p{N}]/u.test(text)
 }

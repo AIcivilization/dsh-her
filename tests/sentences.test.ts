@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { SentenceSplitter } from '../src/core/sentences.ts'
+import { readingMs, SentenceSplitter } from '../src/core/sentences.ts'
 
 function run(deltas: string[]): string[] {
   const splitter = new SentenceSplitter()
@@ -37,4 +37,10 @@ test('reset drops the unfinished sentence', () => {
   splitter.push('说到一半')
   splitter.reset()
   assert.deepEqual(splitter.flush(), [])
+})
+
+test('reading time counts letters and digits only, with a floor', () => {
+  assert.equal(readingMs('好。'), 1200)
+  assert.equal(readingMs('你回来啦，我等你好久了。'), 10 * 220)
+  assert.equal(readingMs('！？…'), 1200)
 })

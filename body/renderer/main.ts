@@ -1,10 +1,6 @@
 /**
- * Body page (M0 spike): an idle pool of clips on two players that crossfade,
- * plus overlay click-through and dragging.
- *
- * Each player is a <video>; for "stacked" packs the video stays hidden and a
- * WebGL canvas shows it (see stacked.ts). The crossfade toggles whichever
- * element is visible.
+ * Body page: her clips (player.ts), the speech bubble (bubble.ts), the input
+ * box, and overlay click-through and dragging.
  *
  * Click-through: main keeps the window ignoring the mouse but forwarding moves.
  * On each move (throttled) the current frame's alpha under the pointer, read
@@ -12,80 +8,37 @@
  * stops ignoring the mouse so she can be clicked and dragged. No screen
  * recording permission is involved. M3 replaces the live sampling with masks
  * precomputed at import.
+ *
+ * Talking to her: double-click her, or the global shortcut, opens the input
+ * box; Enter sends, Esc closes.
  */
 
-import type { BodyConfig, HerBridge, PackLayout } from '../shared/types.ts'
-import { StackedView } from './stacked.ts'
+import type { BrainMessage } from '../../src/protocol/index.ts'
+import type { BodyConfig, HerBridge, LinkStatus, PackLayout } from '../shared/types.ts'
+import { Bubble } from './bubble.ts'
+import { Player } from './player.ts'
 
 declare global {
   interface Window { her: HerBridge }
 }
 
-const FADE_LEAD_S = 0.6
 const HIT_ALPHA = 40
 const HIT_EVERY_MS = 50
 
-interface Player {
-  video: HTMLVideoElement
-  /** The element on screen: the video itself, or its WebGL canvas. */
-  shown: HTMLElement
-}
-
 const stage = document.getElementById('stage') as HTMLDivElement
-let players: Player[] = []
-let active = 0
-let lastClip = -1
-let switching = false
-
-function makePlayers(layout: PackLayout): Player[] {
-  return [0, 1].map(() => {
-    const video = document.createElement('video')
-    video.muted = true
-    video.playsInline = true
-    video.preload = 'auto'
-    stage.append(video)
-    if (layout !== 'stacked') return { video, shown: video }
-    video.classList.add('source')
-    const view = new StackedView(video)
-    stage.append(view.canvas)
-    return { video, shown: view.canvas }
-  })
-}
-
-async function playNext(config: BodyConfig): Promise<void> {
-  const clips = config.pack.clips
-  let pick = Math.floor(Math.random() * clips.length)
-  if (clips.length > 1 && pick === lastClip) pick = (pick + 1) % clips.length
-  lastClip = pick
-  const incoming = players[1 - active]!
-  const outgoing = players[active]!
-  incoming.video.src = clips[pick]!.url
-  incoming.video.currentTime = 0
-  await incoming.video.play()
-  incoming.shown.classList.add('on')
-  outgoing.shown.classList.remove('on')
-  active = 1 - active
-  setTimeout(() => { if (players[1 - active] === outgoing) outgoing.video.pause() }, 700)
-}
-
-function watchForEnd(config: BodyConfig): void {
-  for (const { video } of players) {
-    video.addEventListener('timeupdate', () => {
-      if (video !== players[active]!.video || switching || !Number.isFinite(video.duration)) return
-      if (video.duration - video.currentTime > FADE_LEAD_S) return
-      switching = true
-      playNext(config).catch(console.error).finally(() => { switching = false })
-    })
-  }
-}
+const bubble = new Bubble(document.getElementById('bubble')!)
+const ask = document.getElementById('ask') as HTMLFormElement
+const askInput = document.getElementById('ask-input') as HTMLInputElement
+let player: Player | undefined
+let linkStatus: LinkStatus = 'connecting'
 
 /** Whether a window point is on her: inside the shown frame and not transparent there. */
 function makeHitTest(layout: PackLayout): (x: number, y: number) => boolean {
   const canvas = document.createElement('canvas')
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!
   return (x, y) => {
-    const video = players[active]!.video
-    if (video.videoWidth === 0) return false
+    const video = player?.current.video
+    if (video === undefined || video.videoWidth === 0) return false
     const frameW = video.videoWidth
     const frameH = layout === 'stacked' ? video.videoHeight / 2 : video.videoHeight
     const box = stage.getBoundingClientRect()
@@ -108,21 +61,51 @@ function makeHitTest(layout: PackLayout): (x: number, y: number) => boolean {
   }
 }
 
+function openInput(): void {
+  ask.classList.add('show')
+  window.her.interactive(true)
+  player?.touch()
+  askInput.focus()
+}
+
+function closeInput(): void {
+  ask.classList.remove('show')
+  askInput.value = ''
+  window.her.interactive(false)
+}
+
+function wireInput(): void {
+  ask.addEventListener('submit', event => {
+    event.preventDefault()
+    const text = askInput.value.trim()
+    closeInput()
+    if (text === '') return
+    window.her.say(text).then(sent => {
+      if (!sent) bubble.note(linkStatus === 'rejected' ? '（dsh 不认我了，得重新配对）' : '（我现在连不上 dsh，等它开起来再说吧）')
+    }, console.error)
+  })
+  askInput.addEventListener('keydown', event => {
+    if (event.key === 'Escape') closeInput()
+  })
+  askInput.addEventListener('blur', () => { if (askInput.value.trim() === '') closeInput() })
+}
+
 function wireOverlay(config: BodyConfig): void {
   const hitTest = makeHitTest(config.pack.layout)
   let onHer = false
   let lastCheck = 0
-  let drag: { x: number; y: number } | undefined
+  let drag: { x: number; y: number; moved: boolean } | undefined
   const setOnHer = (value: boolean) => {
     if (value === onHer) return
     onHer = value
-    window.her.hit(value)
+    // While the input box is open the window keeps the mouse.
+    if (!ask.classList.contains('show')) window.her.hit(value)
     document.body.style.cursor = value ? 'grab' : 'default'
   }
   window.addEventListener('mousemove', event => {
     if (drag !== undefined) {
       window.her.drag(event.screenX - drag.x, event.screenY - drag.y)
-      drag = { x: event.screenX, y: event.screenY }
+      drag = { x: event.screenX, y: event.screenY, moved: true }
       return
     }
     const now = performance.now()
@@ -132,21 +115,64 @@ function wireOverlay(config: BodyConfig): void {
   })
   window.addEventListener('mouseleave', () => { if (drag === undefined) setOnHer(false) })
   window.addEventListener('mousedown', event => {
-    if (event.button === 0 && onHer) drag = { x: event.screenX, y: event.screenY }
+    if (event.button === 0 && onHer && !ask.contains(event.target as Node)) {
+      drag = { x: event.screenX, y: event.screenY, moved: false }
+      player?.touch()
+    }
   })
   window.addEventListener('mouseup', () => { drag = undefined })
+  window.addEventListener('dblclick', () => { if (onHer) openInput() })
   window.addEventListener('contextmenu', event => {
     event.preventDefault()
     if (onHer) window.her.menu()
   })
 }
 
+function onBrain(message: BrainMessage): void {
+  switch (message.t) {
+    case 'state':
+      player?.setState(message.state)
+      if (message.state === 'think') bubble.thinking()
+      break
+    case 'speak.begin':
+      bubble.begin(message.uid)
+      player?.setState('talk')
+      break
+    case 'speak.seg':
+      bubble.seg(message.uid, message.text, message.durationMs)
+      player?.touch()
+      break
+    case 'speak.end':
+      bubble.end(message.uid)
+      player?.setState('idle')
+      break
+    case 'speak.cancel':
+      bubble.cancel(message.uid)
+      player?.setState('idle')
+      break
+    case 'bubble':
+      bubble.note(message.text, message.ttlMs)
+      player?.touch()
+      break
+    case 'reject':
+      bubble.note(`（${message.message}）`, 8000)
+      break
+  }
+}
+
+// Listeners first: the shortcut may ask for the input box while the config loads.
+window.her.onShowInput(openInput)
+window.her.onBrain(onBrain)
+window.her.onStatus(status => { linkStatus = status })
+
 async function main(): Promise<void> {
   const config = await window.her.config()
   document.body.classList.add(config.mode)
-  players = makePlayers(config.pack.layout)
-  watchForEnd(config)
-  await playNext(config)
+  document.documentElement.style.setProperty('--her-w', `${config.her.width}px`)
+  document.documentElement.style.setProperty('--her-h', `${config.her.height}px`)
+  player = new Player(stage, config.pack)
+  await player.start()
+  wireInput()
   if (config.mode === 'overlay') wireOverlay(config)
   else window.addEventListener('contextmenu', () => window.her.menu())
 }

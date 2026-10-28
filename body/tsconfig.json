@@ -14,5 +14,5 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["main", "renderer", "shared"]
+  "include": ["main", "renderer", "shared", "../src/protocol"]
 }

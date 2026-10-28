@@ -80,11 +80,14 @@ export interface DshServices {
   sessionQuery?: { readSession(id: string): Promise<{ events: Array<{ seq: number; type: string; data: unknown }> }> }
 }
 
-/** What her stream produces, in order: one `start`, any number of `sentence`s, one `end`. */
+/**
+ * What her stream produces, per reply: one `start`, any number of `sentence`s,
+ * one `end`. `replyId` is unique across turns.
+ */
 export interface ReplyEvents {
-  start(attemptId: string): void
-  sentence(attemptId: string, text: string): void
-  end(attemptId: string, outcome: string): void
+  start(replyId: string): void
+  sentence(replyId: string, text: string): void
+  end(replyId: string, outcome: string): void
 }
 
 export interface HerSessionDeps {
@@ -105,6 +108,8 @@ export class HerSession {
   private readonly splitter = new SentenceSplitter()
   /** Set by interrupt(): the rest of the current reply is not spoken. */
   private dropping = false
+  /** The reply being streamed, unique across turns. */
+  private replyId: string | undefined
   private readonly deps: HerSessionDeps
 
   constructor(deps: HerSessionDeps) {
@@ -227,16 +232,23 @@ export class HerSession {
     if (frame.type === 'start') {
       this.splitter.reset()
       this.dropping = false
-      events.start(frame.attemptId)
-    } else if (frame.type === 'chunk') {
+      // DSH's attempt id repeats across turns (it ends in the agent's revision), so the turn and step make it unique.
+      this.replyId = `${frame.attemptId}@${frame.turn}.${frame.step}`
+      events.start(this.replyId)
+      return
+    }
+    const id = this.replyId
+    if (id === undefined) return
+    if (frame.type === 'chunk') {
       if (this.dropping || frame.chunk.type !== 'text-delta' || typeof frame.chunk.text !== 'string') return
-      for (const sentence of this.splitter.push(frame.chunk.text)) events.sentence(frame.attemptId, sentence)
+      for (const sentence of this.splitter.push(frame.chunk.text)) events.sentence(id, sentence)
     } else {
       if (!this.dropping && frame.outcome.kind !== 'abandoned') {
-        for (const sentence of this.splitter.flush()) events.sentence(frame.attemptId, sentence)
+        for (const sentence of this.splitter.flush()) events.sentence(id, sentence)
       }
       this.splitter.reset()
-      events.end(frame.attemptId, frame.outcome.kind)
+      this.replyId = undefined
+      events.end(id, frame.outcome.kind)
     }
   }
 }
