@@ -1,0 +1,18 @@
+node_modules/
+lib/
+*.tgz
+*.tsbuildinfo
+.DS_Store
+
+# Electron body build output.
+body/dist/
+body/out/
+
+# Voice models are downloaded on first use, never committed.
+models/
+
+# Third-party demo clips used only for local development; they never enter the repository.
+dev-assets/
+
+# Local dev-server launch config for the Claude app.
+.claude/

@@ -1,0 +1,5 @@
+# dsh bundle patch: inserts dsh-her into a profile's layer stack.
+# Override any field (home, character.*, model) in your profile's cordis.patch.yml.
+- insert:
+    - id: dsh-her
+      name: dsh-her

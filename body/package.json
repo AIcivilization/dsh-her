@@ -1,0 +1,23 @@
+{
+  "name": "dsh-her-body",
+  "version": "0.1.0-dev.0",
+  "private": true,
+  "description": "dsh-her body: the desktop app she lives in (on top of your windows or inside the wallpaper).",
+  "main": "dist/main.cjs",
+  "license": "MIT",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "npm run build && electron .",
+    "dev-pack": "node scripts/make-dev-pack.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "koffi": "3.3.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "electron": "44.7.0",
+    "esbuild": "0.28.2",
+    "typescript": "^5.9.2"
+  }
+}

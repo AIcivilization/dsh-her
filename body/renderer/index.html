@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; media-src file:; script-src 'self'; style-src 'self' 'unsafe-inline'">
+  <title>她</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; user-select: none; }
+    body.window { background: #1b1b1f; }
+    #stage { position: absolute; inset: 0; }
+    body.wallpaper #stage { inset: auto; right: 3vw; bottom: 6vh; height: 42vh; aspect-ratio: 3 / 4; }
+    video, canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 0.6s linear; pointer-events: none; }
+    video.on, canvas.on { opacity: 1; }
+    /* Decoding source of a stacked clip; its canvas is what shows. */
+    video.source { width: 1px; height: 1px; opacity: 0 !important; }
+  </style>
+</head>
+<body>
+  <div id="stage"></div>
+  <script src="renderer.js"></script>
+</body>
+</html>
