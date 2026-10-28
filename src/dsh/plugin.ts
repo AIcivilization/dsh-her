@@ -4,10 +4,15 @@
  * hangs off `ctx.effect`, so disabling or uninstalling the plugin closes her
  * session handle and the server (the body stays up and waits, asleep).
  *
- * M1: text only. Every reply of her session, whoever prompted it (the body's
- * input box, the DSH page, `/her`), goes to connected bodies as `speak.*`
- * sentences without audio, timed by reading speed. Replies are live only: a
- * body that connects later never gets earlier ones replayed.
+ * Every reply of her session, whoever prompted it (the body's input box or
+ * microphone, the DSH page, `/her`), goes to connected bodies as `speak.*`
+ * sentences, each with its synthesized audio (or, without a voice, timed by
+ * reading speed). Replies are live only: a body that connects later never gets
+ * earlier ones replayed.
+ *
+ * Listening: a body sends what you said as audio; it is recognized here and
+ * goes to her like typed text. When a body cuts her off (you started talking),
+ * it reports how far she got; her next turn is told what you actually heard.
  *
  * Her replies are also logged with timings to `<home>/logs/stream.jsonl`.
  */
@@ -15,12 +20,14 @@
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { herPaths, readingMs } from '../core/index.ts'
+import { herPaths, judgeBargeIn, readingMs, speakable } from '../core/index.ts'
 import { PROTOCOL_VERSION, type BodyMessage, type BrainMessage } from '../protocol/index.ts'
 import { BrainServer } from '../server/brain-server.ts'
 import { bodyRunning, findDevBody, launchBody } from './body-launcher.ts'
 import type { HerConfig } from './config.ts'
 import { HerSession, type DshServices, type ModelRoute } from './her-session.ts'
+import { heardText, SpeechQueue } from '../voice/speech-queue.ts'
+import { Voice } from '../voice/voice.ts'
 
 interface CommandsLike {
   register(definition: {
@@ -61,6 +68,13 @@ export function apply(ctx: Context, config: HerConfig): void {
   const finished: ReplyTrace[] = []
   /** Resolves on the first sentence of the next reply. */
   let onFirstSentence: (() => void) | undefined
+  let voice: Voice | undefined
+  let speech: SpeechQueue | undefined
+  let nextStream = 1
+  /** What you heard of her last cut-off reply; told to her before your next turn. */
+  let cutNote: string | undefined
+  /** The last barge-in, to check the utterance that follows it for echo. */
+  let lastCut: { uid: string; at: number } | undefined
 
   const log = (entry: Record<string, unknown>) => {
     try {
@@ -83,25 +97,82 @@ export function apply(ctx: Context, config: HerConfig): void {
     session?.ensure().catch(error => ctx.logger.warn(`dsh-her: her session not ready (${(error as Error).message})`))
   }
 
-  /** You said something (typed in the body): cut her off if she is talking, then pass it on. */
-  const hear = (text: string) => {
-    if (session === undefined) return
-    if (current !== undefined) {
-      session.interrupt()
-      broadcast({ t: 'speak.cancel', cid, uid: current.attemptId })
-    }
-    sentAt = Date.now()
-    broadcast({ t: 'state', cid, state: 'think' })
-    session.say(text, 'text').catch((error: Error) => {
-      broadcast({ t: 'state', cid, state: 'idle' })
-      broadcast({ t: 'bubble', cid, text: `（我还没准备好：${error.message}）`, ttlMs: 6000 })
-    })
+  /** Stop her current reply: generation, synthesis and every body's playback. */
+  const cut = () => {
+    if (current === undefined) return
+    session?.interrupt()
+    speech?.cancel(current.attemptId)
+    broadcast({ t: 'speak.cancel', cid, uid: current.attemptId })
   }
 
-  const onBodyMessage = (message: BodyMessage) => {
-    if (message.t === 'user.text') {
-      const text = message.text.trim()
-      if (text !== '') hear(text)
+  /** You said something (typed or spoken): cut her off if she is talking, then pass it on. */
+  const hear = (text: string, via: 'text' | 'voice') => {
+    if (session === undefined) return
+    cut()
+    sentAt = Date.now()
+    broadcast({ t: 'state', cid, state: 'think' })
+    const her = session
+    const note = cutNote
+    cutNote = undefined
+    ;(note === undefined ? Promise.resolve() : her.note(note))
+      .then(() => her.say(text, via))
+      .catch((error: Error) => {
+        broadcast({ t: 'state', cid, state: 'idle' })
+        broadcast({ t: 'bubble', cid, text: `（我还没准备好：${error.message}）`, ttlMs: 6000 })
+      })
+  }
+
+  /** A body cut her off at `seq`, `playedMs` into it: remember what you heard and stop the rest. */
+  const interrupted = (uid: string, seq: number, playedMs: number) => {
+    const heard = heardText(speech?.sentOf(uid) ?? [], seq, playedMs)
+    cutNote = heard === ''
+      ? '（备注：你上一段话刚开口就被对方打断了，对方什么都没听到。）'
+      : `（备注：你上一段话只说到"${heard}"就被对方打断了，后面的部分对方没有听到。）`
+    log({ event: 'interrupted', uid, seq, playedMs, heard })
+    lastCut = { uid, at: Date.now() }
+    if (current?.attemptId === uid) session?.interrupt()
+    speech?.cancel(uid)
+  }
+
+  const onBodyMessage = (message: BodyMessage, audio: Uint8Array | undefined) => {
+    switch (message.t) {
+      case 'user.text': {
+        const text = message.text.trim()
+        if (text !== '') hear(text, 'text')
+        break
+      }
+      case 'user.utterance': {
+        if (message.text !== undefined) {
+          broadcast({ t: 'heard', cid, uttId: message.uttId, text: message.text })
+          if (message.text.trim() !== '') hear(message.text.trim(), 'voice')
+          break
+        }
+        if (audio === undefined || voice === undefined) break
+        const rate = Number(/@(\d+)k/.exec(message.format)?.[1] ?? 16) * 1000
+        const endedAt = Date.now()
+        voice.recognize(audio, rate).then(({ text, ms }) => {
+          // Right after a barge-in: was it you, or her own voice through the speakers?
+          const barge = lastCut !== undefined && endedAt - lastCut.at < 10_000 ? lastCut : undefined
+          lastCut = undefined
+          const verdict = barge === undefined ? 'you' : judgeBargeIn(text, (speech?.sentOf(barge.uid) ?? []).map(s => s.text).join(''))
+          log({ event: 'heard', uttId: message.uttId, text, asrMs: ms, audioMs: message.durationMs, verdict })
+          if (verdict !== 'you') {
+            cutNote = undefined
+            broadcast({ t: 'heard', cid, uttId: message.uttId, text: '', ignored: verdict })
+            return
+          }
+          broadcast({ t: 'heard', cid, uttId: message.uttId, text })
+          if (text !== '') hear(text, 'voice')
+          sentAt = endedAt
+        }, (error: Error) => {
+          broadcast({ t: 'heard', cid, uttId: message.uttId, text: '' })
+          broadcast({ t: 'bubble', cid, text: `（我没听清：${error.message}）`, ttlMs: 5000 })
+        })
+        break
+      }
+      case 'interrupt':
+        interrupted(message.uid, message.seq, message.playedMs)
+        break
     }
   }
 
@@ -133,7 +204,7 @@ export function apply(ctx: Context, config: HerConfig): void {
           onFirstSentence?.()
           onFirstSentence = undefined
           log({ event: 'sentence', attemptId, text, sinceSendMs: sentAt === undefined ? null : now - sentAt })
-          broadcast({ t: 'speak.seg', cid, uid: attemptId, seq, text, durationMs: readingMs(text) })
+          speech?.say(attemptId, seq, text)
         },
         end(attemptId, outcome) {
           log({ event: 'end', attemptId, outcome, sinceSendMs: sentAt === undefined ? null : Date.now() - sentAt })
@@ -145,12 +216,30 @@ export function apply(ctx: Context, config: HerConfig): void {
             finished.push(current)
             if (finished.length > 20) finished.shift()
           }
-          broadcast({ t: 'speak.end', cid, uid: attemptId })
+          speech?.end(attemptId)
           current = undefined
         },
       },
     } as ConstructorParameters<typeof HerSession>[0])
     if (services !== undefined) open()
+
+    voice = new Voice(paths.models, config.voice, ctx.logger)
+    const herVoice = voice
+    void herVoice.start()
+    speech = new SpeechQueue(text => herVoice.synthesize(speakable(text)), {
+      sentence(uid, seq, text, audio) {
+        if (audio === undefined) {
+          broadcast({ t: 'speak.seg', cid, uid, seq, text, durationMs: readingMs(text) })
+          return
+        }
+        const stream = nextStream++
+        if (seq === 0) log({ event: 'first-audio', uid, sinceSendMs: sentAt === undefined ? null : Date.now() - sentAt, durationMs: audio.durationMs })
+        server?.broadcastWithAudio({ t: 'speak.seg', cid, uid, seq, text, durationMs: audio.durationMs, format: 'wav', stream }, stream, audio.audio)
+      },
+      end(uid) {
+        broadcast({ t: 'speak.end', cid, uid })
+      },
+    })
 
     const brain = new BrainServer({
       tokenFile: join(paths.root, 'token'),
@@ -162,9 +251,9 @@ export function apply(ctx: Context, config: HerConfig): void {
         v: PROTOCOL_VERSION,
         sessionId: session?.sessionId ?? '',
         characters: [{ cid, name: config.character.name, mode: 'overlay' }],
-        config: { mic: 'push-to-talk', bargeIn: true },
+        config: { mic: config.voice.mic, bargeIn: true },
       }),
-      message: (_client, message) => onBodyMessage(message),
+      message: (_client, message, audio) => onBodyMessage(message, audio),
     })
     let launchTimer: NodeJS.Timeout | undefined
     brain.start().then(discovery => {
@@ -185,6 +274,9 @@ export function apply(ctx: Context, config: HerConfig): void {
 
     return async () => {
       clearTimeout(launchTimer)
+      herVoice.stop()
+      voice = undefined
+      speech = undefined
       const closing = session
       session = undefined
       server = undefined
@@ -248,6 +340,7 @@ export function apply(ctx: Context, config: HerConfig): void {
       systemChars: system === undefined ? null : JSON.stringify(system.message).length,
       usage: usage?.usage ?? null,
       bodies: server?.bodies.map(b => `${b.hello.body.kind} ${b.hello.body.version} ${b.hello.body.os}`) ?? [],
+      voice: voice?.status ?? null,
       server: server?.url ?? null,
     }
     log({ event: 'diagnose', ...result })
@@ -272,8 +365,7 @@ export function apply(ctx: Context, config: HerConfig): void {
           }
         }
         if (STOP_WORDS.has(text.toLowerCase())) {
-          session.interrupt()
-          if (current !== undefined) broadcast({ t: 'speak.cancel', cid, uid: current.attemptId })
+          cut()
           return { kind: 'success', text: '已让她停下。' }
         }
         if (text.startsWith(INTERRUPT_CHECK)) return checkInterrupt(session, text.slice(INTERRUPT_CHECK.length).trim() || '给我讲一个很长很长的睡前故事，至少讲十句。')

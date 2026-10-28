@@ -1,6 +1,14 @@
 /**
- * Body page: her clips (player.ts), the speech bubble (bubble.ts), the input
- * box, and overlay click-through and dragging.
+ * Body page: her clips (player.ts), her voice (speech-player.ts), the speech
+ * bubble (bubble.ts), the microphone (mic.ts), the input box, and overlay
+ * click-through and dragging.
+ *
+ * Talking: the shortcut listens for one utterance; "always listening" keeps
+ * the microphone open. When you start talking while she speaks, she stops at
+ * once and the brain is told how far she got (barge-in). If that keeps firing
+ * on her own voice (speakers, no headphones: speech starts while she talks but
+ * nothing is understood), barge-in turns off for the session and she finishes
+ * before listening; she says so once.
  *
  * Click-through: main keeps the window ignoring the mouse but forwarding moves.
  * On each move (throttled) the current frame's alpha under the pointer, read
@@ -9,28 +17,96 @@
  * recording permission is involved. M3 replaces the live sampling with masks
  * precomputed at import.
  *
- * Talking to her: double-click her, or the global shortcut, opens the input
- * box; Enter sends, Esc closes.
+ * With `--her-debug`, `window.__her` offers test hooks (inject a recording, read
+ * timings).
  */
 
 import type { BrainMessage } from '../../src/protocol/index.ts'
-import type { BodyConfig, HerBridge, LinkStatus, PackLayout } from '../shared/types.ts'
+import type { BodyConfig, HerBridge, LinkStatus, MicMode, PackLayout } from '../shared/types.ts'
 import { Bubble } from './bubble.ts'
+import { Mic } from './mic.ts'
 import { Player } from './player.ts'
+import { SpeechPlayer } from './speech-player.ts'
+import { SAMPLE_RATE, toPcm16 } from './vad.ts'
 
 declare global {
-  interface Window { her: HerBridge }
+  interface Window {
+    her: HerBridge
+    __her?: unknown
+  }
 }
 
 const HIT_ALPHA = 40
 const HIT_EVERY_MS = 50
+/** Barge-ins that heard nothing, within this window, before barge-in is turned off. */
+const FALSE_BARGE_LIMIT = 2
+const FALSE_BARGE_WINDOW_MS = 30_000
 
 const stage = document.getElementById('stage') as HTMLDivElement
 const bubble = new Bubble(document.getElementById('bubble')!)
+const micDot = document.getElementById('mic') as HTMLDivElement
 const ask = document.getElementById('ask') as HTMLFormElement
 const askInput = document.getElementById('ask-input') as HTMLInputElement
 let player: Player | undefined
+let speech: SpeechPlayer | undefined
 let linkStatus: LinkStatus = 'connecting'
+let bargeIn = true
+let micMode: MicMode = 'push-to-talk'
+let lastHeard: string | undefined
+/** When the last barge-in happened, until its utterance is understood (or not). */
+let bargedAt: number | undefined
+const falseBarges: number[] = []
+let uttCounter = 0
+
+/** Timings for tests and tuning: from the end of your utterance to her first sound. */
+const stats: { utteranceEndAt?: number; firstAudioAt?: number; turns: Array<{ endToVoiceMs: number }> } = { turns: [] }
+
+const mic = new Mic({
+  listening: on => micDot.classList.toggle('on', on),
+  speechStart: () => {
+    micDot.classList.add('speech')
+    player?.touch()
+    if (speech?.speaking !== true) return
+    const at = speech.cut()
+    if (at === undefined) return
+    bargedAt = Date.now()
+    void window.her.send({ t: 'interrupt', cid: '', ...at })
+    bubble.cancel(at.uid)
+    player?.setState('listen')
+  },
+  utterance: samples => {
+    micDot.classList.remove('speech')
+    sendUtterance(samples)
+  },
+  nothing: () => {
+    micDot.classList.remove('speech')
+    noteFalseBarge()
+  },
+})
+
+function sendUtterance(samples: Float32Array): void {
+  const pcm = toPcm16(samples)
+  const durationMs = Math.round((samples.length / SAMPLE_RATE) * 1000)
+  stats.utteranceEndAt = performance.now()
+  stats.firstAudioAt = undefined
+  bubble.thinking()
+  void window.her.utterance(`u${++uttCounter}`, pcm.buffer as ArrayBuffer, durationMs).then(sent => {
+    if (!sent) bubble.note('（我现在连不上 dsh，等它开起来再说吧）')
+  })
+}
+
+/** A barge-in that turned out to be nothing (her own voice through the speakers, most likely). */
+function noteFalseBarge(): void {
+  if (bargedAt === undefined || Date.now() - bargedAt > 10_000) return
+  bargedAt = undefined
+  const now = Date.now()
+  falseBarges.push(now)
+  while (falseBarges.length > 0 && now - falseBarges[0]! > FALSE_BARGE_WINDOW_MS) falseBarges.shift()
+  if (bargeIn && falseBarges.length >= FALSE_BARGE_LIMIT) {
+    bargeIn = false
+    bubble.note('（外放的回声太大，我老是把自己的声音当成你在说话。我改成说完再听你的了，戴耳机会好很多。）', 8000)
+  }
+}
 
 /** Whether a window point is on her: inside the shown frame and not transparent there. */
 function makeHitTest(layout: PackLayout): (x: number, y: number) => boolean {
@@ -74,12 +150,26 @@ function closeInput(): void {
   window.her.interactive(false)
 }
 
+/** The talk shortcut: cut her off if she is talking, then listen for one utterance. */
+function talk(): void {
+  player?.touch()
+  const at = speech?.cut()
+  if (at !== undefined) {
+    void window.her.send({ t: 'interrupt', cid: '', ...at })
+    bubble.cancel(at.uid)
+  }
+  player?.setState('listen')
+  mic.listenOnce().catch(error => bubble.note(`（打不开麦克风：${(error as Error).message}）`, 6000))
+}
+
 function wireInput(): void {
   ask.addEventListener('submit', event => {
     event.preventDefault()
     const text = askInput.value.trim()
     closeInput()
     if (text === '') return
+    const at = speech?.cut()
+    if (at !== undefined) void window.her.send({ t: 'interrupt', cid: '', ...at })
     window.her.say(text).then(sent => {
       if (!sent) bubble.note(linkStatus === 'rejected' ? '（dsh 不认我了，得重新配对）' : '（我现在连不上 dsh，等它开起来再说吧）')
     }, console.error)
@@ -94,7 +184,7 @@ function wireOverlay(config: BodyConfig): void {
   const hitTest = makeHitTest(config.pack.layout)
   let onHer = false
   let lastCheck = 0
-  let drag: { x: number; y: number; moved: boolean } | undefined
+  let drag: { x: number; y: number } | undefined
   const setOnHer = (value: boolean) => {
     if (value === onHer) return
     onHer = value
@@ -105,7 +195,7 @@ function wireOverlay(config: BodyConfig): void {
   window.addEventListener('mousemove', event => {
     if (drag !== undefined) {
       window.her.drag(event.screenX - drag.x, event.screenY - drag.y)
-      drag = { x: event.screenX, y: event.screenY, moved: true }
+      drag = { x: event.screenX, y: event.screenY }
       return
     }
     const now = performance.now()
@@ -116,7 +206,7 @@ function wireOverlay(config: BodyConfig): void {
   window.addEventListener('mouseleave', () => { if (drag === undefined) setOnHer(false) })
   window.addEventListener('mousedown', event => {
     if (event.button === 0 && onHer && !ask.contains(event.target as Node)) {
-      drag = { x: event.screenX, y: event.screenY, moved: false }
+      drag = { x: event.screenX, y: event.screenY }
       player?.touch()
     }
   })
@@ -128,25 +218,46 @@ function wireOverlay(config: BodyConfig): void {
   })
 }
 
-function onBrain(message: BrainMessage): void {
+function setMicMode(mode: MicMode): void {
+  micMode = mode
+  mic.setAlways(mode === 'always').catch(error => bubble.note(`（打不开麦克风：${(error as Error).message}）`, 6000))
+}
+
+function onBrain(message: BrainMessage, audio?: Uint8Array): void {
   switch (message.t) {
+    case 'welcome':
+      bargeIn = message.config.bargeIn && falseBarges.length < FALSE_BARGE_LIMIT
+      if (message.config.mic !== micMode) setMicMode(message.config.mic)
+      break
     case 'state':
       player?.setState(message.state)
-      if (message.state === 'think') bubble.thinking()
+      if (message.state === 'think') {
+        bubble.thinking(lastHeard)
+        lastHeard = undefined
+      }
+      break
+    case 'heard':
+      if (message.text === '') {
+        const barged = bargedAt !== undefined
+        noteFalseBarge()
+        if (!barged && message.ignored === undefined && micMode === 'push-to-talk') bubble.note('（没听清，再说一遍？）', 2500)
+      } else {
+        bargedAt = undefined
+        lastHeard = message.text
+      }
       break
     case 'speak.begin':
+      speech?.begin(message.uid)
       bubble.begin(message.uid)
-      player?.setState('talk')
       break
     case 'speak.seg':
-      bubble.seg(message.uid, message.text, message.durationMs)
-      player?.touch()
+      speech?.seg(message.uid, { seq: message.seq, text: message.text, durationMs: message.durationMs, ...(audio === undefined ? {} : { audio }) })
       break
     case 'speak.end':
-      bubble.end(message.uid)
-      player?.setState('idle')
+      speech?.end(message.uid)
       break
     case 'speak.cancel':
+      speech?.cancel(message.uid)
       bubble.cancel(message.uid)
       player?.setState('idle')
       break
@@ -160,8 +271,44 @@ function onBrain(message: BrainMessage): void {
   }
 }
 
-// Listeners first: the shortcut may ask for the input box while the config loads.
+function installDebugHooks(): void {
+  window.__her = {
+    stats,
+    /** Play a recording into the pipeline as if you had said it. */
+    async injectWav(url: string): Promise<number> {
+      const bytes = await (await fetch(url)).arrayBuffer()
+      const decoded = await new AudioContext().decodeAudioData(bytes)
+      const offline = new OfflineAudioContext(1, Math.ceil(decoded.duration * SAMPLE_RATE), SAMPLE_RATE)
+      const source = offline.createBufferSource()
+      source.buffer = decoded
+      source.connect(offline.destination)
+      source.start()
+      const rendered = await offline.startRendering()
+      sendUtterance(rendered.getChannelData(0))
+      return rendered.duration
+    },
+    /** As if you started talking right now (barge-in path). */
+    speechStart(): boolean {
+      const speaking = speech?.speaking === true
+      if (speaking) {
+        const at = speech!.cut()
+        if (at !== undefined) {
+          bargedAt = Date.now()
+          void window.her.send({ t: 'interrupt', cid: '', ...at })
+          bubble.cancel(at.uid)
+        }
+      }
+      return speaking
+    },
+    get speaking(): boolean { return speech?.speaking === true },
+    get bargeIn(): boolean { return bargeIn },
+  }
+}
+
+// Listeners first: the shortcut may fire while the config loads.
 window.her.onShowInput(openInput)
+window.her.onTalk(talk)
+window.her.onMicMode(setMicMode)
 window.her.onBrain(onBrain)
 window.her.onStatus(status => { linkStatus = status })
 
@@ -171,6 +318,24 @@ async function main(): Promise<void> {
   document.documentElement.style.setProperty('--her-w', `${config.her.width}px`)
   document.documentElement.style.setProperty('--her-h', `${config.her.height}px`)
   player = new Player(stage, config.pack)
+  speech = new SpeechPlayer({
+    sentence: (uid, seq, text, durationMs) => {
+      if (seq === 0 && stats.utteranceEndAt !== undefined && stats.firstAudioAt === undefined) {
+        stats.firstAudioAt = performance.now()
+        stats.turns.push({ endToVoiceMs: Math.round(stats.firstAudioAt - stats.utteranceEndAt) })
+      }
+      bubble.seg(uid, text, durationMs)
+      player?.setState('talk')
+    },
+    progress: (uid, seq, phase) => { void window.her.send({ t: 'speak.progress', cid: '', uid, seq, phase }) },
+    done: uid => {
+      bubble.end(uid)
+      player?.setState('idle')
+    },
+  }, config.mute)
+  // While she talks and barge-in is off, the microphone ignores what it hears.
+  window.setInterval(() => { mic.paused = !bargeIn && speech?.speaking === true }, 100)
+  if (config.debug) installDebugHooks()
   await player.start()
   wireInput()
   if (config.mode === 'overlay') wireOverlay(config)

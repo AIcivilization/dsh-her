@@ -20,9 +20,16 @@ export class Bubble {
     this.text = box.querySelector('p')!
   }
 
-  thinking(): void {
+  /** She is thinking; `heard` is what you said, shown above the dots. */
+  thinking(heard?: string): void {
     this.uid = undefined
     this.text.replaceChildren()
+    if (heard !== undefined && heard !== '') {
+      const span = document.createElement('span')
+      span.className = 'heard'
+      span.textContent = `「${heard}」`
+      this.text.append(span)
+    }
     this.box.classList.add('show', 'thinking')
     this.clearHide()
   }

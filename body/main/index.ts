@@ -11,18 +11,22 @@
  *   shortcut brings her out to overlay first.
  * - window: an ordinary window (debugging, fallback).
  *
+ * Talking: the shortcut listens for one utterance (cutting her off if she is
+ * talking); "always listening" in the menu keeps the microphone open. Double-
+ * click her (or the menu) to type instead.
+ *
  * Only one body runs at a time; a second start just quits.
  *
- *   npm start -- --mode overlay --pack ~/dsh-her-dev-assets/bg2-stacked [--home ~/.dsh-her-dev]
+ *   npm start -- --mode overlay --pack ~/dsh-her-dev-assets/bg2-stacked [--home ~/.dsh-her-dev] [--her-debug] [--her-mute]
  */
 
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, screen, Tray } from 'electron'
+import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, screen, session, systemPreferences, Tray } from 'electron'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { BrainMessage } from '../../src/protocol/index.ts'
-import type { BodyConfig, LinkStatus, Mode, PackInfo, PackLayout } from '../shared/types.ts'
+import type { BodyMessage, BrainMessage } from '../../src/protocol/index.ts'
+import type { BodyConfig, LinkStatus, MicMode, Mode, PackInfo, PackLayout } from '../shared/types.ts'
 import { BrainLink } from './brain-link.ts'
 import { attachToWallpaper } from './wallpaper-win.ts'
 
@@ -40,6 +44,13 @@ const expand = (p: string) => p.replace(/^~(?=$|[\\/])/, homedir())
 const packDir = expand(arg('pack') ?? process.env.DSH_HER_PACK ?? '~/dsh-her-dev-assets/bg2-stacked')
 const home = arg('home') ?? process.env.DSH_HER_HOME ?? '~/.dsh-her'
 let mode: Mode = (arg('mode') as Mode | undefined) ?? 'overlay'
+const debug = process.argv.includes('--her-debug')
+const mute = process.argv.includes('--her-mute')
+/** From the brain's welcome; the menu can switch it. */
+let micMode: MicMode = 'push-to-talk'
+
+// Her voice must play without a click first.
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
 
 function loadPack(dir: string): PackInfo {
   const manifest = JSON.parse(readFileSync(join(dir, 'clips.json'), 'utf8')) as { name: string; layout?: PackLayout; clips: Array<{ id: string; file: string; role?: string }> }
@@ -130,7 +141,16 @@ function menuTemplate(): Electron.MenuItemConstructorOptions[] {
     { label: statusLabel(), enabled: false },
     { label: `外形：${pack.name}`, enabled: false },
     { type: 'separator' },
-    { label: `和她说话（${process.platform === 'darwin' ? '⌃⌥空格' : 'Ctrl+Alt+空格'}）`, click: showInput },
+    { label: `和她说话（${process.platform === 'darwin' ? '⌃⌥空格' : 'Ctrl+Alt+空格'}）`, click: talk },
+    { label: '打字和她说', click: showInput },
+    {
+      label: '一直在听', type: 'checkbox', checked: micMode === 'always',
+      click: item => {
+        micMode = item.checked ? 'always' : 'push-to-talk'
+        toPage('mic-mode', micMode)
+        refreshTray()
+      },
+    },
     { type: 'separator' },
     item('浮在最上层', 'overlay'),
     item('住在壁纸里', 'wallpaper'),
@@ -147,22 +167,36 @@ function refreshTray(): void {
   tray.setToolTip(`dsh-her · ${statusLabel()}`)
 }
 
-/** Open the input box; a wallpaper window takes no keys, so she comes out first. */
-function showInput(): void {
-  if (mode === 'wallpaper') {
+/** Send to her page; a wallpaper window takes no keys, so for typing she comes out first. */
+function toHer(channel: 'show-input' | 'talk'): void {
+  if (mode === 'wallpaper' && channel === 'show-input') {
     switchMode('overlay')
-    win?.webContents.once('did-finish-load', () => win?.webContents.send('show-input'))
+    win?.webContents.once('did-finish-load', () => win?.webContents.send(channel))
     return
   }
-  win?.webContents.send('show-input')
+  win?.webContents.send(channel)
+}
+
+function showInput(): void {
+  toHer('show-input')
+}
+
+function talk(): void {
+  toHer('talk')
 }
 
 function toPage(channel: string, ...args: unknown[]): void {
   for (const window of BrowserWindow.getAllWindows()) window.webContents.send(channel, ...args)
 }
 
-ipcMain.handle('config', (): BodyConfig => ({ mode, platform: process.platform, pack, her: herSize() }))
+ipcMain.handle('config', (): BodyConfig => ({ mode, platform: process.platform, pack, her: herSize(), debug, mute }))
 ipcMain.handle('say', (_event, text: string) => link?.send({ t: 'user.text', ...(cid === undefined ? {} : { cid }), text }) ?? false)
+ipcMain.handle('send', (_event, message: BodyMessage) => {
+  const withCid = 'cid' in message && typeof message.cid === 'string' && message.cid !== '' ? message : { ...message, cid: cid ?? '' }
+  return link?.send(withCid as BodyMessage) ?? false
+})
+ipcMain.handle('utterance', (_event, uttId: string, pcm: ArrayBuffer, durationMs: number) =>
+  link?.sendWithAudio(new Uint8Array(pcm), stream => ({ t: 'user.utterance', ...(cid === undefined ? {} : { cid }), uttId, format: 'pcm16@16k', durationMs, stream })) ?? false)
 ipcMain.on('hit', (event, onHer: boolean) => {
   BrowserWindow.fromWebContents(event.sender)?.setIgnoreMouseEvents(!onHer, { forward: true })
 })
@@ -191,18 +225,23 @@ if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   app.on('second-instance', () => showInput())
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     if (process.platform === 'darwin') app.dock?.hide()
+    session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => callback(permission === 'media'))
+    if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('microphone') !== 'granted') {
+      await systemPreferences.askForMediaAccess('microphone').catch(() => false)
+    }
     tray = new Tray(nativeImage.createEmpty())
     refreshTray()
     win = createWindow()
-    globalShortcut.register(TALK_SHORTCUT, showInput)
+    globalShortcut.register(TALK_SHORTCUT, talk)
     link = new BrainLink({
       home,
       hello: () => ({
         body: { kind: 'video', app: 'dsh-her-body', version: app.getVersion(), os: `${process.platform}-${process.arch}` },
         caps: {
-          audioOut: [],
+          audioOut: ['wav'],
+          micIn: { formats: ['pcm16@16k'], vad: 'energy' },
           asrLocal: false,
           ttsLocal: [],
           modes: ['overlay', 'wallpaper', 'window'],
@@ -210,9 +249,13 @@ if (!app.requestSingleInstanceLock()) {
         },
         packs: [],
       }),
-      onMessage: (message: BrainMessage) => {
-        if (message.t === 'welcome') cid = message.characters[0]?.cid
-        toPage('brain', message)
+      onMessage: (message: BrainMessage, audio?: Uint8Array) => {
+        if (message.t === 'welcome') {
+          cid = message.characters[0]?.cid
+          micMode = message.config.mic
+          refreshTray()
+        }
+        toPage('brain', message, audio)
       },
       onStatus: (next, detail) => {
         status = detail === undefined ? { status: next } : { status: next, detail }

@@ -6,8 +6,10 @@
  * A sentence ends at a terminator (。！？!?… or a line break); closing quotes
  * and brackets right after it stay with the sentence. A long run with no
  * terminator is cut at the last soft pause (，、；：,;) so the first audio is
- * never held back by one endless clause. Fragments with no letters or digits
- * (a lone "！", stray markdown) are dropped: they must never reach the TTS.
+ * never held back by one endless clause. The first sentence of a reply is cut
+ * much earlier (FIRST_SOFT_CUT_AT): the sooner the first audio is synthesized,
+ * the sooner she starts talking. Fragments with no letters or digits (a lone
+ * "！", stray markdown) are dropped: they must never reach the TTS.
  */
 
 const TERMINATORS = new Set(['。', '！', '？', '!', '?', '…', '\n'])
@@ -16,6 +18,8 @@ const SOFT_PAUSES = new Set(['，', '、', '；', '：', ',', ';'])
 
 /** Characters after which a run without a terminator is cut at its last soft pause. */
 export const SOFT_CUT_AT = 48
+/** The same, for the first sentence of a reply. */
+export const FIRST_SOFT_CUT_AT = 8
 
 /**
  * How long a sentence takes to say or read, for showing it when there is no
@@ -34,6 +38,8 @@ export class SentenceSplitter {
   private buffer = ''
   /** A terminated sentence held until the next character shows whether a closer follows. */
   private pending: string | undefined
+  /** Sentences released since the last reset. */
+  private released = 0
 
   /** Feed a streamed delta; returns the sentences it completed, in order. */
   push(delta: string): string[] {
@@ -50,7 +56,7 @@ export class SentenceSplitter {
       if (TERMINATORS.has(ch)) {
         this.pending = this.buffer
         this.buffer = ''
-      } else if ([...this.buffer].length >= SOFT_CUT_AT) {
+      } else if ([...this.buffer].length >= (this.released === 0 && this.pending === undefined ? FIRST_SOFT_CUT_AT : SOFT_CUT_AT)) {
         this.cutAtSoftPause(out)
       }
     }
@@ -71,12 +77,16 @@ export class SentenceSplitter {
   reset(): void {
     this.buffer = ''
     this.pending = undefined
+    this.released = 0
   }
 
   private release(out: string[]): void {
     const sentence = this.pending?.trim() ?? ''
     this.pending = undefined
-    if (isSpeakable(sentence)) out.push(sentence)
+    if (isSpeakable(sentence)) {
+      out.push(sentence)
+      this.released++
+    }
   }
 
   private cutAtSoftPause(out: string[]): void {
@@ -85,7 +95,10 @@ export class SentenceSplitter {
       if (SOFT_PAUSES.has(chars[i]!)) {
         const head = chars.slice(0, i + 1).join('').trim()
         this.buffer = chars.slice(i + 1).join('')
-        if (isSpeakable(head)) out.push(head)
+        if (isSpeakable(head)) {
+          out.push(head)
+          this.released++
+        }
         return
       }
     }

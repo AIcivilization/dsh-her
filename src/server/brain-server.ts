@@ -9,6 +9,8 @@
  *   carries the token, so a body started by hand can find it; it is rewritten
  *   on every start because the port may change, and removed on stop.
  * - Heartbeat: a body pings every 15 s; one silent for 45 s is dropped.
+ * - Audio: a binary frame (4-byte stream id + payload) comes first, then the
+ *   JSON message naming its stream; the server pairs them, both directions.
  *
  * The server knows nothing about DSH or sessions; the plugin wires it.
  */
@@ -17,16 +19,20 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
-import { parseMessage, PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type Hello } from '../protocol/index.ts'
+import { decodeAudioFrame, encodeAudioFrame, parseMessage, PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type Hello } from '../protocol/index.ts'
 
 export const DEFAULT_PORT = 38100
 const PORT_TRIES = 20
 const DEAD_AFTER_MS = 45_000
+/** Audio frames waiting for the message that names them, per body; older ones are dropped. */
+const MAX_PENDING_AUDIO = 8
 
 export interface BodyClient {
   readonly id: number
   readonly hello: Hello
   send(message: BrainMessage): void
+  /** Send audio for a stream; the message naming the stream must follow. */
+  sendAudio(stream: number, payload: Uint8Array): void
 }
 
 export interface BrainServerOptions {
@@ -36,8 +42,8 @@ export interface BrainServerOptions {
   preferredPort?: number
   /** Called once a body has said a valid hello; return its welcome. */
   welcome(client: BodyClient): BrainMessage
-  /** Every later message from an admitted body. */
-  message(client: BodyClient, message: BodyMessage): void
+  /** Every later message from an admitted body, with the audio of its `stream` if it named one. */
+  message(client: BodyClient, message: BodyMessage, audio?: Uint8Array): void
   /** An admitted body went away. */
   closed?(client: BodyClient): void
   logger?: { info(message: string): void; warn(message: string): void }
@@ -137,6 +143,14 @@ export class BrainServer {
     for (const client of this.clients.values()) client.send(message)
   }
 
+  /** Send audio and then the message naming its stream to every body. */
+  broadcastWithAudio(message: BrainMessage, stream: number, payload: Uint8Array): void {
+    for (const client of this.clients.values()) {
+      client.sendAudio(stream, payload)
+      client.send(message)
+    }
+  }
+
   async stop(): Promise<void> {
     clearInterval(this.reaper)
     const server = this.server
@@ -157,25 +171,40 @@ export class BrainServer {
     const send = (message: BrainMessage) => {
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message))
     }
+    const sendAudio = (stream: number, payload: Uint8Array) => {
+      if (socket.readyState === socket.OPEN) socket.send(encodeAudioFrame(stream, payload))
+    }
+    const pendingAudio = new Map<number, Uint8Array>()
     // The first message must be a valid hello within 10 s.
     const helloTimer = setTimeout(() => socket.close(4000, 'no hello'), 10_000)
     socket.on('message', (data, isBinary) => {
       this.lastSeen.set(socket, Date.now())
-      if (isBinary) return // audio arrives from M2 on
+      if (isBinary) {
+        if (!this.clients.has(socket)) return
+        const bytes = data instanceof Buffer ? data : Buffer.concat(Array.isArray(data) ? data : [Buffer.from(data as ArrayBuffer)])
+        const frame = decodeAudioFrame(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength))
+        if (frame === undefined) return
+        pendingAudio.set(frame.stream, frame.payload)
+        while (pendingAudio.size > MAX_PENDING_AUDIO) pendingAudio.delete(pendingAudio.keys().next().value!)
+        return
+      }
       const message = parseMessage<BodyMessage>(data.toString())
       if (message === undefined) return
       const client = this.clients.get(socket)
       if (client === undefined) {
         clearTimeout(helloTimer)
-        this.admit(socket, message, send)
+        this.admit(socket, message, send, sendAudio)
         return
       }
       if (message.t === 'ping') {
         client.send({ t: 'pong', at: message.at })
         return
       }
+      const stream = (message as { stream?: unknown }).stream
+      const audio = typeof stream === 'number' ? pendingAudio.get(stream) : undefined
+      if (typeof stream === 'number') pendingAudio.delete(stream)
       try {
-        this.options.message(client, message)
+        this.options.message(client, message, audio)
       } catch (error) {
         this.options.logger?.warn(`dsh-her: body message ${message.t} failed (${(error as Error).message})`)
       }
@@ -190,7 +219,7 @@ export class BrainServer {
     socket.on('error', () => socket.close())
   }
 
-  private admit(socket: WebSocket, message: BodyMessage, send: (message: BrainMessage) => void): void {
+  private admit(socket: WebSocket, message: BodyMessage, send: (message: BrainMessage) => void, sendAudio: BodyClient['sendAudio']): void {
     if (message.t !== 'hello') {
       socket.close(4001, 'hello first')
       return
@@ -205,7 +234,7 @@ export class BrainServer {
       socket.close(4004, 'version')
       return
     }
-    const client: BodyClient = { id: this.nextId++, hello: message, send }
+    const client: BodyClient = { id: this.nextId++, hello: message, send, sendAudio }
     this.clients.set(socket, client)
     send(this.options.welcome(client))
     this.options.logger?.info(`dsh-her: body #${client.id} connected (${message.body.kind} ${message.body.version}, ${message.body.os})`)

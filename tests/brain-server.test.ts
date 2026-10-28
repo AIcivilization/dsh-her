@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import WebSocket from 'ws'
 import { BrainServer, type Discovery } from '../src/server/brain-server.ts'
-import { PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type Hello } from '../src/protocol/index.ts'
+import { encodeAudioFrame, PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type Hello } from '../src/protocol/index.ts'
 
 function hello(token: string, v = PROTOCOL_VERSION): Hello {
   return {
@@ -112,5 +112,37 @@ test('the token survives restarts; a taken port moves the brain to the next one'
     await again.stop()
   } finally {
     blocker.close()
+  }
+})
+
+test('audio frames are paired with the message that names their stream, both ways', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'dsh-her-brain-'))
+  const heard: Array<{ message: BodyMessage; audio: number[] | undefined }> = []
+  const server = new BrainServer({
+    tokenFile: join(home, 'token'), discoveryFile: join(home, 'brain.json'), preferredPort: 0,
+    welcome: () => ({ t: 'welcome', v: PROTOCOL_VERSION, sessionId: 's', characters: [], config: { mic: 'push-to-talk', bargeIn: true } }),
+    message: (_client, message, audio) => { heard.push({ message, audio: audio === undefined ? undefined : [...audio] }) },
+  })
+  const discovery = await server.start()
+  try {
+    const socket = new WebSocket(discovery.url)
+    const frames: Array<string | number[]> = []
+    socket.on('message', (data, isBinary) => frames.push(isBinary ? [...(data as Buffer)] : data.toString()))
+    await new Promise(resolve => socket.on('open', resolve))
+    socket.send(JSON.stringify(hello(discovery.token)))
+    for (let i = 0; i < 100 && frames.length === 0; i++) await new Promise(r => setTimeout(r, 10))
+    socket.send(encodeAudioFrame(7, new Uint8Array([1, 2, 3])))
+    socket.send(JSON.stringify({ t: 'user.utterance', uttId: 'u1', format: 'pcm16@16k', durationMs: 100, stream: 7 }))
+    socket.send(JSON.stringify({ t: 'user.utterance', uttId: 'u2', format: 'pcm16@16k', durationMs: 100, stream: 8 }))
+    for (let i = 0; i < 100 && heard.length < 2; i++) await new Promise(r => setTimeout(r, 10))
+    assert.deepEqual(heard[0]!.audio, [1, 2, 3])
+    assert.equal(heard[1]!.audio, undefined)
+    server.broadcastWithAudio({ t: 'speak.seg', cid: 'c', uid: 'r', seq: 0, text: '嗯。', durationMs: 300, format: 'wav', stream: 5 }, 5, new Uint8Array([9]))
+    for (let i = 0; i < 100 && frames.length < 3; i++) await new Promise(r => setTimeout(r, 10))
+    assert.deepEqual(frames[1], [0, 0, 0, 5, 9])
+    assert.equal(JSON.parse(frames[2] as string).t, 'speak.seg')
+    socket.close()
+  } finally {
+    await server.stop()
   }
 })

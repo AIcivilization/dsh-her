@@ -1,9 +1,10 @@
 /** Shapes shared by the body's main process, preload and page. */
 
-import type { BrainMessage } from '../../src/protocol/index.ts'
+import type { BodyMessage, BrainMessage } from '../../src/protocol/index.ts'
 import type { LinkStatus } from '../main/brain-link.ts'
 
 export type Mode = 'overlay' | 'wallpaper' | 'window'
+export type MicMode = 'push-to-talk' | 'always'
 
 /**
  * How a pack's clips carry transparency:
@@ -27,6 +28,10 @@ export interface BodyConfig {
   pack: PackInfo
   /** Her size in the window, in CSS pixels; the overlay window adds room above her for the bubble. */
   her: { width: number; height: number }
+  /** Development: expose `window.__her` test hooks. */
+  debug: boolean
+  /** Development: play her voice silently (everything else as usual). */
+  mute: boolean
 }
 
 export type { LinkStatus }
@@ -40,10 +45,18 @@ export interface HerBridge {
   menu(): void
   /** Send what you typed to the brain; false when not connected. */
   say(text: string): Promise<boolean>
+  /** Any other message to the brain (main fills in the character id); false when not connected. */
+  send(message: BodyMessage): Promise<boolean>
+  /** What you said, as 16-bit mono PCM at 16 kHz; false when not connected. */
+  utterance(uttId: string, pcm: ArrayBuffer, durationMs: number): Promise<boolean>
   /** The input box is open: take the mouse and keyboard focus (or give them back). */
   interactive(on: boolean): void
-  onBrain(listener: (message: BrainMessage) => void): void
+  onBrain(listener: (message: BrainMessage, audio?: Uint8Array) => void): void
   onStatus(listener: (status: LinkStatus, detail?: string) => void): void
-  /** The global shortcut asks for the input box. */
+  /** Open the input box (menu). */
   onShowInput(listener: () => void): void
+  /** The talk shortcut: listen for one utterance (and cut her off if she is talking). */
+  onTalk(listener: () => void): void
+  /** The menu switched how the microphone listens. */
+  onMicMode(listener: (mode: MicMode) => void): void
 }

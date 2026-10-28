@@ -26,6 +26,15 @@
       /* Older sentences fade out at the top instead of being cut mid-line. */
       mask-image: linear-gradient(to bottom, transparent 0, #000 22px); }
     #bubble p span.cut { color: #b9b3c4; }
+    #bubble p span.heard { color: #b9b3c4; font-size: 13px; }
+
+    /* Listening: a soft dot at her feet. */
+    #mic { position: absolute; left: 50%; bottom: 6px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%;
+      background: #ff6b8a; box-shadow: 0 0 10px 3px rgba(255, 107, 138, 0.6); opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+    #mic.on { opacity: 1; animation: pulse 1.4s ease-in-out infinite; }
+    #mic.speech { background: #7cf0b0; box-shadow: 0 0 12px 4px rgba(124, 240, 176, 0.7); }
+    @keyframes pulse { 50% { transform: scale(1.35); } }
+    body.wallpaper #mic { left: auto; right: calc(3vw + 42vh * 0.375); bottom: calc(6vh - 14px); }
     #bubble.thinking p::after { content: '…'; display: inline-block; animation: dots 1.2s steps(4, end) infinite; width: 1.4em; overflow: hidden; vertical-align: bottom; }
     @keyframes dots { from { width: 0; } to { width: 1.4em; } }
 
@@ -39,6 +48,7 @@
 <body>
   <div id="stage"></div>
   <div id="bubble"><p></p></div>
+  <div id="mic"></div>
   <form id="ask"><input id="ask-input" autocomplete="off" placeholder="想和她说点什么…（回车发送，Esc 关闭）"></form>
   <script src="renderer.js"></script>
 </body>

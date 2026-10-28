@@ -30,6 +30,8 @@ interface UserMessageLike {
 interface AgentLike {
   readonly session: { readonly id: string }
   followup(message: UserMessageLike): void
+  /** Context for the next model request, without starting a turn. */
+  inject(message: UserMessageLike): void
   cancel(cause?: unknown): void
   whenIdle(): Promise<void>
 }
@@ -136,6 +138,12 @@ export class HerSession {
     const { agent } = await this.ensure()
     agent.followup({ id: randomUUID(), role: 'user', content: [{ type: 'text', text }], source: { kind: 'dsh-her', via } })
     return agent
+  }
+
+  /** Tell her something for her next turn without making her answer (what was heard of a cut-off reply, …). */
+  async note(text: string): Promise<void> {
+    const { agent } = await this.ensure()
+    agent.inject({ id: randomUUID(), role: 'user', content: [{ type: 'text', text }], source: { kind: 'dsh-her-context' } })
   }
 
   /** Stop the reply in progress (barge-in). DSH keeps the delivered prefix marked `interrupted`. */

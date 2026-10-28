@@ -12,3 +12,4 @@ await Promise.all([
   build({ ...common, entryPoints: ['renderer/main.ts'], outfile: 'dist/renderer.js', platform: 'browser', format: 'iife' }),
 ])
 copyFileSync('renderer/index.html', 'dist/index.html')
+copyFileSync('renderer/mic-worklet.js', 'dist/mic-worklet.js')

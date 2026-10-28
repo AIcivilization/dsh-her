@@ -1,5 +1,6 @@
 import Schema from '@deepseek-ai/schemastery'
 import { SAMPLE_PERSONA } from '../core/index.ts'
+import type { VoiceConfig } from '../voice/voice.ts'
 
 export interface HerConfig {
   /** Where dsh-her keeps characters, packs, models and the discovery file, outside DSH. `~` expands. */
@@ -23,6 +24,10 @@ export interface HerConfig {
     /** Appearance pack directory passed to the body; empty = the body's default. */
     pack: string
   }
+  voice: VoiceConfig & {
+    /** How the body listens: one utterance per shortcut press, or all the time. */
+    mic: 'push-to-talk' | 'always'
+  }
 }
 
 export const Config: Schema<HerConfig> = Schema.object({
@@ -39,5 +44,12 @@ export const Config: Schema<HerConfig> = Schema.object({
   body: Schema.object({
     launch: Schema.union(['auto', 'off']).default('auto').description('Start the body app with DSH'),
     pack: Schema.string().default('').description('Appearance pack directory (empty = body default)'),
+  }).default({}),
+  voice: Schema.object({
+    engine: Schema.union(['local', 'off']).default('local').description('Her voice: local (sherpa-onnx, CPU) or off (text only)'),
+    sid: Schema.natural().max(102).default(3).description('Local voice: Kokoro speaker id (0–102)'),
+    speed: Schema.number().min(0.5).max(2).default(1).description('Speaking speed'),
+    threads: Schema.natural().min(1).max(16).default(4).description('CPU threads for local voice'),
+    mic: Schema.union(['push-to-talk', 'always']).default('push-to-talk').description('Microphone: one utterance per shortcut press, or always listening'),
   }).default({}),
 }) as Schema<HerConfig>

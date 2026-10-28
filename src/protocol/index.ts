@@ -3,8 +3,8 @@
  * (the Electron desktop app, later Unity or a phone). Design: docs/身体协议.md.
  *
  * Text frames carry one JSON message each. Binary frames carry audio: a 4-byte
- * big-endian header holding the stream id, then the payload. A `speak.seg` or
- * `user.utterance` names the stream id its audio arrives on.
+ * big-endian header holding the stream id, then the payload. The audio frame
+ * is sent first, then the `speak.seg` or `user.utterance` naming its stream.
  *
  * This file has no runtime dependencies so the body can import the same source.
  */
@@ -113,6 +113,12 @@ export type BrainMessage =
   | { t: 'speak.cancel'; cid: string; uid: string }
   | { t: 'act'; cid: string; id: string; action: string; args?: unknown }
   | { t: 'bubble'; cid: string; text: string; ttlMs?: number }
+  /**
+   * What the brain recognized in a `user.utterance` (empty: nothing understood).
+   * `ignored`: right after a barge-in it was her own voice (echo) or only a
+   * filler sound, so it was dropped and does not count as your turn.
+   */
+  | { t: 'heard'; cid: string; uttId: string; text: string; ignored?: 'echo' | 'filler' }
   | { t: 'ask'; cid: string; id: string; question: string; options: string[] }
   | { t: 'mode'; cid: string; mode: WindowMode; screen?: number; pos?: { x: number; y: number }; scale?: number }
   | { t: 'config'; mic?: 'push-to-talk' | 'always'; bargeIn?: boolean }

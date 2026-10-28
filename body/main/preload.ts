@@ -7,10 +7,14 @@ const bridge: HerBridge = {
   drag: (dx, dy) => ipcRenderer.send('drag', { dx, dy }),
   menu: () => ipcRenderer.send('menu'),
   say: text => ipcRenderer.invoke('say', text),
+  send: message => ipcRenderer.invoke('send', message),
+  utterance: (uttId, pcm, durationMs) => ipcRenderer.invoke('utterance', uttId, pcm, durationMs),
   interactive: on => ipcRenderer.send('interactive', on),
-  onBrain: listener => { ipcRenderer.on('brain', (_event, message) => listener(message)) },
+  onBrain: listener => { ipcRenderer.on('brain', (_event, message, audio) => listener(message, audio)) },
   onStatus: listener => { ipcRenderer.on('status', (_event, status, detail) => listener(status, detail)) },
   onShowInput: listener => { ipcRenderer.on('show-input', () => listener()) },
+  onTalk: listener => { ipcRenderer.on('talk', () => listener()) },
+  onMicMode: listener => { ipcRenderer.on('mic-mode', (_event, mode) => listener(mode)) },
 }
 
 contextBridge.exposeInMainWorld('her', bridge)

@@ -44,3 +44,18 @@ test('reading time counts letters and digits only, with a floor', () => {
   assert.equal(readingMs('你回来啦，我等你好久了。'), 10 * 220)
   assert.equal(readingMs('！？…'), 1200)
 })
+
+test('the first sentence of a reply is cut early at a soft pause, later ones are not', () => {
+  assert.deepEqual(run(['今天外面下雨，记得带伞哦。明天也会下雨，后天放晴，大后天又要降温。']), [
+    '今天外面下雨，', '记得带伞哦。', '明天也会下雨，后天放晴，大后天又要降温。',
+  ])
+})
+
+test('after reset the next reply gets the early cut again', () => {
+  const splitter = new SentenceSplitter()
+  splitter.push('第一段回复说完了。')
+  splitter.flush()
+  splitter.reset()
+  assert.deepEqual(splitter.push('新的回复开头，'), [])
+  assert.deepEqual(splitter.push('接着说'), ['新的回复开头，'])
+})

@@ -10,19 +10,22 @@
  *
  * `<home>/body.json` holds this body's pid while it runs, so the plugin does
  * not start a second one while this one is still backing off.
+ *
+ * Audio: a binary frame comes first, then the message naming its stream; the
+ * link pairs them and hands the message over with its audio.
  */
 
 import { mkdirSync, readFileSync, rmSync, watch, writeFileSync, type FSWatcher } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { parseMessage, PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type Hello } from '../../src/protocol/index.ts'
+import { decodeAudioFrame, encodeAudioFrame, parseMessage, PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type Hello } from '../../src/protocol/index.ts'
 
 export type LinkStatus = 'connecting' | 'connected' | 'waiting' | 'rejected'
 
 export interface LinkOptions {
   home: string
   hello: () => Omit<Hello, 't' | 'v' | 'token'>
-  onMessage: (message: BrainMessage) => void
+  onMessage: (message: BrainMessage, audio?: Uint8Array) => void
   onStatus: (status: LinkStatus, detail?: string) => void
 }
 
@@ -42,6 +45,8 @@ export class BrainLink {
   private fromEnv: Endpoint | undefined
   private stopped = false
   private watcher: FSWatcher | undefined
+  private readonly pendingAudio = new Map<number, Uint8Array>()
+  private nextStream = 1
   private readonly options: LinkOptions
 
   constructor(options: LinkOptions) {
@@ -89,6 +94,15 @@ export class BrainLink {
     return true
   }
 
+  /** Send audio, then the message naming it (built with the stream id it gets). */
+  sendWithAudio(payload: Uint8Array, message: (stream: number) => BodyMessage): boolean {
+    if (this.socket?.readyState !== WebSocket.OPEN) return false
+    const stream = this.nextStream++
+    this.socket.send(encodeAudioFrame(stream, payload))
+    this.socket.send(JSON.stringify(message(stream)))
+    return true
+  }
+
   private discovery(): Endpoint | undefined {
     try {
       const value = JSON.parse(readFileSync(join(expand(this.options.home), 'brain.json'), 'utf8')) as Partial<Endpoint>
@@ -117,6 +131,7 @@ export class BrainLink {
       return
     }
     this.socket = socket
+    socket.binaryType = 'arraybuffer'
     let welcomed = false
     socket.addEventListener('open', () => {
       this.lastHeard = Date.now()
@@ -125,6 +140,13 @@ export class BrainLink {
     })
     socket.addEventListener('message', event => {
       this.lastHeard = Date.now()
+      if (event.data instanceof ArrayBuffer) {
+        const frame = decodeAudioFrame(new Uint8Array(event.data))
+        if (frame === undefined) return
+        this.pendingAudio.set(frame.stream, frame.payload)
+        while (this.pendingAudio.size > 8) this.pendingAudio.delete(this.pendingAudio.keys().next().value!)
+        return
+      }
       if (typeof event.data !== 'string') return
       const message = parseMessage<BrainMessage>(event.data)
       if (message === undefined) return
@@ -136,7 +158,15 @@ export class BrainLink {
       } else if (message.t === 'reject') {
         this.options.onStatus('rejected', message.message)
       }
-      if (message.t !== 'pong') this.options.onMessage(message)
+      if (message.t === 'pong') return
+      const stream = (message as { stream?: unknown }).stream
+      if (typeof stream === 'number') {
+        const audio = this.pendingAudio.get(stream)
+        this.pendingAudio.delete(stream)
+        this.options.onMessage(message, audio)
+      } else {
+        this.options.onMessage(message)
+      }
     })
     socket.addEventListener('close', () => {
       clearInterval(this.heartbeat)
