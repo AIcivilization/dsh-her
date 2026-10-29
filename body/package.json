@@ -2,6 +2,7 @@
   "name": "dsh-her-body",
   "version": "0.1.0-dev.0",
   "private": true,
+  "type": "module",
   "description": "dsh-her body: the desktop app she lives in (on top of your windows or inside the wallpaper).",
   "main": "dist/main.cjs",
   "license": "MIT",

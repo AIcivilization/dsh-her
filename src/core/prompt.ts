@@ -10,8 +10,36 @@ export interface PromptParts {
   persona: string
   /** Inline performance tags she may use, generated from the body's pack; empty when no body is connected. */
   performance?: string
-  /** "About you" from memory; empty until memory exists. */
+  /** What she remembers, already rendered (memoryContext); empty until there is any. */
   aboutYou?: string
+  /** Today, so "tomorrow" and "next Wednesday" mean something. */
+  now?: Date
+}
+
+export interface MemoryContext {
+  profile: string
+  recent: string
+  due: Array<{ text: string; due?: string }>
+}
+
+const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
+
+/**
+ * The part of the day, not the minute: her prompt is rebuilt on every request,
+ * and a clock that changes each minute would defeat the provider's prompt cache.
+ */
+export function partOfDay(now: Date): string {
+  const h = now.getHours()
+  return h < 5 ? '凌晨' : h < 8 ? '早上' : h < 11 ? '上午' : h < 13 ? '中午' : h < 17 ? '下午' : h < 19 ? '傍晚' : h < 23 ? '晚上' : '深夜'
+}
+
+/** "关于对方": facts, the last diary days, and what has a date today or tomorrow. */
+export function memoryContext(memory: MemoryContext): string {
+  const parts: string[] = []
+  if (memory.profile !== '') parts.push(`你记得的关于对方的事：\n${memory.profile}`)
+  if (memory.recent !== '') parts.push(`你最近的日记：\n${memory.recent}`)
+  if (memory.due.length > 0) parts.push(`这两天有日子的事（合适的时候自然地提一句）：\n${memory.due.map(e => `- ${e.due ?? ''} ${e.text}`.trim()).join('\n')}`)
+  return parts.join('\n\n')
 }
 
 const SPEECH_RULES = [
@@ -19,6 +47,12 @@ const SPEECH_RULES = [
   '- 用口语，短句。一次回复一般一到三句，除非对方想听你多说。',
   '- 不用列表、标题、表格、代码块和链接；数字、单位、符号都写成念得出来的样子。',
   '- 不复述对方刚说的话，不说"作为一个 AI"。',
+].join('\n')
+
+const MEMORY = [
+  '对方明确让你记住的事，或者以后用得上的事（称呼、喜好、忌讳、重要的人、带日期的安排），用 remember 记下来；不要每句话都记。',
+  '想不起来对方说过什么时，用 recall 查，别瞎编。',
+  '对方让你忘掉某件事：先用 recall 找到，跟对方确认是哪条，再用 forget 删掉。',
 ].join('\n')
 
 const LIMITS = [
@@ -31,8 +65,10 @@ export function buildSystemPrompt(parts: PromptParts): string {
     `# 你是${parts.name}\n${parts.persona.trim()}`,
     `# 说话方式\n${SPEECH_RULES}`,
     parts.performance?.trim() ? `# 表演\n${parts.performance.trim()}` : '',
+    `# 记忆\n${MEMORY}`,
     `# 能力边界\n${LIMITS}`,
     parts.aboutYou?.trim() ? `# 关于对方\n${parts.aboutYou.trim()}` : '',
+    parts.now === undefined ? '' : `# 现在\n${parts.now.getFullYear()} 年 ${parts.now.getMonth() + 1} 月 ${parts.now.getDate()} 日，星期${WEEKDAYS[parts.now.getDay()]}，${partOfDay(parts.now)}`,
   ]
   return sections.filter(s => s !== '').join('\n\n')
 }

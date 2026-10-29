@@ -19,13 +19,21 @@
  * and longer performances go through her `play_action` tool, which waits for
  * the body's `act.done`.
  *
+ * Memory: files under `<home>/characters/<cid>/memory/` (src/memory). She
+ * writes with `remember`, reads with `recall`, and her prompt carries what she
+ * knows about you, her last diary days and what has a date today or tomorrow.
+ * Once a day (30 minutes after you last talked, or from 23:30) a digest reads
+ * the day back from her session and writes her diary page and candidates.
+ *
  * Her replies are also logged with timings to `<home>/logs/stream.jsonl`.
  */
 
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { extractCues, herPaths, judgeBargeIn, performanceSection, readingMs, speakable } from '../core/index.ts'
+import { extractCues, herPaths, judgeBargeIn, memoryContext, performanceSection, readingMs, speakable } from '../core/index.ts'
+import { digestPrompt, parseDigest, transcriptOf } from '../memory/digest.ts'
+import { dayOf, FileMemory } from '../memory/store.ts'
 import { PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type PackSummary } from '../protocol/index.ts'
 import { BrainServer } from '../server/brain-server.ts'
 import { bodyRunning, findDevBody, launchBody } from './body-launcher.ts'
@@ -43,14 +51,38 @@ interface CommandsLike {
   }): () => void
 }
 
-const SERVICES = ['agents', 'agentDefaultModel', 'workspaceRegistry', 'sessionTitle', 'sessionQuery'] as const
+const SERVICES = ['agents', 'agentDefaultModel', 'workspaceRegistry', 'sessionTitle', 'sessionQuery', 'llm'] as const
+
+interface LlmLike {
+  stream(options: {
+    provider: string
+    model: string
+    reasoningEffort?: string
+    system?: string
+    messages: Array<{ role: 'user'; content: Array<{ type: 'text'; text: string }> }>
+    maxTokens?: number
+  }): AsyncIterable<{ type: string; text?: string; reason?: unknown }>
+}
+
+/** The digest runs this long after you last talked, or from DIGEST_HOUR:DIGEST_MINUTE. */
+const DIGEST_IDLE_MS = 30 * 60_000
+const DIGEST_HOUR = 23
+const DIGEST_MINUTE = 30
+const DIGEST_CHECK_MS = 5 * 60_000
 
 const STOP_WORDS = new Set(['停', '停下', 'stop'])
+const MEMORY_WORDS = new Set(['记忆', 'memory'])
 const INTERRUPT_CHECK = '测打断'
 const DIAGNOSE = '诊断'
 
 /** How long after DSH starts to wait for a running body before starting one. */
 const LAUNCH_AFTER_MS = 3000
+/**
+ * A turn that has not started this long after you spoke is stuck. Seen in M4:
+ * an effort id the route does not accept (`off`) left her session silent with
+ * no error at all.
+ */
+const STUCK_AFTER_MS = 20_000
 
 /** One reply as seen from the stream, for timing and for `/her`'s answer. */
 interface ReplyTrace {
@@ -78,6 +110,73 @@ export function apply(ctx: Context, config: HerConfig): void {
   let nextStream = 1
   /** What you heard of her last cut-off reply; told to her before your next turn. */
   let cutNote: string | undefined
+  let stuckTimer: NodeJS.Timeout | undefined
+  const memory = new FileMemory(join(dir, 'memory'))
+  /** When you last talked to her, and the day of it (for the digest). */
+  let lastTalkAt = 0
+  let digesting: Promise<string> | undefined
+
+  /** Write her diary page for `day` and keep what is worth keeping; a short report. */
+  const digest = (day: string): Promise<string> => {
+    digesting ??= runDigest(day).finally(() => { digesting = undefined })
+    return digesting
+  }
+
+  const runDigest = async (day: string): Promise<string> => {
+    const id = session?.sessionId
+    const query = services?.sessionQuery
+    const llm = (services as unknown as { llm?: LlmLike } | undefined)?.llm
+    const target = route()
+    if (id === undefined || query === undefined || llm === undefined || target === undefined) return '整理不了：dsh 的服务还没准备好'
+    const [y, m, d] = day.split('-').map(Number) as [number, number, number]
+    const start = new Date(y, m - 1, d).getTime()
+    const lines = transcriptOf((await query.readSession(id)).events as Array<{ type: string; time?: number; data: unknown }>, start, start + 86_400_000)
+    if (lines.length === 0) {
+      memory.applyDigest(day, { diary: '', facts: [], episodes: [] }, new Date())
+      return `${day} 没有聊天，不用整理`
+    }
+    const { facts, episodes } = memory.list()
+    const prompt = digestPrompt(config.character.name, day, lines, facts.map(f => f.text), episodes.map(e => (e.due === undefined ? e.text : `${e.text}（${e.due}）`)))
+    let answer = ''
+    for await (const chunk of llm.stream({
+      provider: target.provider, model: target.model, ...(target.reasoningEffort === undefined ? {} : { reasoningEffort: target.reasoningEffort }),
+      system: prompt.system, messages: [{ role: 'user', content: [{ type: 'text', text: prompt.user }] }], maxTokens: 2000,
+    })) {
+      if (chunk.type === 'text-delta' && typeof chunk.text === 'string') answer += chunk.text
+    }
+    const parsed = parseDigest(answer)
+    if (parsed === undefined) {
+      log({ event: 'digest', day, error: 'unparsable', answer: answer.slice(0, 400) })
+      return `${day} 整理失败：模型没有给出能读懂的结果`
+    }
+    const added = memory.applyDigest(day, parsed, new Date())
+    log({ event: 'digest', day, lines: lines.length, ...added })
+    return `${day} 整理好了：日记 1 篇，新的候选事实 ${added.facts} 条，事件 ${added.episodes} 条`
+  }
+
+  /** Every few minutes: settle old candidates, and digest a day that has ended its talking. */
+  const digestTick = () => {
+    const now = new Date()
+    memory.settle(now)
+    const done = memory.lastDigestDay()
+    if (lastTalkAt === 0) {
+      // DSH restarted since you last talked: catch up on yesterday, if it was never digested.
+      const yesterday = dayOf(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))
+      if (done === undefined || done < yesterday) void digest(yesterday).then(report => ctx.logger.info(`dsh-her: ${report}`), () => {})
+      return
+    }
+    const talkedDay = dayOf(new Date(lastTalkAt))
+    if (done !== undefined && done >= talkedDay) return
+    const late = now.getHours() > DIGEST_HOUR || (now.getHours() === DIGEST_HOUR && now.getMinutes() >= DIGEST_MINUTE)
+    const quiet = now.getTime() - lastTalkAt >= DIGEST_IDLE_MS
+    const nextDay = dayOf(now) !== talkedDay
+    if (quiet || late || nextDay) void digest(talkedDay).then(report => ctx.logger.info(`dsh-her: ${report}`), (error: Error) => ctx.logger.warn(`dsh-her: digest failed (${error.message})`))
+  }
+
+  const aboutYou = () => {
+    const now = new Date()
+    return memoryContext({ profile: memory.profile(), recent: memory.recent(now), due: memory.due(now) })
+  }
   /** The last barge-in, to check the utterance that follows it for echo. */
   let lastCut: { uid: string; at: number } | undefined
   /** The pack of the most recently connected body: what she can perform. */
@@ -164,7 +263,16 @@ export function apply(ctx: Context, config: HerConfig): void {
     if (session === undefined) return
     cut()
     sentAt = Date.now()
+    lastTalkAt = sentAt
     broadcast({ t: 'state', cid, state: 'think' })
+    clearTimeout(stuckTimer)
+    stuckTimer = setTimeout(() => {
+      log({ event: 'stuck', text, waitedMs: STUCK_AFTER_MS })
+      void logQuietTurn()
+      broadcast({ t: 'state', cid, state: 'idle' })
+      broadcast({ t: 'bubble', cid, text: '（我好像卡住了，没能开始回答。看看 dsh 里她的会话和模型设置？）', ttlMs: 8000 })
+    }, STUCK_AFTER_MS)
+    stuckTimer.unref()
     const her = session
     const note = cutNote
     cutNote = undefined
@@ -245,12 +353,15 @@ export function apply(ctx: Context, config: HerConfig): void {
       persona: config.character.persona,
       performance: () => performanceSection(bodyPack),
       playAction,
+      aboutYou,
+      memory,
       dir,
       get route() { return route() },
       services: () => services,
       logger: ctx.logger,
       events: {
         start(attemptId) {
+          clearTimeout(stuckTimer)
           current = { attemptId, startedAt: Date.now(), sentences: [] }
           log({ event: 'start', attemptId, sinceSendMs: sentAt === undefined ? null : current.startedAt - sentAt })
           broadcast({ t: 'speak.begin', cid, uid: attemptId })
@@ -345,8 +456,13 @@ export function apply(ctx: Context, config: HerConfig): void {
       launchTimer.unref()
     }, (error: Error) => ctx.logger.warn(`dsh-her: body server failed to start (${error.message})`))
 
+    const digestTimer = setInterval(digestTick, DIGEST_CHECK_MS)
+    digestTimer.unref()
+
     return async () => {
       clearTimeout(launchTimer)
+      clearInterval(digestTimer)
+      clearTimeout(stuckTimer)
       herVoice.stop()
       voice = undefined
       speech = undefined
@@ -420,6 +536,40 @@ export function apply(ctx: Context, config: HerConfig): void {
     return { kind: 'success', text: JSON.stringify(result, null, 2) }
   }
 
+  /**
+   * `/her 记忆`: what she remembers, with ids. `/her 确认 f3 f4`, `/her 忘掉 f3 e2`,
+   * `/her 整理` (digest today now), `/her 导出记忆` (a Markdown file).
+   */
+  const memoryCommand = (text: string): Promise<{ kind: 'success' | 'error'; text: string }> | undefined => {
+    const [word = '', ...rest] = text.split(/\s+/)
+    const ids = rest.map(id => id.replace(/^#/, '')).filter(Boolean)
+    if (MEMORY_WORDS.has(word)) {
+      const { facts, episodes, diary } = memory.list()
+      const lines = [
+        `关于你（${facts.length}）：`,
+        ...facts.map(f => `  ${f.id} ${f.text}${f.status === 'candidate' ? '（待确认）' : ''}${f.sensitive ? '（敏感）' : ''}`),
+        `事件（${episodes.length}）：`,
+        ...episodes.map(e => `  ${e.id} ${e.at.slice(0, 10)} ${e.text}${e.due === undefined ? '' : `（${e.due}）`}`),
+        `日记：${diary.length === 0 ? '还没有' : diary.join('、')}`,
+        `文件在 ${join(dir, 'memory')}`,
+        '确认：/her 确认 f3 ｜ 删除：/her 忘掉 f3 e2 ｜ 现在整理今天：/her 整理 ｜ 导出：/her 导出记忆',
+      ]
+      return Promise.resolve({ kind: 'success', text: lines.join('\n') })
+    }
+    if (word === '确认') return Promise.resolve({ kind: 'success', text: `确认了 ${memory.confirm(ids)} 条。` })
+    if (word === '忘掉' || word === 'forget') {
+      if (ids.length === 0) return Promise.resolve({ kind: 'error', text: '用法：/her 忘掉 f3 e2（编号见 /her 记忆）' })
+      return Promise.resolve({ kind: 'success', text: `删掉了 ${memory.remove(ids)} 条。` })
+    }
+    if (word === '整理') return digest(dayOf(new Date())).then(report => ({ kind: 'success' as const, text: report }))
+    if (word === '导出记忆') {
+      const file = join(dir, 'memory', `她记得的事-${dayOf(new Date())}.md`)
+      writeFileSync(file, memory.exportMarkdown())
+      return Promise.resolve({ kind: 'success', text: `导出到 ${file}` })
+    }
+    return undefined
+  }
+
   ctx.inject(['commands'], (commandCtx) => {
     const commands = (commandCtx as unknown as { commands: CommandsLike }).commands
     commandCtx.effect(() => commands.register({
@@ -443,6 +593,8 @@ export function apply(ctx: Context, config: HerConfig): void {
         }
         if (text.startsWith(INTERRUPT_CHECK)) return checkInterrupt(session, text.slice(INTERRUPT_CHECK.length).trim() || '给我讲一个很长很长的睡前故事，至少讲十句。')
         if (text === DIAGNOSE) return diagnose(session)
+        const memoryReply = memoryCommand(text)
+        if (memoryReply !== undefined) return memoryReply
         sentAt = Date.now()
         broadcast({ t: 'state', cid, state: 'think' })
         const before = finished.length
