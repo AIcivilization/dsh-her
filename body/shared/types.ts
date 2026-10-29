@@ -15,11 +15,35 @@ export type MicMode = 'push-to-talk' | 'always'
  */
 export type PackLayout = 'opaque' | 'alpha' | 'stacked'
 
-export interface PackInfo {
+export interface PackClipInfo {
+  id: string
+  url: string
+  from: string
+  to: string
+  role: 'state' | 'emotion' | 'action' | 'transition' | 'line'
+  /** State name, emotion name, or action id. */
   name: string
+  interruptible: boolean
+  durationMs: number
+  /** Whether each end lines up with its anchor (hard cut) or needs a crossfade. */
+  seam: { in: 'cut' | 'fade'; out: 'cut' | 'fade' }
+  /** Click mask: one byte per pixel, `width`×`height` per frame, `fps` frames a second. */
+  mask?: { url: string; width: number; height: number; fps: number; frames: number }
+  /** Stored lines: their audio and words. */
+  audioUrl?: string
+  transcript?: string
+}
+
+export interface PackInfo {
+  id: string
+  name: string
+  layer: 'overlay' | 'scene'
   layout: PackLayout
-  /** `role` is the state or action a clip shows; clips without one are idle. */
-  clips: Array<{ id: string; url: string; role: string }>
+  start: string
+  clips: PackClipInfo[]
+  macros: Array<{ action: string; desc: string; goTo: string; then?: string }>
+  /** Scene packs: the empty scene, shown behind her in the wallpaper layer. */
+  plateUrl?: string
 }
 
 export interface BodyConfig {

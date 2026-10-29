@@ -67,6 +67,11 @@ export class StackedView {
     video.requestVideoFrameCallback(draw)
   }
 
+  /** Draw the frame the video is on now (a preloaded clip shows its first frame before it plays). */
+  drawNow(): void {
+    this.draw()
+  }
+
   private draw(): void {
     const { gl, video } = this
     if (video.videoWidth === 0) return

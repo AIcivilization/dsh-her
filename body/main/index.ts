@@ -21,13 +21,12 @@
  */
 
 import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, screen, session, systemPreferences, Tray } from 'electron'
-import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import type { BodyMessage, BrainMessage } from '../../src/protocol/index.ts'
-import type { BodyConfig, LinkStatus, MicMode, Mode, PackInfo, PackLayout } from '../shared/types.ts'
+import type { BodyConfig, LinkStatus, MicMode, Mode } from '../shared/types.ts'
 import { BrainLink } from './brain-link.ts'
+import { loadPack, summarize } from './pack/load.ts'
 import { attachToWallpaper } from './wallpaper-win.ts'
 
 /** ⌃⌥Space / Ctrl+Alt+Space: talk to her. Alt+Space alone is taken by Windows' window menu. */
@@ -43,7 +42,6 @@ function arg(name: string): string | undefined {
 const expand = (p: string) => p.replace(/^~(?=$|[\\/])/, homedir())
 const packDir = expand(arg('pack') ?? process.env.DSH_HER_PACK ?? '~/dsh-her-dev-assets/bg2-stacked')
 const home = arg('home') ?? process.env.DSH_HER_HOME ?? '~/.dsh-her'
-let mode: Mode = (arg('mode') as Mode | undefined) ?? 'overlay'
 const debug = process.argv.includes('--her-debug')
 const mute = process.argv.includes('--her-mute')
 /** From the brain's welcome; the menu can switch it. */
@@ -52,16 +50,9 @@ let micMode: MicMode = 'push-to-talk'
 // Her voice must play without a click first.
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
 
-function loadPack(dir: string): PackInfo {
-  const manifest = JSON.parse(readFileSync(join(dir, 'clips.json'), 'utf8')) as { name: string; layout?: PackLayout; clips: Array<{ id: string; file: string; role?: string }> }
-  return {
-    name: manifest.name,
-    layout: manifest.layout ?? 'opaque',
-    clips: manifest.clips.map(c => ({ id: c.id, url: pathToFileURL(join(dir, c.file)).href, role: c.role ?? 'idle' })),
-  }
-}
-
 const pack = loadPack(packDir)
+/** A scene pack belongs in the wallpaper; she alone floats on top. */
+let mode: Mode = (arg('mode') as Mode | undefined) ?? (pack.layer === 'scene' ? 'wallpaper' : 'overlay')
 let win: BrowserWindow | undefined
 let tray: Tray | undefined
 let link: BrainLink | undefined
@@ -247,7 +238,7 @@ if (!app.requestSingleInstanceLock()) {
           modes: ['overlay', 'wallpaper', 'window'],
           screens: screen.getAllDisplays().map(d => ({ id: d.id, w: d.size.width, h: d.size.height, scale: d.scaleFactor })),
         },
-        packs: [],
+        packs: [summarize(pack)],
       }),
       onMessage: (message: BrainMessage, audio?: Uint8Array) => {
         if (message.t === 'welcome') {

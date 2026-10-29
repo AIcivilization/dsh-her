@@ -11,13 +11,15 @@
  * subtitle shows and the reply goes on.
  */
 
+import type { Cue } from '../protocol/index.ts'
+
 export interface Synthesized {
   audio: Uint8Array
   durationMs: number
 }
 
 export interface SpeechOut {
-  sentence(uid: string, seq: number, text: string, audio: Synthesized | undefined): void
+  sentence(uid: string, seq: number, text: string, audio: Synthesized | undefined, cues: Cue[]): void
   end(uid: string): void
 }
 
@@ -28,7 +30,7 @@ export interface SentSentence {
   durationMs: number
 }
 
-type Job = { uid: string; kind: 'sentence'; seq: number; text: string } | { uid: string; kind: 'end' }
+type Job = { uid: string; kind: 'sentence'; seq: number; text: string; cues: Cue[] } | { uid: string; kind: 'end' }
 
 export class SpeechQueue {
   private readonly jobs: Job[] = []
@@ -43,9 +45,9 @@ export class SpeechQueue {
     this.out = out
   }
 
-  say(uid: string, seq: number, text: string): void {
+  say(uid: string, seq: number, text: string, cues: Cue[] = []): void {
     if (this.cancelled.has(uid)) return
-    this.jobs.push({ uid, kind: 'sentence', seq, text })
+    this.jobs.push({ uid, kind: 'sentence', seq, text, cues })
     void this.pump()
   }
 
@@ -92,7 +94,7 @@ export class SpeechQueue {
         record.push({ seq: job.seq, text: job.text, durationMs: audio?.durationMs ?? 0 })
         this.sent.set(job.uid, record)
         if (this.sent.size > 16) this.sent.delete(this.sent.keys().next().value!)
-        this.out.sentence(job.uid, job.seq, job.text, audio)
+        this.out.sentence(job.uid, job.seq, job.text, audio, job.cues)
       }
     } finally {
       this.running = false

@@ -8,16 +8,19 @@
  * so the brain can tell her what you actually heard.
  */
 
+import type { Cue } from '../../src/protocol/index.ts'
+
 export interface SpeechSegment {
   seq: number
   text: string
   durationMs: number
   audio?: Uint8Array
+  cues?: Cue[]
 }
 
 export interface SpeechEvents {
-  /** A sentence starts playing: show it. */
-  sentence(uid: string, seq: number, text: string, durationMs: number): void
+  /** A sentence starts playing: show it, and act out its cues. */
+  sentence(uid: string, seq: number, text: string, durationMs: number, cues: Cue[]): void
   progress(uid: string, seq: number, phase: 'start' | 'end'): void
   /** The reply has been said to the end. */
   done(uid: string): void
@@ -145,7 +148,7 @@ export class SpeechPlayer {
     } else {
       playing.timer = window.setTimeout(done, segment.durationMs)
     }
-    this.events.sentence(uid, segment.seq, segment.text, playing.durationMs)
+    this.events.sentence(uid, segment.seq, segment.text, playing.durationMs, segment.cues ?? [])
     this.events.progress(uid, segment.seq, 'start')
   }
 

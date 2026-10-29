@@ -10,19 +10,22 @@
  * nothing is understood), barge-in turns off for the session and she finishes
  * before listening; she says so once.
  *
+ * Performing: the brain asks for actions (`act`, answered with `act.done`) and
+ * emotions; cues riding on a sentence fire when that sentence starts. Stored
+ * lines play their own audio and show their words.
+ *
  * Click-through: main keeps the window ignoring the mouse but forwarding moves.
- * On each move (throttled) the current frame's alpha under the pointer, read
- * from a 64-px-wide canvas, decides whether the pointer is on her; main then
- * stops ignoring the mouse so she can be clicked and dragged. No screen
- * recording permission is involved. M3 replaces the live sampling with masks
- * precomputed at import.
+ * On each move (throttled) the current clip's click mask (made at import)
+ * decides whether the pointer is on her; packs without masks fall back to the
+ * frame's alpha read from a 64-px canvas. Main then stops ignoring the mouse so
+ * she can be clicked and dragged. No screen recording permission is involved.
  *
  * With `--her-debug`, `window.__her` offers test hooks (inject a recording, read
  * timings).
  */
 
-import type { BrainMessage } from '../../src/protocol/index.ts'
-import type { BodyConfig, HerBridge, LinkStatus, MicMode, PackLayout } from '../shared/types.ts'
+import type { BrainMessage, Cue } from '../../src/protocol/index.ts'
+import type { BodyConfig, HerBridge, LinkStatus, MicMode, PackClipInfo, PackLayout } from '../shared/types.ts'
 import { Bubble } from './bubble.ts'
 import { Mic } from './mic.ts'
 import { Player } from './player.ts'
@@ -108,6 +111,25 @@ function noteFalseBarge(): void {
   }
 }
 
+const masks = new Map<string, Uint8Array | 'loading'>()
+
+/** The current clip's mask value (0–255) at a point given as fractions of the frame, if its mask is loaded. */
+function maskAt(clip: PackClipInfo | undefined, time: number, fx: number, fy: number): number | undefined {
+  const mask = clip?.mask
+  if (clip === undefined || mask === undefined) return undefined
+  const data = masks.get(clip.id)
+  if (data === undefined) {
+    masks.set(clip.id, 'loading')
+    fetch(mask.url).then(r => r.arrayBuffer()).then(b => masks.set(clip.id, new Uint8Array(b)), () => masks.delete(clip.id))
+    return undefined
+  }
+  if (data === 'loading') return undefined
+  const index = Math.min(mask.frames - 1, Math.floor(time * mask.fps))
+  const px = Math.min(mask.width - 1, Math.floor(fx * mask.width))
+  const py = Math.min(mask.height - 1, Math.floor(fy * mask.height))
+  return data[index * mask.width * mask.height + py * mask.width + px]
+}
+
 /** Whether a window point is on her: inside the shown frame and not transparent there. */
 function makeHitTest(layout: PackLayout): (x: number, y: number) => boolean {
   const canvas = document.createElement('canvas')
@@ -125,6 +147,8 @@ function makeHitTest(layout: PackLayout): (x: number, y: number) => boolean {
     const top = box.top + (box.height - h) / 2
     if (x < left || x >= left + w || y < top || y >= top + h) return false
     if (layout === 'opaque') return true
+    const fromMask = maskAt(player?.current.clip, video.currentTime, (x - left) / w, (y - top) / h)
+    if (fromMask !== undefined) return fromMask > HIT_ALPHA
     canvas.width = 64
     canvas.height = Math.round(64 * frameH / frameW)
     ctx.clearRect(0, 0, canvas.width, canvas.height)
@@ -223,8 +247,50 @@ function setMicMode(mode: MicMode): void {
   mic.setAlways(mode === 'always').catch(error => bubble.note(`（打不开麦克风：${(error as Error).message}）`, 6000))
 }
 
+/** Act out a sentence's cues as it starts. */
+function perform(cues: Cue[]): void {
+  for (const cue of cues) {
+    if (cue.kind === 'emotion') player?.emote(cue.name)
+    else void player?.act(cue.name)
+  }
+}
+
+/** A clip came on screen: stored lines speak, and the brain hears where she stands. */
+let lastAnchor: string | undefined
+let lineAudio: HTMLAudioElement | undefined
+let muted = false
+/** Clips as they came on screen, with when (for tests and tuning). */
+const played: Array<{ id: string; at: number }> = []
+function clipStarted(clip: PackClipInfo): void {
+  played.push({ id: clip.id, at: Math.round(performance.now()) })
+  if (played.length > 200) played.shift()
+  if (clip.role === 'line') {
+    if (clip.audioUrl !== undefined) {
+      lineAudio?.pause()
+      lineAudio = new Audio(clip.audioUrl)
+      lineAudio.muted = muted
+      void lineAudio.play()
+    }
+    if (clip.transcript !== undefined) bubble.note(clip.transcript, clip.durationMs + 800)
+  }
+  if (clip.to !== lastAnchor) {
+    lastAnchor = clip.to
+    void window.her.send({ t: 'posture', cid: '', anchor: clip.to })
+  }
+}
+
 function onBrain(message: BrainMessage, audio?: Uint8Array): void {
   switch (message.t) {
+    case 'act':
+      if (player === undefined) {
+        void window.her.send({ t: 'act.done', cid: '', id: message.id, ok: false, reason: 'not ready' })
+        break
+      }
+      player.act(message.action).then(result => window.her.send({ t: 'act.done', cid: '', id: message.id, ...result }), console.error)
+      break
+    case 'emotion':
+      player?.emote(message.emotion)
+      break
     case 'welcome':
       bargeIn = message.config.bargeIn && falseBarges.length < FALSE_BARGE_LIMIT
       if (message.config.mic !== micMode) setMicMode(message.config.mic)
@@ -251,7 +317,10 @@ function onBrain(message: BrainMessage, audio?: Uint8Array): void {
       bubble.begin(message.uid)
       break
     case 'speak.seg':
-      speech?.seg(message.uid, { seq: message.seq, text: message.text, durationMs: message.durationMs, ...(audio === undefined ? {} : { audio }) })
+      speech?.seg(message.uid, {
+        seq: message.seq, text: message.text, durationMs: message.durationMs,
+        ...(audio === undefined ? {} : { audio }), ...(message.cues === undefined ? {} : { cues: message.cues }),
+      })
       break
     case 'speak.end':
       speech?.end(message.uid)
@@ -274,6 +343,11 @@ function onBrain(message: BrainMessage, audio?: Uint8Array): void {
 function installDebugHooks(): void {
   window.__her = {
     stats,
+    played,
+    get clip(): string | undefined { return player?.current.clip?.id },
+    get anchor(): string | undefined { return player?.director.at },
+    act: (action: string) => player?.act(action),
+    emote: (emotion: string) => player?.emote(emotion),
     /** Play a recording into the pipeline as if you had said it. */
     async injectWav(url: string): Promise<number> {
       const bytes = await (await fetch(url)).arrayBuffer()
@@ -315,11 +389,17 @@ window.her.onStatus(status => { linkStatus = status })
 async function main(): Promise<void> {
   const config = await window.her.config()
   document.body.classList.add(config.mode)
+  if (config.pack.layer === 'scene') {
+    document.body.classList.add('scene')
+    if (config.pack.plateUrl !== undefined) document.documentElement.style.setProperty('--plate', `url("${config.pack.plateUrl}")`)
+  }
   document.documentElement.style.setProperty('--her-w', `${config.her.width}px`)
   document.documentElement.style.setProperty('--her-h', `${config.her.height}px`)
-  player = new Player(stage, config.pack)
+  muted = config.mute
+  player = new Player(stage, config.pack, { started: clipStarted })
   speech = new SpeechPlayer({
-    sentence: (uid, seq, text, durationMs) => {
+    sentence: (uid, seq, text, durationMs, cues) => {
+      perform(cues)
       if (seq === 0 && stats.utteranceEndAt !== undefined && stats.firstAudioAt === undefined) {
         stats.firstAudioAt = performance.now()
         stats.turns.push({ endToVoiceMs: Math.round(stats.firstAudioAt - stats.utteranceEndAt) })

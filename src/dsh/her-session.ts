@@ -7,6 +7,10 @@
  * coding-agent prompt and runtime chatter are replaced) and a listener on her
  * live assistant stream, which turns text deltas into speakable sentences.
  * Reasoning and tool-call deltas are never spoken.
+ *
+ * Her prompt is rebuilt at every model request, so its performance section
+ * always matches the body that is connected; `play_action` (her one tool for
+ * now) asks the body for a longer performance and waits for it.
  */
 
 import { randomUUID } from 'node:crypto'
@@ -56,7 +60,7 @@ export interface ScopedContext {
     restrict(filter: { allow?: readonly string[]; deny?: readonly string[] }): () => void
   }
   systemPrompt?: {
-    section(definition: { name: string; order: number; text: string; complete?: boolean; interpolate?: boolean }): unknown
+    section(definition: { name: string; order: number; text: string | (() => string); complete?: boolean; interpolate?: boolean }): unknown
     suppressRuntimeContext?(): unknown
   }
   on(event: 'agent/assistant-stream', listener: (payload: { frame: StreamFrame }) => void): () => void
@@ -96,6 +100,10 @@ export interface HerSessionDeps {
   cid: string
   name: string
   persona: string
+  /** The performance section for the connected body (empty without one). */
+  performance: () => string
+  /** Have the body perform an action; resolves when it is done. */
+  playAction: (action: string) => Promise<{ ok: boolean; reason?: string; transcript?: string }>
   /** dsh-her home for this character: session.json and her room live here. */
   dir: string
   route: ModelRoute | undefined
@@ -212,12 +220,48 @@ export class HerSession {
     return handle
   }
 
-  private composeScope(agentCtx: ScopedContext): void {
-    const text = buildSystemPrompt({ name: this.deps.name, persona: this.deps.persona })
-    agentCtx.systemPrompt?.section({ name: 'dsh-her:system', order: 0, text, complete: true, interpolate: false })
+  private async composeScope(agentCtx: ScopedContext): Promise<void> {
+    const { name, persona } = this.deps
+    agentCtx.systemPrompt?.section({
+      name: 'dsh-her:system', order: 0, complete: true, interpolate: false,
+      text: () => buildSystemPrompt({ name, persona, performance: this.deps.performance() }),
+    })
     agentCtx.systemPrompt?.suppressRuntimeContext?.()
     this.hideGlobalTools(agentCtx)
+    // Without her tools she can still talk; never let them keep her session closed.
+    await this.registerTools(agentCtx).catch((error: Error) => this.deps.logger.warn(`dsh-her: play_action not registered (${error.message})`))
     agentCtx.on('agent/assistant-stream', ({ frame }) => this.onFrame(frame))
+  }
+
+  /**
+   * Her tools, in DSH's native tool shape (plain JSON Schema). Not through
+   * `defineTool`: a plugin linked from outside the profile cannot import
+   * dsh-tools, and an unconverted schema makes the model provider reject the
+   * whole request.
+   */
+  private async registerTools(agentCtx: ScopedContext): Promise<void> {
+    const playAction = this.deps.playAction
+    agentCtx.tools.register({
+      name: 'play_action',
+      description: '让你在桌面上的身体做一个较长的表演（离开画面换衣服、说准备好的台词等），做完才返回。能做哪些见系统提示词的"表演"一节。',
+      parameters: {
+        type: 'object',
+        properties: { action: { type: 'string', description: '表演的名字，比如 outfit_jk' } },
+        required: ['action'],
+        additionalProperties: false,
+      },
+      output: {
+        schema: { type: 'object', properties: { ok: { type: 'boolean' }, text: { type: 'string' } }, required: ['ok', 'text'] },
+        render: (_args: unknown, value: { text: string }) => [{ type: 'text', text: value.text }],
+      },
+      execute: async (args: { action: string }) => {
+        const action = String(args.action ?? '').trim()
+        const result = await playAction(action)
+        if (result.ok) return { ok: true, text: result.transcript === undefined ? `已经做完：${action}` : `已经做完：${action}（你说了"${result.transcript}"）` }
+        const why = { unsupported: '身体不会这个表演', interrupted: '做到一半被打断了', 'no body': '桌面上没有连着身体', timeout: '等了太久没做完' }[result.reason ?? ''] ?? result.reason ?? '没做成'
+        return { ok: false, text: `没做成：${action}（${why}）` }
+      },
+    })
   }
 
   /**

@@ -59,3 +59,8 @@ test('after reset the next reply gets the early cut again', () => {
   assert.deepEqual(splitter.push('新的回复开头，'), [])
   assert.deepEqual(splitter.push('接着说'), ['新的回复开头，'])
 })
+
+test('a performance tag is never cut, even with a colon or a stop inside', () => {
+  assert.deepEqual(run(['〔动作：wa', 've〕你好呀，今天过得怎么样？']), ['〔动作：wave〕你好呀，', '今天过得怎么样？'])
+  assert.deepEqual(run(['〔开心。〕好。']), ['〔开心。〕好。'])
+})

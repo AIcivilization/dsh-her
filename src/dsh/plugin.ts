@@ -14,14 +14,19 @@
  * goes to her like typed text. When a body cuts her off (you started talking),
  * it reports how far she got; her next turn is told what you actually heard.
  *
+ * Performing: the connected body's pack decides what she can do. Her prompt
+ * lists it; inline tags in her reply become cues on the sentence they are in,
+ * and longer performances go through her `play_action` tool, which waits for
+ * the body's `act.done`.
+ *
  * Her replies are also logged with timings to `<home>/logs/stream.jsonl`.
  */
 
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { herPaths, judgeBargeIn, readingMs, speakable } from '../core/index.ts'
-import { PROTOCOL_VERSION, type BodyMessage, type BrainMessage } from '../protocol/index.ts'
+import { extractCues, herPaths, judgeBargeIn, performanceSection, readingMs, speakable } from '../core/index.ts'
+import { PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type PackSummary } from '../protocol/index.ts'
 import { BrainServer } from '../server/brain-server.ts'
 import { bodyRunning, findDevBody, launchBody } from './body-launcher.ts'
 import type { HerConfig } from './config.ts'
@@ -75,6 +80,33 @@ export function apply(ctx: Context, config: HerConfig): void {
   let cutNote: string | undefined
   /** The last barge-in, to check the utterance that follows it for echo. */
   let lastCut: { uid: string; at: number } | undefined
+  /** The pack of the most recently connected body: what she can perform. */
+  let bodyPack: PackSummary | undefined
+  /** Actions sent to a body, waiting for its `act.done`. */
+  const pendingActs = new Map<string, (result: { ok: boolean; reason?: string }) => void>()
+  let nextAct = 1
+
+  /** Have the body perform an action and wait (at most 90 s) for it to finish. */
+  const playAction = (action: string): Promise<{ ok: boolean; reason?: string; transcript?: string }> => {
+    const body = server?.bodies.at(-1)
+    log({ event: 'play-action', action, body: body?.id ?? null, packActions: bodyPack?.actions.map(a => a.id) ?? null })
+    if (body === undefined) return Promise.resolve({ ok: false, reason: 'no body' })
+    const known = bodyPack?.actions.find(a => a.id === action)
+    if (known === undefined) return Promise.resolve({ ok: false, reason: 'unsupported' })
+    const id = `a${nextAct++}`
+    return new Promise(resolve => {
+      const timer = setTimeout(() => {
+        pendingActs.delete(id)
+        resolve({ ok: false, reason: 'timeout' })
+      }, 90_000)
+      pendingActs.set(id, result => {
+        clearTimeout(timer)
+        log({ event: 'act', action, ...result })
+        resolve(known.transcript === undefined || !result.ok ? result : { ...result, transcript: known.transcript })
+      })
+      body.send({ t: 'act', cid, id, action })
+    })
+  }
 
   const log = (entry: Record<string, unknown>) => {
     try {
@@ -85,6 +117,28 @@ export function apply(ctx: Context, config: HerConfig): void {
   }
 
   const broadcast = (message: BrainMessage) => server?.broadcast(message)
+
+  /** A reply with no words: record what the turn did instead (tool calls, reasoning only, errors). */
+  const logQuietTurn = async () => {
+    const id = session?.sessionId
+    const query = services?.sessionQuery
+    if (id === undefined || query === undefined) return
+    try {
+      const events = (await query.readSession(id)).events.slice(-12)
+      log({
+        event: 'quiet-turn',
+        events: events.map(e => {
+          const data = e.data as { name?: string; arguments?: string; message?: { content?: Array<{ type: string; text?: string }> }; reason?: unknown }
+          if (e.type === 'tool/call') return `tool/call ${data.name} ${data.arguments ?? ''}`
+          if (e.type === 'assistant/message') return `assistant/message [${data.message?.content?.map(b => `${b.type}${b.text === undefined ? '' : `:${b.text.slice(0, 40)}`}`).join(', ') ?? ''}]`
+          if (e.type === 'turn/end') return `turn/end ${JSON.stringify(data.reason).slice(0, 120)}`
+          return e.type
+        }),
+      })
+    } catch (error) {
+      log({ event: 'quiet-turn', error: (error as Error).message })
+    }
+  }
 
   const route = (): ModelRoute | undefined => {
     const effort = config.reasoningEffort === '' ? {} : { reasoningEffort: config.reasoningEffort }
@@ -173,6 +227,12 @@ export function apply(ctx: Context, config: HerConfig): void {
       case 'interrupt':
         interrupted(message.uid, message.seq, message.playedMs)
         break
+      case 'act.done': {
+        const settle = pendingActs.get(message.id)
+        pendingActs.delete(message.id)
+        settle?.({ ok: message.ok, ...(message.reason === undefined ? {} : { reason: message.reason }) })
+        break
+      }
     }
   }
 
@@ -183,6 +243,8 @@ export function apply(ctx: Context, config: HerConfig): void {
       cid,
       name: config.character.name,
       persona: config.character.persona,
+      performance: () => performanceSection(bodyPack),
+      playAction,
       dir,
       get route() { return route() },
       services: () => services,
@@ -204,7 +266,8 @@ export function apply(ctx: Context, config: HerConfig): void {
           onFirstSentence?.()
           onFirstSentence = undefined
           log({ event: 'sentence', attemptId, text, sinceSendMs: sentAt === undefined ? null : now - sentAt })
-          speech?.say(attemptId, seq, text)
+          const performed = extractCues(text, bodyPack)
+          if (performed.text !== '' || performed.cues.length > 0) speech?.say(attemptId, seq, performed.text, performed.cues)
         },
         end(attemptId, outcome) {
           log({ event: 'end', attemptId, outcome, sinceSendMs: sentAt === undefined ? null : Date.now() - sentAt })
@@ -213,6 +276,7 @@ export function apply(ctx: Context, config: HerConfig): void {
             if (current.sentences.length === 0 && outcome !== 'committed') {
               broadcast({ t: 'bubble', cid, text: '（我刚才没说出话来，模型可能出错了）', ttlMs: 6000 })
             }
+            if (current.sentences.length === 0) void logQuietTurn()
             finished.push(current)
             if (finished.length > 20) finished.shift()
           }
@@ -227,14 +291,15 @@ export function apply(ctx: Context, config: HerConfig): void {
     const herVoice = voice
     void herVoice.start()
     speech = new SpeechQueue(text => herVoice.synthesize(speakable(text)), {
-      sentence(uid, seq, text, audio) {
+      sentence(uid, seq, text, audio, cues) {
+        const withCues = cues.length === 0 ? {} : { cues }
         if (audio === undefined) {
-          broadcast({ t: 'speak.seg', cid, uid, seq, text, durationMs: readingMs(text) })
+          broadcast({ t: 'speak.seg', cid, uid, seq, text, durationMs: text === '' ? 300 : readingMs(text), ...withCues })
           return
         }
         const stream = nextStream++
         if (seq === 0) log({ event: 'first-audio', uid, sinceSendMs: sentAt === undefined ? null : Date.now() - sentAt, durationMs: audio.durationMs })
-        server?.broadcastWithAudio({ t: 'speak.seg', cid, uid, seq, text, durationMs: audio.durationMs, format: 'wav', stream }, stream, audio.audio)
+        server?.broadcastWithAudio({ t: 'speak.seg', cid, uid, seq, text, durationMs: audio.durationMs, format: 'wav', stream, ...withCues }, stream, audio.audio)
       },
       end(uid) {
         broadcast({ t: 'speak.end', cid, uid })
@@ -246,14 +311,22 @@ export function apply(ctx: Context, config: HerConfig): void {
       discoveryFile: paths.discovery,
       preferredPort: config.port,
       logger: ctx.logger,
-      welcome: () => ({
-        t: 'welcome',
-        v: PROTOCOL_VERSION,
-        sessionId: session?.sessionId ?? '',
-        characters: [{ cid, name: config.character.name, mode: 'overlay' }],
-        config: { mic: config.voice.mic, bargeIn: true },
-      }),
+      welcome: client => {
+        bodyPack = client.hello.packs[0] ?? bodyPack
+        return {
+          t: 'welcome',
+          v: PROTOCOL_VERSION,
+          sessionId: session?.sessionId ?? '',
+          characters: [{ cid, name: config.character.name, mode: 'overlay' }],
+          config: { mic: config.voice.mic, bargeIn: true },
+        }
+      },
       message: (_client, message, audio) => onBodyMessage(message, audio),
+      closed: () => {
+        bodyPack = server?.bodies.at(-1)?.hello.packs[0]
+        for (const settle of pendingActs.values()) settle({ ok: false, reason: 'no body' })
+        pendingActs.clear()
+      },
     })
     let launchTimer: NodeJS.Timeout | undefined
     brain.start().then(discovery => {

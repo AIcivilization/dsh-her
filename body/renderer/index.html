@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; media-src file:; script-src 'self'; style-src 'self' 'unsafe-inline'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; media-src file:; img-src 'self' file:; script-src 'self'; style-src 'self' 'unsafe-inline'">
   <title>她</title>
   <style>
     :root { --her-w: 300px; --her-h: 400px; }
@@ -11,8 +11,15 @@
     body.window { background: #1b1b1f; }
     #stage { position: absolute; left: 50%; bottom: 0; width: var(--her-w); height: var(--her-h); transform: translateX(-50%); }
     body.wallpaper #stage { left: auto; transform: none; right: 3vw; bottom: 6vh; height: 42vh; width: auto; aspect-ratio: 3 / 4; }
-    video, canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 0.6s linear; pointer-events: none; }
+    /* Scene packs: the whole window is the scene, the empty plate behind the clips. */
+    body.scene { background: var(--plate) center / cover no-repeat; }
+    body.scene #stage { inset: 0; left: 0; width: auto; height: auto; transform: none; aspect-ratio: auto; }
+    body.scene video, body.scene canvas { object-fit: cover; }
+    body.scene #bubble { left: 6vw; right: auto; width: 32vw; bottom: 45vh; justify-content: flex-start; }
+    video, canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 0.3s linear; pointer-events: none; }
     video.on, canvas.on { opacity: 1; }
+    /* A hard cut: the anchor frames match, so the swap must not blend. */
+    video.cut, canvas.cut { transition: none; }
     /* Decoding source of a stacked clip; its canvas is what shows. */
     video.source { width: 1px; height: 1px; opacity: 0 !important; }
 

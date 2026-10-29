@@ -11,7 +11,7 @@
 | M0 风险验证 | ✅ mac 通过（[记录](docs/M0验证记录.md)）；Windows 待测 |
 | M1 大脑与身体打通（文字） | ✅ mac 通过（[记录](docs/M1记录.md)）；休息模式 CPU 2.2% |
 | M2 语音 | ✅ mac 通过（[记录](docs/M2记录.md)）；说完到她开口中位数约 2.5 秒；云端克隆音色待接 |
-| M3 外形包与姿势图 | — |
+| M3 外形包与姿势图 | ✅ mac 通过（[记录](docs/M3记录.md)）；用合成测试包验证，"想看 JK" 全流程跑通；待真实素材校准 |
 | M4 内置记忆 | — |
 | M5 向导与管理页 | — |
 | M6 打磨与发布 | — |
@@ -75,7 +75,19 @@ DSH_HER_HOME=~/.dsh-her-dev npm run voice:models
 DSH_HER_HOME=~/.dsh-her-dev npm run voice:bench
 ```
 
-开发用外形包由 `body/scripts/make-dev-pack.mjs` 从第三方演示素材生成，放在 `~/dsh-her-dev-assets/`，**不进仓库**。
+导入外形包（按 [docs/素材生成提示词.md](docs/素材生成提示词.md) 命名的一个文件夹）：
+
+```bash
+node body/scripts/import-pack.ts ~/我的角色 --packs ~/.dsh-her/packs --name 名字
+```
+
+合成测试包（色块小人，绿幕；加 `--scene` 是带空场景图的房间）：
+
+```bash
+node body/scripts/make-test-pack.mjs ~/dsh-her-dev-assets/test-doll-src
+```
+
+开发用素材都放在 `~/dsh-her-dev-assets/`，**不进仓库**。第三方演示素材由 `body/scripts/make-dev-pack.mjs` 转换。
 
 ## 隐私
 

@@ -9,7 +9,8 @@
  * never held back by one endless clause. The first sentence of a reply is cut
  * much earlier (FIRST_SOFT_CUT_AT): the sooner the first audio is synthesized,
  * the sooner she starts talking. Fragments with no letters or digits (a lone
- * "！", stray markdown) are dropped: they must never reach the TTS.
+ * "！", stray markdown) are dropped: they must never reach the TTS. Nothing is
+ * ever cut inside a performance tag 〔…〕.
  */
 
 const TERMINATORS = new Set(['。', '！', '？', '!', '?', '…', '\n'])
@@ -40,6 +41,8 @@ export class SentenceSplitter {
   private pending: string | undefined
   /** Sentences released since the last reset. */
   private released = 0
+  /** Inside a 〔…〕 tag. */
+  private inTag = false
 
   /** Feed a streamed delta; returns the sentences it completed, in order. */
   push(delta: string): string[] {
@@ -53,6 +56,9 @@ export class SentenceSplitter {
         this.release(out)
       }
       this.buffer += ch
+      if (ch === '〔') this.inTag = true
+      else if (ch === '〕') this.inTag = false
+      if (this.inTag) continue
       if (TERMINATORS.has(ch)) {
         this.pending = this.buffer
         this.buffer = ''
@@ -78,6 +84,7 @@ export class SentenceSplitter {
     this.buffer = ''
     this.pending = undefined
     this.released = 0
+    this.inTag = false
   }
 
   private release(out: string[]): void {
@@ -91,16 +98,20 @@ export class SentenceSplitter {
 
   private cutAtSoftPause(out: string[]): void {
     const chars = [...this.buffer]
-    for (let i = chars.length - 1; i > 0; i--) {
-      if (SOFT_PAUSES.has(chars[i]!)) {
-        const head = chars.slice(0, i + 1).join('').trim()
-        this.buffer = chars.slice(i + 1).join('')
-        if (isSpeakable(head)) {
-          out.push(head)
-          this.released++
-        }
-        return
-      }
+    // The last soft pause outside any 〔…〕 tag.
+    let cut = -1
+    let depth = 0
+    chars.forEach((ch, i) => {
+      if (ch === '〔') depth++
+      else if (ch === '〕') depth = Math.max(0, depth - 1)
+      else if (depth === 0 && i > 0 && SOFT_PAUSES.has(ch)) cut = i
+    })
+    if (cut < 0) return
+    const head = chars.slice(0, cut + 1).join('').trim()
+    this.buffer = chars.slice(cut + 1).join('')
+    if (isSpeakable(head)) {
+      out.push(head)
+      this.released++
     }
   }
 }

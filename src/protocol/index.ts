@@ -22,6 +22,12 @@ export interface CharMark {
   ms: number
 }
 
+/** A performance cue riding on a sentence: applied when that sentence starts playing. */
+export interface Cue {
+  kind: 'emotion' | 'act'
+  name: string
+}
+
 export interface PackAction {
   id: string
   desc: string
@@ -108,7 +114,7 @@ export type BrainMessage =
   | { t: 'state'; cid: string; state: AvatarState }
   | { t: 'emotion'; cid: string; emotion: string; intensity?: number }
   | { t: 'speak.begin'; cid: string; uid: string; emotion?: string }
-  | { t: 'speak.seg'; cid: string; uid: string; seq: number; text: string; durationMs: number; format?: AudioFormat; stream?: number; marks?: CharMark[] }
+  | { t: 'speak.seg'; cid: string; uid: string; seq: number; text: string; durationMs: number; format?: AudioFormat; stream?: number; marks?: CharMark[]; cues?: Cue[] }
   | { t: 'speak.end'; cid: string; uid: string }
   | { t: 'speak.cancel'; cid: string; uid: string }
   | { t: 'act'; cid: string; id: string; action: string; args?: unknown }

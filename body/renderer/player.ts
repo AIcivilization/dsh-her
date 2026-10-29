@@ -1,20 +1,29 @@
 /**
- * Clip player: two players that crossfade, choosing clips from the pool of the
- * current state (talk, think, …; idle when the pack has none for it).
+ * Clip player on two slots, driven by the pose-graph director (director.ts).
+ *
+ * Joins: when the outgoing clip's end and the incoming clip's start both line
+ * up with their anchor (seam "cut"), the next clip is preloaded on its first
+ * frame and swapped in on the last frame: no blend, no jump. Otherwise the
+ * two crossfade for 0.3 s. Cutting a clip short (a request arrived, the state
+ * changed) is always a crossfade, and only for interruptible clips.
  *
  * Rest: playing video costs CPU on every frame (M0: about 17% of one core on
  * an M1 Pro, against 0.4% for a still frame). After REST_AFTER_MS without any
- * interaction she rests: the clip runs to its end and stays on its last frame,
- * and one idle clip plays every 20–40 s. Any interaction wakes her at once.
+ * interaction she rests: an idle clip runs to its end and stays on its last
+ * frame (which is the anchor pose), and one idle clip plays every 20–40 s.
+ * Any interaction wakes her at once.
  *
  * For "stacked" packs each video stays hidden and a WebGL canvas shows it
  * (see stacked.ts).
  */
 
-import type { PackInfo, PackLayout } from '../shared/types.ts'
+import type { PackClipInfo, PackInfo, PackLayout } from '../shared/types.ts'
+import { Director } from './director.ts'
 import { StackedView } from './stacked.ts'
 
-const FADE_LEAD_S = 0.6
+const FADE_S = 0.3
+/** Seconds before a clip's end at which the next one is chosen (and preloaded or faded in). */
+const LEAD_S = 0.45
 export const REST_AFTER_MS = 2 * 60_000
 const REST_GAP_MS: [number, number] = [20_000, 40_000]
 
@@ -22,24 +31,35 @@ export interface Slot {
   video: HTMLVideoElement
   /** The element on screen: the video itself, or its WebGL canvas. */
   shown: HTMLElement
+  view?: StackedView
+  clip?: PackClipInfo
+}
+
+export interface PlayerEvents {
+  /** A clip is now on screen. */
+  started(clip: PackClipInfo): void
 }
 
 export class Player {
   readonly slots: Slot[]
+  readonly director: Director<PackClipInfo>
   private active = 0
-  private lastClip: string | undefined
+  /** The next clip, chosen and loaded on the other slot, waiting for a hard cut. */
+  private queued: PackClipInfo | undefined
   private switching = false
-  private state = 'idle'
   private lastInteraction = Date.now()
   private restTimer: number | undefined
-  private readonly pools = new Map<string, PackInfo['clips']>()
+  private readonly byId: Map<string, PackClipInfo>
+  private readonly events: PlayerEvents
 
-  constructor(stage: HTMLElement, private readonly pack: PackInfo) {
-    for (const clip of pack.clips) this.pools.set(clip.role, [...(this.pools.get(clip.role) ?? []), clip])
+  constructor(stage: HTMLElement, pack: PackInfo, events: PlayerEvents) {
+    this.byId = new Map(pack.clips.map(c => [c.id, c]))
+    this.director = new Director(pack.clips, pack.macros, pack.start)
+    this.events = events
     this.slots = [0, 1].map(() => makeSlot(stage, pack.layout))
-    for (const { video } of this.slots) {
-      video.addEventListener('timeupdate', () => this.nearEnd(video))
-      video.addEventListener('ended', () => this.ended(video))
+    for (const slot of this.slots) {
+      slot.video.addEventListener('timeupdate', () => this.nearEnd(slot))
+      slot.video.addEventListener('ended', () => this.ended(slot))
     }
   }
 
@@ -48,11 +68,11 @@ export class Player {
   }
 
   get resting(): boolean {
-    return Date.now() - this.lastInteraction > REST_AFTER_MS
+    return Date.now() - this.lastInteraction > REST_AFTER_MS && !this.director.urgent && this.director.wanted === 'idle'
   }
 
-  start(): Promise<void> {
-    return this.playNext()
+  async start(): Promise<void> {
+    await this.show(this.director.next(), 'fade')
   }
 
   /** Something happened (talk, touch, typing): stay awake; leave a still frame now. */
@@ -61,63 +81,120 @@ export class Player {
     if (this.restTimer !== undefined || this.current.video.ended) {
       window.clearTimeout(this.restTimer)
       this.restTimer = undefined
-      this.playNext().catch(console.error)
+      this.advance('fade')
     }
   }
 
   setState(state: string): void {
-    const changed = state !== this.state
-    this.state = state
+    const changed = state !== this.director.wanted
+    this.director.setState(state)
     this.touch()
-    // A new state shows at once when the pack has clips for it.
-    if (changed && this.pools.has(state) && !this.switching) this.playNext().catch(console.error)
+    if (changed) this.cutShort()
   }
 
-  private pick(): PackInfo['clips'][number] {
-    const pool = this.pools.get(this.state) ?? this.pools.get('idle') ?? this.pack.clips
-    const options = pool.length > 1 ? pool.filter(c => c.id !== this.lastClip) : pool
-    const clip = options[Math.floor(Math.random() * options.length)]!
-    this.lastClip = clip.id
-    return clip
+  /** Queue an action; resolves when it has played. */
+  act(action: string): Promise<{ ok: boolean; reason?: string }> {
+    const done = this.director.act(action)
+    this.touch()
+    this.cutShort()
+    return done
   }
 
-  private async playNext(): Promise<void> {
+  emote(emotion: string): void {
+    this.director.emote(emotion)
+    this.touch()
+    this.cutShort()
+  }
+
+  /** Leave an interruptible loop now if something else is wanted. */
+  private cutShort(): void {
+    const clip = this.current.clip
+    if (clip === undefined || this.switching || !clip.interruptible || clip.from !== clip.to) return
+    const wantsLoop = clip.role === 'state' && clip.name === this.director.wanted
+    if (wantsLoop && !this.director.urgent) return
+    this.queued = undefined
+    this.advance('fade')
+  }
+
+  private advance(join: 'cut' | 'fade'): void {
     if (this.switching) return
+    const next = this.queued ?? this.director.next()
+    this.queued = undefined
+    this.show(next, join).catch(console.error)
+  }
+
+  private async show(clip: PackClipInfo, join: 'cut' | 'fade'): Promise<void> {
     this.switching = true
     try {
       const incoming = this.slots[1 - this.active]!
       const outgoing = this.slots[this.active]!
-      incoming.video.src = this.pick().url
-      incoming.video.currentTime = 0
+      const ov = outgoing.video
+      const finished = ov.ended || !Number.isFinite(ov.duration) || ov.duration - ov.currentTime <= LEAD_S + 0.1
+      if (incoming.clip?.id !== clip.id || incoming.video.ended || incoming.video.currentTime > 0.05) await load(incoming, clip)
+      for (const slot of this.slots) slot.shown.classList.toggle('cut', join === 'cut')
       await incoming.video.play()
       incoming.shown.classList.add('on')
       outgoing.shown.classList.remove('on')
       this.active = 1 - this.active
-      window.setTimeout(() => { if (this.slots[1 - this.active] === outgoing) outgoing.video.pause() }, 700)
+      if (outgoing.clip !== undefined) this.director.played(outgoing.clip, finished)
+      this.events.started(clip)
+      window.setTimeout(() => { if (this.slots[1 - this.active] === outgoing) outgoing.video.pause() }, FADE_S * 1000 + 100)
     } finally {
       this.switching = false
     }
   }
 
-  private nearEnd(video: HTMLVideoElement): void {
-    if (video !== this.current.video || this.switching || this.resting || !Number.isFinite(video.duration)) return
-    if (video.duration - video.currentTime > FADE_LEAD_S) return
-    this.playNext().catch(console.error)
+  private nearEnd(slot: Slot): void {
+    const video = slot.video
+    const clip = slot.clip
+    if (slot !== this.current || clip === undefined || this.switching || this.queued !== undefined || !Number.isFinite(video.duration)) return
+    if (video.duration - video.currentTime > LEAD_S) return
+    // Resting on an idle loop: let it end on its last frame.
+    if (this.resting && clip.role === 'state' && clip.from === clip.to) return
+    const next = this.director.next()
+    if (clip.seam.out === 'cut' && next.seam.in === 'cut' && clip.to === next.from) {
+      this.queued = next
+      load(this.slots[1 - this.active]!, next).catch(console.error)
+    } else {
+      this.show(next, 'fade').catch(console.error)
+    }
   }
 
-  /** Resting: the clip ended on its last frame; play the next one after a pause. */
-  private ended(video: HTMLVideoElement): void {
-    if (video !== this.current.video || this.restTimer !== undefined) return
-    if (!this.resting) {
-      this.playNext().catch(console.error)
+  private ended(slot: Slot): void {
+    if (slot !== this.current || this.switching) return
+    if (this.queued !== undefined) {
+      this.advance('cut')
       return
     }
+    if (!this.resting) {
+      this.advance('fade')
+      return
+    }
+    if (this.restTimer !== undefined) return
     const [min, max] = REST_GAP_MS
     this.restTimer = window.setTimeout(() => {
       this.restTimer = undefined
-      this.playNext().catch(console.error)
+      // Still on the anchor pose: the next loop starts there, so a cut is seamless.
+      this.advance(slot.clip?.seam.out === 'cut' ? 'cut' : 'fade')
     }, min + Math.random() * (max - min))
   }
+
+  clipById(id: string): PackClipInfo | undefined {
+    return this.byId.get(id)
+  }
+}
+
+/** Load a clip on a slot, paused on its first frame (drawn, for stacked packs). */
+async function load(slot: Slot, clip: PackClipInfo): Promise<void> {
+  slot.clip = clip
+  slot.video.src = clip.url
+  slot.video.currentTime = 0
+  await new Promise<void>((resolve, reject) => {
+    if (slot.video.readyState >= 2) return resolve()
+    slot.video.addEventListener('loadeddata', () => resolve(), { once: true })
+    slot.video.addEventListener('error', () => reject(new Error(`cannot play ${clip.url}`)), { once: true })
+  })
+  slot.view?.drawNow()
 }
 
 function makeSlot(stage: HTMLElement, layout: PackLayout): Slot {
@@ -130,5 +207,5 @@ function makeSlot(stage: HTMLElement, layout: PackLayout): Slot {
   video.classList.add('source')
   const view = new StackedView(video)
   stage.append(view.canvas)
-  return { video, shown: view.canvas }
+  return { video, shown: view.canvas, view }
 }
