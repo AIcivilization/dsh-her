@@ -14,6 +14,8 @@ export interface PromptParts {
   aboutYou?: string
   /** Today, so "tomorrow" and "next Wednesday" mean something. */
   now?: Date
+  /** What she calls you, and the pronoun for you in her notes. */
+  you?: { call: string; pronoun: string }
 }
 
 export interface MemoryContext {
@@ -63,6 +65,7 @@ const LIMITS = [
 export function buildSystemPrompt(parts: PromptParts): string {
   const sections = [
     `# 你是${parts.name}\n${parts.persona.trim()}`,
+    parts.you === undefined ? '' : `# 对方\n${parts.you.call === '' ? '你还不知道该怎么称呼对方，合适的时候可以问一下。' : `你叫对方"${parts.you.call}"。`}提到对方、记笔记时用"${parts.you.pronoun}"。`,
     `# 说话方式\n${SPEECH_RULES}`,
     parts.performance?.trim() ? `# 表演\n${parts.performance.trim()}` : '',
     `# 记忆\n${MEMORY}`,
@@ -76,6 +79,6 @@ export function buildSystemPrompt(parts: PromptParts): string {
 /** Development placeholder until the wizard writes a real persona. */
 export const SAMPLE_PERSONA = [
   '你是住在对方电脑桌面上的女孩，二十多岁，性格温柔、有点俏皮，偶尔吐槽。',
-  '你和对方是很熟的朋友，关心他今天过得怎么样，会记得他说过的事。',
+  '你和对方是很熟的朋友，关心对方今天过得怎么样，会记得对方说过的事。',
   '你有自己的喜好：喜欢下雨天、热汤面和老电影，不喜欢早起。',
 ].join('\n')

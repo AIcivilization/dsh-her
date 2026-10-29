@@ -33,7 +33,7 @@ export class Voice {
   private state: VoiceStatus
   private readonly cache = new Map<string, Synthesized>()
   private readonly modelsDir: string
-  private readonly config: VoiceConfig
+  private config: VoiceConfig
   private readonly logger: { info(message: string): void; warn(message: string): void }
 
   constructor(modelsDir: string, config: VoiceConfig, logger: { info(message: string): void; warn(message: string): void }) {
@@ -71,6 +71,23 @@ export class Voice {
       this.state = 'failed'
       this.logger.warn(`dsh-her: voice unavailable, text only (${(error as Error).message})`)
     }
+  }
+
+  /** Change her speaker and speed (from the "她" page); takes effect with the next sentence. */
+  setVoice(sid: number, speed: number): void {
+    if (sid === this.config.sid && speed === this.config.speed) return
+    this.config = { ...this.config, sid, speed }
+  }
+
+  get sid(): number {
+    return this.config.sid
+  }
+
+  /** One sentence in a given voice, for trying voices; not cached. */
+  async preview(text: string, sid: number, speed: number): Promise<Synthesized | undefined> {
+    if (this.state !== 'ready' || this.engine === undefined) return undefined
+    const audio = await this.engine.synthesize(text, sid, speed)
+    return { audio: encodeWav(audio.samples, audio.sampleRate), durationMs: Math.round((audio.samples.length / audio.sampleRate) * 1000) }
   }
 
   /** Her sentence as WAV, or undefined when she has no voice right now. */

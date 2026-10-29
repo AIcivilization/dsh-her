@@ -20,13 +20,16 @@
  *   npm start -- --mode overlay --pack ~/dsh-her-dev-assets/bg2-stacked [--home ~/.dsh-her-dev] [--her-debug] [--her-mute]
  */
 
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, screen, session, systemPreferences, Tray } from 'electron'
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, screen, session, systemPreferences, Tray } from 'electron'
+import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { BodyMessage, BrainMessage } from '../../src/protocol/index.ts'
 import type { BodyConfig, LinkStatus, MicMode, Mode } from '../shared/types.ts'
 import { BrainLink } from './brain-link.ts'
+import { importPack } from './pack/import.ts'
 import { loadPack, summarize } from './pack/load.ts'
+import { listPacks, loadSettings, saveSettings, type BodySettings } from './settings.ts'
 import { attachToWallpaper } from './wallpaper-win.ts'
 
 /** ⌃⌥Space / Ctrl+Alt+Space: talk to her. Alt+Space alone is taken by Windows' window menu. */
@@ -40,8 +43,13 @@ function arg(name: string): string | undefined {
 }
 
 const expand = (p: string) => p.replace(/^~(?=$|[\\/])/, homedir())
-const packDir = expand(arg('pack') ?? process.env.DSH_HER_PACK ?? '~/dsh-her-dev-assets/bg2-stacked')
 const home = arg('home') ?? process.env.DSH_HER_HOME ?? '~/.dsh-her'
+const packsDir = join(expand(home), 'packs')
+let settings: BodySettings = loadSettings(expand(home))
+/** The pack chosen on the "她" page wins; `--pack` is only the first default. */
+const packDir = settings.pack !== undefined && listPacks(packsDir).some(p => p.packId === settings.pack)
+  ? join(packsDir, settings.pack)
+  : expand(arg('pack') ?? process.env.DSH_HER_PACK ?? '~/dsh-her-dev-assets/bg2-stacked')
 const debug = process.argv.includes('--her-debug')
 const mute = process.argv.includes('--her-mute')
 /** From the brain's welcome; the menu can switch it. */
@@ -50,9 +58,12 @@ let micMode: MicMode = 'push-to-talk'
 // Her voice must play without a click first.
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
 
-const pack = loadPack(packDir)
+let pack = loadPack(packDir)
 /** A scene pack belongs in the wallpaper; she alone floats on top. */
-let mode: Mode = (arg('mode') as Mode | undefined) ?? (pack.layer === 'scene' ? 'wallpaper' : 'overlay')
+const layerMode = (p: { layer?: string }): Mode => (p.layer === 'scene' ? 'wallpaper' : 'overlay')
+/** A mode the user chose (argument or menu/page) wins over the pack's default. */
+const chosenMode = (): Mode | undefined => (arg('mode') as Mode | undefined) ?? settings.mode
+let mode: Mode = chosenMode() ?? layerMode(pack)
 let win: BrowserWindow | undefined
 let tray: Tray | undefined
 let link: BrainLink | undefined
@@ -110,10 +121,60 @@ function createWindow(): BrowserWindow {
 function switchMode(next: Mode): void {
   if (next === mode && win !== undefined) return
   mode = next
+  settings = { ...settings, mode }
+  saveSettings(expand(home), settings)
   const old = win
   win = createWindow()
   old?.destroy()
   refreshTray()
+  reportMode()
+}
+
+function reportMode(): void {
+  link?.send({ t: 'mode.changed', cid: cid ?? '', mode })
+}
+
+/** Tell the brain which packs there are and which one is on screen. */
+function reportPacks(): void {
+  link?.send({ t: 'pack.list', packs: listPacks(packsDir), active: pack.id })
+}
+
+/** Show another imported pack: reload the window with it, and remember the choice. */
+function usePack(packId: string): void {
+  const next = loadPack(join(packsDir, packId))
+  pack = next
+  settings = { ...settings, pack: packId }
+  saveSettings(expand(home), settings)
+  const nextMode = chosenMode() ?? layerMode(pack)
+  if (nextMode !== mode) {
+    mode = nextMode
+    reportMode()
+  }
+  const old = win
+  win = createWindow()
+  old?.destroy()
+  refreshTray()
+  reportPacks()
+}
+
+/** Let the user pick a folder here, import it, show it. Progress and the report go to the brain. */
+async function pickAndImport(): Promise<void> {
+  const send = (message: BodyMessage) => link?.send(message)
+  if (process.platform === 'darwin') app.focus({ steal: true })
+  const choice = await dialog.showOpenDialog({ title: '选择素材文件夹', buttonLabel: '导入', properties: ['openDirectory'] })
+  const dir = choice.filePaths[0]
+  if (choice.canceled || dir === undefined) {
+    send({ t: 'pack.report', id: '', ok: false, lines: [{ level: 'warn', text: '没有选择文件夹' }] })
+    return
+  }
+  mkdirSync(packsDir, { recursive: true })
+  const result = await importPack(dir, packsDir, {
+    onProgress: (done, total, step) => send({ t: 'pack.progress', id: '', done, total, step }),
+  })
+  const ok = result.pack !== undefined
+  send({ t: 'pack.report', id: '', ok, ...(ok ? { pack: summarize(loadPack(join(packsDir, result.pack!.id))) } : {}), lines: result.report })
+  if (ok) usePack(result.pack!.id)
+  else reportPacks()
 }
 
 function statusLabel(): string {
@@ -245,6 +306,21 @@ if (!app.requestSingleInstanceLock()) {
           cid = message.characters[0]?.cid
           micMode = message.config.mic
           refreshTray()
+          reportPacks()
+          reportMode()
+        } else if (message.t === 'mode') {
+          switchMode(message.mode)
+          return
+        } else if (message.t === 'pack.use') {
+          try {
+            usePack(message.packId)
+          } catch (error) {
+            link?.send({ t: 'error', code: 'pack', message: (error as Error).message })
+          }
+          return
+        } else if (message.t === 'pack.pick') {
+          pickAndImport().catch(error => link?.send({ t: 'pack.report', id: '', ok: false, lines: [{ level: 'error', text: (error as Error).message }] }))
+          return
         }
         toPage('brain', message, audio)
       },

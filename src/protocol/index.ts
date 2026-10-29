@@ -92,7 +92,8 @@ export type BodyMessage =
   | { t: 'mode.changed'; cid: string; mode: WindowMode; pos?: { x: number; y: number; screen?: number } }
   | { t: 'pack.progress'; id: string; done: number; total: number; step: string }
   | { t: 'pack.report'; id: string; ok: boolean; pack?: PackSummary; lines: Array<{ level: 'ok' | 'warn' | 'error'; text: string }> }
-  | { t: 'pack.list'; packs: PackSummary[] }
+  /** The packs this body has imported, and the one on screen. */
+  | { t: 'pack.list'; packs: PackSummary[]; active?: string }
   | { t: 'error'; code: string; message: string }
 
 // ── brain → body ────────────────────────────────────────────────────────────
@@ -128,8 +129,11 @@ export type BrainMessage =
   | { t: 'ask'; cid: string; id: string; question: string; options: string[] }
   | { t: 'mode'; cid: string; mode: WindowMode; screen?: number; pos?: { x: number; y: number }; scale?: number }
   | { t: 'config'; mic?: 'push-to-talk' | 'always'; bargeIn?: boolean }
+  /** Let the user choose a folder on the body's computer and import it (progress and report follow). */
   | { t: 'pack.pick'; id: string }
   | { t: 'pack.import'; id: string; dir: string }
+  /** Show this imported pack from now on. */
+  | { t: 'pack.use'; packId: string }
 
 export type AnyMessage = BodyMessage | BrainMessage
 

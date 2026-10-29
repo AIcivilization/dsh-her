@@ -17,7 +17,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { buildSystemPrompt, SentenceSplitter } from '../core/index.ts'
+import { buildSystemPrompt, SentenceSplitter, type Character } from '../core/index.ts'
 import type { MemoryProvider } from '../memory/store.ts'
 
 export interface ModelRoute {
@@ -100,8 +100,8 @@ export interface ReplyEvents {
 
 export interface HerSessionDeps {
   cid: string
-  name: string
-  persona: string
+  /** Who she is right now (the "她" page can change it at any time). */
+  character: () => Pick<Character, 'name' | 'persona' | 'callYou' | 'pronoun'>
   /** The performance section for the connected body (empty without one). */
   performance: () => string
   /** Have the body perform an action; resolves when it is done. */
@@ -132,7 +132,7 @@ export class HerSession {
   }
 
   get title(): string {
-    return `她 · ${this.deps.name}`
+    return `她 · ${this.deps.character().name}`
   }
 
   get sessionId(): string | undefined {
@@ -226,11 +226,16 @@ export class HerSession {
   }
 
   private async composeScope(agentCtx: ScopedContext): Promise<void> {
-    const { name, persona } = this.deps
     agentCtx.systemPrompt?.section({
       name: 'dsh-her:system', order: 0, complete: true, interpolate: false,
       // A failing part is left out, never the prompt: a throw here leaves her silent with no error (M4).
-      text: () => buildSystemPrompt({ name, persona, performance: this.safe('performance', this.deps.performance), aboutYou: this.safe('aboutYou', this.deps.aboutYou), now: new Date() }),
+      text: () => {
+        const { name, persona, callYou, pronoun } = this.deps.character()
+        return buildSystemPrompt({
+          name, persona, you: { call: callYou, pronoun },
+          performance: this.safe('performance', this.deps.performance), aboutYou: this.safe('aboutYou', this.deps.aboutYou), now: new Date(),
+        })
+      },
     })
     agentCtx.systemPrompt?.suppressRuntimeContext?.()
     this.hideGlobalTools(agentCtx)

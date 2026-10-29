@@ -31,12 +31,14 @@
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { extractCues, herPaths, judgeBargeIn, memoryContext, performanceSection, readingMs, speakable } from '../core/index.ts'
+import { buildSystemPrompt, extractCues, herPaths, invalidCharacter, judgeBargeIn, loadCharacter, memoryContext, performanceSection, readingMs, saveCharacter, speakable, type Character } from '../core/index.ts'
 import { digestPrompt, parseDigest, transcriptOf } from '../memory/digest.ts'
 import { dayOf, FileMemory } from '../memory/store.ts'
-import { PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type PackSummary } from '../protocol/index.ts'
+import { PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type PackSummary, type WindowMode } from '../protocol/index.ts'
 import { BrainServer } from '../server/brain-server.ts'
+import { API_BASE, apiHandlers, handle, type ApiRuntime } from './api.ts'
 import { bodyRunning, findDevBody, launchBody } from './body-launcher.ts'
+import { IDLE_IMPORT, type ImportStatus } from './import-status.ts'
 import type { HerConfig } from './config.ts'
 import { HerSession, type DshServices, type ModelRoute } from './her-session.ts'
 import { heardText, SpeechQueue } from '../voice/speech-queue.ts'
@@ -112,6 +114,15 @@ export function apply(ctx: Context, config: HerConfig): void {
   let cutNote: string | undefined
   let stuckTimer: NodeJS.Timeout | undefined
   const memory = new FileMemory(join(dir, 'memory'))
+  /** Who she is: the "她" page's saved settings over the plugin config's defaults. */
+  let character: Character = loadCharacter(dir, {
+    name: config.character.name,
+    persona: config.character.persona,
+    callYou: '',
+    pronoun: '他',
+    voice: { sid: config.voice.sid, speed: config.voice.speed },
+    onboarded: false,
+  })
   /** When you last talked to her, and the day of it (for the digest). */
   let lastTalkAt = 0
   let digesting: Promise<string> | undefined
@@ -122,12 +133,25 @@ export function apply(ctx: Context, config: HerConfig): void {
     return digesting
   }
 
+  /** One model call outside her session (digest, persona drafts): the whole answer as text. */
+  const complete = async (system: string, user: string, maxTokens: number): Promise<string> => {
+    const llm = (services as unknown as { llm?: LlmLike } | undefined)?.llm
+    const target = route()
+    if (llm === undefined || target === undefined) throw new Error('dsh 的模型服务还没准备好')
+    let answer = ''
+    for await (const chunk of llm.stream({
+      provider: target.provider, model: target.model, ...(target.reasoningEffort === undefined ? {} : { reasoningEffort: target.reasoningEffort }),
+      system, messages: [{ role: 'user', content: [{ type: 'text', text: user }] }], maxTokens,
+    })) {
+      if (chunk.type === 'text-delta' && typeof chunk.text === 'string') answer += chunk.text
+    }
+    return answer.trim()
+  }
+
   const runDigest = async (day: string): Promise<string> => {
     const id = session?.sessionId
     const query = services?.sessionQuery
-    const llm = (services as unknown as { llm?: LlmLike } | undefined)?.llm
-    const target = route()
-    if (id === undefined || query === undefined || llm === undefined || target === undefined) return '整理不了：dsh 的服务还没准备好'
+    if (id === undefined || query === undefined) return '整理不了：dsh 的服务还没准备好'
     const [y, m, d] = day.split('-').map(Number) as [number, number, number]
     const start = new Date(y, m - 1, d).getTime()
     const lines = transcriptOf((await query.readSession(id)).events as Array<{ type: string; time?: number; data: unknown }>, start, start + 86_400_000)
@@ -136,14 +160,8 @@ export function apply(ctx: Context, config: HerConfig): void {
       return `${day} 没有聊天，不用整理`
     }
     const { facts, episodes } = memory.list()
-    const prompt = digestPrompt(config.character.name, day, lines, facts.map(f => f.text), episodes.map(e => (e.due === undefined ? e.text : `${e.text}（${e.due}）`)))
-    let answer = ''
-    for await (const chunk of llm.stream({
-      provider: target.provider, model: target.model, ...(target.reasoningEffort === undefined ? {} : { reasoningEffort: target.reasoningEffort }),
-      system: prompt.system, messages: [{ role: 'user', content: [{ type: 'text', text: prompt.user }] }], maxTokens: 2000,
-    })) {
-      if (chunk.type === 'text-delta' && typeof chunk.text === 'string') answer += chunk.text
-    }
+    const prompt = digestPrompt(character.name, day, lines, facts.map(f => f.text), episodes.map(e => (e.due === undefined ? e.text : `${e.text}（${e.due}）`)), character.pronoun)
+    const answer = await complete(prompt.system, prompt.user, 2000)
     const parsed = parseDigest(answer)
     if (parsed === undefined) {
       log({ event: 'digest', day, error: 'unparsable', answer: answer.slice(0, 400) })
@@ -181,6 +199,13 @@ export function apply(ctx: Context, config: HerConfig): void {
   let lastCut: { uid: string; at: number } | undefined
   /** The pack of the most recently connected body: what she can perform. */
   let bodyPack: PackSummary | undefined
+  /** What the body reports about itself, for the "她" page. */
+  let bodyPacks: PackSummary[] = []
+  let activePack: string | undefined
+  let bodyMode: WindowMode | undefined
+  let importStatus: ImportStatus = IDLE_IMPORT
+  let lastHeard: { text: string; at: number } | undefined
+  let discovery: { url: string; token: string } | undefined
   /** Actions sent to a body, waiting for its `act.done`. */
   const pendingActs = new Map<string, (result: { ok: boolean; reason?: string }) => void>()
   let nextAct = 1
@@ -324,6 +349,7 @@ export function apply(ctx: Context, config: HerConfig): void {
             return
           }
           broadcast({ t: 'heard', cid, uttId: message.uttId, text })
+          lastHeard = { text, at: Date.now() }
           if (text !== '') hear(text, 'voice')
           sentAt = endedAt
         }, (error: Error) => {
@@ -341,7 +367,102 @@ export function apply(ctx: Context, config: HerConfig): void {
         settle?.({ ok: message.ok, ...(message.reason === undefined ? {} : { reason: message.reason }) })
         break
       }
+      case 'pack.list':
+        bodyPacks = message.packs
+        activePack = message.active
+        bodyPack = message.packs.find(p => p.packId === message.active) ?? bodyPack
+        break
+      case 'mode.changed':
+        bodyMode = message.mode
+        break
+      case 'pack.progress':
+        importStatus = { ...importStatus, state: 'running', done: message.done, total: message.total, step: message.step }
+        break
+      case 'pack.report':
+        importStatus = { ...importStatus, state: message.ok ? 'done' : 'failed', lines: message.lines }
+        break
     }
+  }
+
+  /** The "她" page's view of everything, and what it can change. */
+  const api: ApiRuntime = {
+    state: () => {
+      const body = server?.bodies.at(-1)
+      const target = route()
+      const { facts, episodes, diary } = memory.list()
+      return {
+        platform: process.platform,
+        character,
+        model: target === undefined ? null : { provider: target.provider, model: target.model },
+        voice: { status: voice?.status ?? 'off', sid: character.voice.sid, speed: character.voice.speed },
+        body: {
+          connected: body !== undefined,
+          running: body !== undefined || bodyRunning(paths.root),
+          canStart: !('missing' in findDevBody()),
+          ...(body === undefined ? {} : { info: { kind: body.hello.body.kind, version: body.hello.body.version, os: body.hello.body.os } }),
+          ...(bodyPack === undefined ? {} : { pack: bodyPack }),
+          packs: bodyPacks,
+          ...(activePack === undefined ? {} : { activePack }),
+          ...(bodyMode === undefined ? {} : { mode: bodyMode }),
+        },
+        import: importStatus,
+        ...(lastHeard === undefined ? {} : { heard: lastHeard }),
+        memory: { facts, episodes, diary, lastDigestDay: memory.lastDigestDay() ?? null },
+      }
+    },
+    saveCharacter: patch => {
+      const next: Character = { ...character, ...patch, voice: { ...character.voice, ...patch.voice } }
+      const problem = invalidCharacter(next)
+      if (problem !== undefined) throw new Error(problem)
+      saveCharacter(dir, next)
+      character = next
+      voice?.setVoice(next.voice.sid, next.voice.speed)
+      log({ event: 'character', name: next.name, sid: next.voice.sid, onboarded: next.onboarded })
+      return next
+    },
+    expandPersona: async ({ name, idea, callYou, pronoun }) => complete(
+      [
+        '你在帮用户写一个桌面陪伴角色的人设。她住在用户电脑桌面上，陪用户聊天，会记得用户说过的事。',
+        '根据用户的一句话描述，写成完整人设：150 到 300 字，用第二人称"你是……"开头。',
+        '写清楚：年龄感和性格、说话方式（口头禅、语气）、自己的喜好和小习惯、和对方的关系。',
+        `对方的称呼是"${callYou || '对方'}"，提到对方时用"${pronoun}"。`,
+        '不要写她能做什么、不能做什么（这部分另有规定）；不要成人内容；只输出人设正文。',
+      ].join('\n'),
+      `名字：${name}\n用户的描述：${idea}`, 800,
+    ),
+    tryPersona: async ({ name, persona, callYou, pronoun, history, message }) => complete(
+      buildSystemPrompt({ name, persona, you: { call: callYou, pronoun }, now: new Date() }),
+      [...history.map(h => `${h.who === 'you' ? '对方' : '你'}：${h.text}`), `对方：${message}`, '（只回复你接下来说的话，不要带"你："前缀。）'].join('\n'),
+      300,
+    ),
+    previewVoice: async (sid, speed, text) => {
+      const audio = await voice?.preview(text, sid, speed)
+      return audio === undefined ? undefined : { wav: Buffer.from(audio.audio).toString('base64'), durationMs: audio.durationMs }
+    },
+    startBody: () => {
+      if (server?.bodies.length) return '身体已经连上了'
+      if (bodyRunning(paths.root)) return '身体已经在运行，正在连接'
+      const plan = findDevBody()
+      if ('missing' in plan) return `找不到身体程序（缺 ${plan.missing}）`
+      if (discovery === undefined) return '大脑还没准备好'
+      launchBody(plan, { url: discovery.url, token: discovery.token, home: paths.root, pack: config.body.pack })
+      return '已经启动，几秒钟后会连上'
+    },
+    setMode: mode => broadcast({ t: 'mode', cid, mode }),
+    pickPack: () => {
+      const body = server?.bodies.at(-1)
+      if (body === undefined) throw new Error('身体还没连上，导入素材要在身体所在的电脑上选文件夹')
+      importStatus = { ...IDLE_IMPORT, state: 'picking' }
+      body.send({ t: 'pack.pick', id: `i${Date.now()}` })
+    },
+    usePack: packId => {
+      if (!bodyPacks.some(p => p.packId === packId)) throw new Error('没有这个外形包')
+      broadcast({ t: 'pack.use', packId })
+    },
+    memoryRemove: ids => memory.remove(ids),
+    memoryConfirm: ids => memory.confirm(ids),
+    digest: () => digest(dayOf(new Date())),
+    exportMemory: () => memory.exportMarkdown(),
   }
 
   ctx.effect(() => {
@@ -349,8 +470,7 @@ export function apply(ctx: Context, config: HerConfig): void {
     mkdirSync(paths.logs, { recursive: true })
     session = new HerSession({
       cid,
-      name: config.character.name,
-      persona: config.character.persona,
+      character: () => character,
       performance: () => performanceSection(bodyPack),
       playAction,
       aboutYou,
@@ -398,7 +518,7 @@ export function apply(ctx: Context, config: HerConfig): void {
     } as ConstructorParameters<typeof HerSession>[0])
     if (services !== undefined) open()
 
-    voice = new Voice(paths.models, config.voice, ctx.logger)
+    voice = new Voice(paths.models, { ...config.voice, sid: character.voice.sid, speed: character.voice.speed }, ctx.logger)
     const herVoice = voice
     void herVoice.start()
     speech = new SpeechQueue(text => herVoice.synthesize(speakable(text)), {
@@ -428,7 +548,7 @@ export function apply(ctx: Context, config: HerConfig): void {
           t: 'welcome',
           v: PROTOCOL_VERSION,
           sessionId: session?.sessionId ?? '',
-          characters: [{ cid, name: config.character.name, mode: 'overlay' }],
+          characters: [{ cid, name: character.name, mode: 'overlay' }],
           config: { mic: config.voice.mic, bargeIn: true },
         }
       },
@@ -440,8 +560,9 @@ export function apply(ctx: Context, config: HerConfig): void {
       },
     })
     let launchTimer: NodeJS.Timeout | undefined
-    brain.start().then(discovery => {
+    brain.start().then(started => {
       server = brain
+      discovery = started
       if (config.body.launch !== 'auto') return
       launchTimer = setTimeout(() => {
         if (brain.bodies.length > 0 || bodyRunning(paths.root)) return
@@ -450,7 +571,7 @@ export function apply(ctx: Context, config: HerConfig): void {
           ctx.logger.warn(`dsh-her: no body to start (missing ${plan.missing})`)
           return
         }
-        const pid = launchBody(plan, { url: discovery.url, token: discovery.token, home: paths.root, pack: config.body.pack })
+        const pid = launchBody(plan, { url: started.url, token: started.token, home: paths.root, pack: config.body.pack })
         ctx.logger.info(`dsh-her: started the body (pid ${pid})`)
       }, LAUNCH_AFTER_MS)
       launchTimer.unref()
@@ -471,6 +592,14 @@ export function apply(ctx: Context, config: HerConfig): void {
       server = undefined
       closing?.interrupt()
       await Promise.all([closing?.dispose(), brain.stop()])
+    }
+  })
+
+  // The "她" page's API, on DSH's own authenticated `/api` channel.
+  ctx.inject(['connection'], (webCtx) => {
+    const connection = (webCtx as unknown as { connection: { fetch: { register(route: { path: string; methods: string[]; requestBody: 'buffered'; fetch: (request: Request) => Promise<Response> }): () => void } } }).connection
+    for (const [path, handler] of Object.entries(apiHandlers(api))) {
+      webCtx.effect(() => connection.fetch.register({ path: `${API_BASE}${path}`, methods: ['POST'], requestBody: 'buffered', fetch: request => handle(handler, request) }))
     }
   })
 

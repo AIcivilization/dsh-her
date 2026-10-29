@@ -27,8 +27,8 @@
     "README.md"
   ],
   "scripts": {
-    "build": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && tsc -p tsconfig.json && node scripts/build-client.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json",
     "test": "node --test --disable-warning=ExperimentalWarning \"tests/*.test.ts\"",
     "voice:models": "node --disable-warning=ExperimentalWarning scripts/fetch-voice-models.ts",
     "voice:bench": "node --disable-warning=ExperimentalWarning scripts/voice-bench.ts",
@@ -47,7 +47,9 @@
     "@deepseek-ai/schemastery": "^3.18.5",
     "@types/node": "^24.0.0",
     "@types/ws": "^8.5.12",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "@types/react": "^18.3.31",
+    "esbuild": "^0.28.2"
   },
   "engines": {
     "node": ">=22.18"
@@ -55,6 +57,13 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
     }
+  },
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js"
   }
 }
