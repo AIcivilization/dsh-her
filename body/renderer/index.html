@@ -9,13 +9,32 @@
     html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; user-select: none;
       font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif; }
     body.window { background: #1b1b1f; }
+    /* Moving between scenes: the old one fades out, every page fades in. */
+    body { animation: appear 0.7s ease-out; transition: opacity 0.6s ease-in; }
+    body.leaving { opacity: 0; }
+    @keyframes appear { from { opacity: 0; } }
     #stage { position: absolute; left: 50%; bottom: 0; width: var(--her-w); height: var(--her-h); transform: translateX(-50%); }
-    body.wallpaper #stage { left: auto; transform: none; right: 3vw; bottom: 6vh; height: 42vh; width: auto; aspect-ratio: 3 / 4; }
+    body.wallpaper #stage { left: auto; transform: none; right: 3vw; bottom: 6vh; height: 42vh; width: auto; aspect-ratio: var(--her-aspect, 0.75); }
     /* Scene packs: the whole window is the scene, the empty plate behind the clips. */
     body.scene { background: var(--plate) center / cover no-repeat; }
     body.scene #stage { inset: 0; left: 0; width: auto; height: auto; transform: none; aspect-ratio: auto; }
-    body.scene video, body.scene canvas { object-fit: cover; }
+    /* With its own plate the scene fills the screen; a picture without one is shown whole, never cut. */
+    body.scene.plate video, body.scene.plate canvas { object-fit: cover; }
+    body.scene:not(.plate) { background: #000; }
     body.scene #bubble { left: 6vw; right: auto; width: 32vw; bottom: 45vh; justify-content: flex-start; }
+    /* A full-screen photo with her clips over one region of it (layoutScene in main.ts sets the boxes). */
+    body.region { background: #000; }
+    #plate, #plate-fill { position: absolute; display: none; pointer-events: none; }
+    body.region #plate { display: block; }
+    /* The photo shrunk to show her whole (screen shape far from the photo's): a blurred copy fills the edges. */
+    #plate-fill { inset: -60px; width: auto; height: auto; object-fit: cover; filter: blur(36px) brightness(0.8); }
+    body.region.fill #plate-fill { display: block; }
+    body.region #stage { inset: auto; transform: none; aspect-ratio: auto;
+      --feather: 3%;
+      -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--feather), #000 calc(100% - var(--feather)), transparent), linear-gradient(to bottom, transparent, #000 var(--feather), #000 calc(100% - var(--feather)), transparent);
+      -webkit-mask-composite: source-in; mask-composite: intersect; }
+    body.region video, body.region canvas { object-fit: cover; }
+    body.region.scene #bubble { right: auto; width: 30vw; justify-content: flex-start; }
     video, canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 0.3s linear; pointer-events: none; }
     video.on, canvas.on { opacity: 1; }
     /* A hard cut: the anchor frames match, so the swap must not blend. */
@@ -23,6 +42,14 @@
     /* Decoding source of a stacked clip; its canvas is what shows. */
     video.source { width: 1px; height: 1px; opacity: 0 !important; }
 
+    /* No look yet: a drawn stand-in (no pictures), until one is imported on the "她" page. */
+    #empty { position: absolute; left: 50%; bottom: 6%; transform: translateX(-50%); display: none; flex-direction: column; align-items: center; gap: 10px; pointer-events: none; }
+    body.empty #empty { display: flex; }
+    #empty .face { width: min(46vw, 150px); aspect-ratio: 1; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      background: radial-gradient(circle at 35% 30%, #ffd9e6, #b69cff 70%); box-shadow: 0 8px 30px rgba(120, 90, 200, 0.35);
+      color: #fff; font-size: min(18vw, 60px); font-weight: 600; animation: breathe 4s ease-in-out infinite; }
+    #empty p { margin: 0; padding: 6px 12px; border-radius: 10px; background: rgba(28, 26, 34, 0.82); color: #f4f0fa; font-size: 13px; text-align: center; max-width: 90%; }
+    @keyframes breathe { 50% { transform: scale(1.04); } }
     #bubble { position: absolute; left: 12px; right: 12px; bottom: calc(var(--her-h) * 0.9); display: flex; justify-content: center;
       opacity: 0; transform: translateY(6px); transition: opacity 0.25s, transform 0.25s; pointer-events: none; }
     body.wallpaper #bubble { left: auto; right: 3vw; width: calc(42vh * 0.75 + 4vw); bottom: calc(6vh + 42vh * 0.9); }
@@ -53,7 +80,10 @@
   </style>
 </head>
 <body>
+  <img id="plate-fill" alt="">
+  <img id="plate" alt="">
   <div id="stage"></div>
+  <div id="empty"><div class="face">她</div><p>还没有外形：去 dsh 的「她」页面导入一个，或者在形象工坊里做一个</p></div>
   <div id="bubble"><p></p></div>
   <div id="mic"></div>
   <form id="ask"><input id="ask-input" autocomplete="off" placeholder="想和她说点什么…（回车发送，Esc 关闭）"></form>

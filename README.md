@@ -14,11 +14,11 @@
 | M3 外形包与姿势图 | ✅ mac 通过（[记录](docs/M3记录.md)）；用合成测试包验证，"想看 JK" 全流程跑通；待真实素材校准 |
 | M4 内置记忆 | ✅ mac 通过（[记录](docs/M4记录.md)）；换全新会话仍记得，删掉的事不再提 |
 | M5 向导与管理页 | ✅ mac 通过（[记录](docs/M5记录.md)）；dsh 侧栏"她"：7 步向导 + 管理页。身体的下载安装挪到 M6 |
-| M6 打磨与发布 | — |
+| M6 打磨与发布 | 进行中（[记录](docs/M6记录.md)）：mac 身体打包、一键下载安装和自动更新、Edge 声音不再依赖系统 Python；签名公证、Windows、省电待做 |
 
 ## 组成
 
-- **大脑**（本包，dsh 插件）：她在 dsh 里的专属会话"她 · 名字"、本地语音、身体协议服务（`ws://127.0.0.1:38100` 起）。
+- **大脑**（本包，dsh 插件）：她在 dsh 里的专属会话"她 · 名字"、语音（本地识别 + 云端合成）、身体协议服务（`ws://127.0.0.1:38100` 起）。
 - **身体**（[body/](body/)，Electron 桌面程序）：她的形象、字幕气泡、输入框、三种窗口模式。
 
 两者之间的协议见 [docs/身体协议.md](docs/身体协议.md)。
@@ -29,6 +29,7 @@
 - **打字**：双击她（或菜单"打字和她说"）打开输入框，回车发送，Esc 关闭。
 - 在 dsh 里打开"她 · 名字"会话直接打字，或在任意会话里用 `/her 想说的话`：她都会在桌面上回答。
 - 在她身上按住可以拖动；右键她（或点菜单栏的"她"）可以切换"浮在最上层 / 住在壁纸里 / 普通窗口"，或退出。
+- **形象**：一个形象可以有好几个场景（窗边、书桌、卧室……），按时间和你在不在自动换，也可以跟她说"去卧室吧"。「她」页面的**形象工坊**带你做自己的形象：选好她的样子和场景，它把每张图、每段视频的提示词写进「文稿 / dsh-her 素材」里的文件夹，生成好再一键导入。见 [docs/形象工坊与多场景.md](docs/形象工坊与多场景.md)。
 - **她记得的事**：她会自己记、自己查，每天整理一次写日记。`/her 记忆` 查看，`/her 忘掉 f3` 删除，`/her 导出记忆` 导出。也可以直接跟她说"把那件事忘掉"。文件都在 `~/.dsh-her/characters/<角色>/memory/`。
 
 ## 开发
@@ -45,6 +46,13 @@ npm run build
 cd body
 npm install
 npm run build
+```
+
+打成一个可以分发的身体程序（mac；输出到 `release/`：zip 和 `body-latest.json`，传到 GitHub Release 后，插件会从 `body.releases` 下载安装、自动更新）：
+
+```bash
+cd body
+npm run package
 ```
 
 在一个单独的测试 profile 里运行（数据放在 `~/.dsh-her-dev`，不碰正式的 `~/.dsh-her`）：
@@ -69,7 +77,13 @@ profile 的 `cordis.patch.yml`：
 dsh --profile her-dev --no-open --port 3191
 ```
 
-本地语音模型（约 530 MB，下载到 `$DSH_HER_HOME/models`）和测速：
+她的声音默认用微软 Edge 的声音（通过开源工具 edge-tts，免费，要联网）；找不到已装好的 edge-tts 时会自动装进 `$DSH_HER_HOME/edge-tts`。也可以在"她"页面里换成阿里云百炼 CosyVoice 的声音，key 放进 mac 钥匙串（或环境变量 `DASHSCOPE_API_KEY`）：
+
+```bash
+security add-generic-password -a dsh-her -s dsh-her-dashscope -w
+```
+
+本地语音识别模型（约 170 MB，下载到 `$DSH_HER_HOME/models`），以及测速和各音色试听样本：
 
 ```bash
 DSH_HER_HOME=~/.dsh-her-dev npm run voice:models

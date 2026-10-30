@@ -28,6 +28,19 @@ export const STYLES = `
 .her-card h2{font-size:15px;font-weight:600;margin:0 0 6px}
 .her-card p{margin:4px 0}
 .her-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}
+.her-fold{display:flex;align-items:baseline;gap:8px;width:100%;border:none;background:none;padding:0;color:${TEXT};font:inherit;cursor:pointer;text-align:left}
+.her-fold h2{margin:0}
+.her-fold-arrow{color:${MUTED};width:14px;font-size:15px;line-height:1}
+.her-fold-sum{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.her-examples{margin-top:12px}
+.her-example-row{display:flex;gap:10px;flex-wrap:wrap}
+.her-example{margin:0;width:150px}
+.her-example img,.her-example video,.her-example-empty{width:150px;height:110px;object-fit:cover;border-radius:8px;background:${LAYER2};display:block}
+.her-example-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px dashed ${LINE};color:${FAINT};font-size:11px;text-align:center;padding:6px}
+.her-example-empty code{font-size:10px;word-break:break-all}
+.her-example figcaption{font-size:11px;color:${MUTED};margin-top:3px}
+.her-scenes{margin-top:14px;border-top:1px solid ${LINE};padding-top:10px}
+.her-scene{margin:4px 0}.her-scene label{min-width:7em}.her-scene .her-muted{flex:1}
 .her-btn{border:1px solid ${LINE};background:${LAYER2};color:${TEXT};border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer}
 .her-btn:hover{background:${HOVER}}
 .her-btn:disabled{opacity:.5;cursor:default}
@@ -56,7 +69,7 @@ export const STYLES = `
 .her-list li:last-child{border-bottom:none}
 .her-list li .grow{flex:1;min-width:0;word-break:break-word}
 .her-tag{font-size:11px;padding:0 6px;border-radius:999px;background:${LAYER2};color:${MUTED};white-space:nowrap}
-.her-tag.warn{color:${WARN}}.her-tag.bad{color:${DANGER}}
+.her-tag.warn{color:${WARN}}.her-tag.bad{color:${DANGER}}.her-tag.ok{color:${OK}}
 .her-chat{background:${LAYER2};border-radius:10px;padding:8px 10px;margin:8px 0;max-height:220px;overflow:auto}
 .her-chat div{margin:3px 0}
 .her-chat .you{color:${MUTED}}

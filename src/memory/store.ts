@@ -60,6 +60,7 @@ export interface MemoryProvider {
   settle(now: Date): number
   /** Today's diary and what the digest found. */
   applyDigest(day: string, digest: DigestResult, now: Date): { facts: number; episodes: number }
+  keep(found: Pick<DigestResult, 'facts' | 'episodes'>, now: Date): { facts: number; episodes: number }
   lastDigestDay(): string | undefined
   exportMarkdown(): string
   clear(): void
@@ -283,22 +284,28 @@ export class FileMemory implements MemoryProvider {
 
   applyDigest(day: string, digest: DigestResult, now: Date): { facts: number; episodes: number } {
     if (digest.diary.trim() !== '') this.write(join('diary', `${day}.md`), `# ${day}\n\n${digest.diary.trim()}\n`)
+    const added = this.keep(digest, now)
+    this.write('meta.json', `${JSON.stringify({ lastDigestDay: day, at: now.toISOString() })}\n`)
+    return added
+  }
+
+  /** Keep what a digest or a note found: new facts as candidates, events not already written down. */
+  keep(found: Pick<DigestResult, 'facts' | 'episodes'>, now: Date): { facts: number; episodes: number } {
     let facts = 0
     let episodes = 0
     const known = new Set(this.facts().map(f => f.text))
-    for (const fact of digest.facts) {
+    for (const fact of found.facts) {
       if (fact.text.trim() === '' || known.has(fact.text.trim())) continue
       this.remember({ kind: 'fact', text: fact.text, sensitive: fact.sensitive === true, source: 'digest' }, now)
       facts++
     }
-    for (const episode of digest.episodes) {
+    for (const episode of found.episodes) {
       if (episode.text.trim() === '') continue
       // Already remembered (she wrote it down during the day): same day, mostly the same words.
       if (this.episodes().some(e => e.due === episode.due && overlap(e.text, episode.text) >= SAME_EVENT)) continue
       this.remember({ kind: 'episode', text: episode.text, ...(episode.due === undefined ? {} : { due: episode.due }) }, now)
       episodes++
     }
-    this.write('meta.json', `${JSON.stringify({ lastDigestDay: day, at: now.toISOString() })}\n`)
     return { facts, episodes }
   }
 

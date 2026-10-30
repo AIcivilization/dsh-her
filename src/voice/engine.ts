@@ -1,6 +1,5 @@
 /**
- * Parent side of the local voice child process. One child serves both
- * recognition and synthesis; requests are answered in order of completion,
+ * Parent side of the local speech recognition child process. Requests are answered in order of completion,
  * matched by id. If the child dies, pending requests fail and the next call
  * starts a fresh one.
  *
@@ -45,7 +44,7 @@ export class LocalVoice {
   private child: ChildProcess | undefined
   private nextId = 1
   private readonly pending = new Map<number, Pending>()
-  private ready: Promise<{ loadMs: number; speakers: number }> | undefined
+  private ready: Promise<{ loadMs: number }> | undefined
   private readonly init: WorkerInit
 
   constructor(init: WorkerInit) {
@@ -53,10 +52,10 @@ export class LocalVoice {
   }
 
   /** Load the models (once); resolves with how long loading took. */
-  start(): Promise<{ loadMs: number; speakers: number }> {
+  start(): Promise<{ loadMs: number }> {
     this.ready ??= this.request({ op: 'init', init: this.init }).then(reply => {
       if (reply.op !== 'init') throw new Error('unexpected reply')
-      return { loadMs: reply.loadMs, speakers: reply.speakers }
+      return { loadMs: reply.loadMs }
     })
     return this.ready
   }
@@ -66,13 +65,6 @@ export class LocalVoice {
     const reply = await this.request({ op: 'asr', samples, sampleRate })
     if (reply.op !== 'asr') throw new Error('unexpected reply')
     return { text: reply.text, lang: reply.lang, ms: reply.ms }
-  }
-
-  async synthesize(text: string, sid: number, speed = 1): Promise<{ samples: Float32Array; sampleRate: number; ms: number }> {
-    await this.start()
-    const reply = await this.request({ op: 'tts', text, sid, speed })
-    if (reply.op !== 'tts') throw new Error('unexpected reply')
-    return { samples: reply.samples, sampleRate: reply.sampleRate, ms: reply.ms }
   }
 
   stop(): void {

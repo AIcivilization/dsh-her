@@ -7,12 +7,17 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { PackSummary } from '../../src/protocol/index.ts'
+import type { LookPrefs } from '../shared/look.ts'
 import type { Mode } from '../shared/types.ts'
 import { loadPack, summarize } from './pack/load.ts'
 
 export interface BodySettings {
   /** Imported pack id, under `<home>/packs`. */
   pack?: string
+  /** A look (`<home>/looks/<id>`) instead of a single pack. */
+  look?: string
+  /** Per look: the scene she is in and how scenes switch. */
+  looks?: Record<string, LookPrefs>
   mode?: Mode
 }
 
@@ -31,14 +36,15 @@ export function saveSettings(home: string, settings: BodySettings): void {
   renameSync(`${file}.tmp`, file)
 }
 
-/** Every imported pack under `<home>/packs`, summarized for the brain. Broken ones are skipped. */
+/** Every pack under `<home>/packs` (imported, or a local development pack), summarized for the brain. Broken ones are skipped. */
 export function listPacks(packsDir: string): PackSummary[] {
   if (!existsSync(packsDir)) return []
   const out: PackSummary[] = []
   for (const id of readdirSync(packsDir).sort()) {
-    if (id.startsWith('.') || !existsSync(join(packsDir, id, 'pack.json'))) continue
+    const dir = join(packsDir, id)
+    if (id.startsWith('.') || !(existsSync(join(dir, 'pack.json')) || existsSync(join(dir, 'clips.json')))) continue
     try {
-      out.push(summarize(loadPack(join(packsDir, id))))
+      out.push(summarize(loadPack(dir)))
     } catch {
       // half-written or from an older format: not offered
     }

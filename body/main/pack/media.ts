@@ -1,14 +1,18 @@
 /**
  * ffmpeg for the pack import: probing, frames, seam scores, keying into the
  * stacked layout, and click masks. Uses only the ffmpeg binary (no ffprobe):
- * `DSH_HER_FFMPEG`, else `ffmpeg` on PATH. Release builds bring their own.
+ * `DSH_HER_FFMPEG`, else the app's own (installed body), else `ffmpeg` on PATH.
  */
 
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { promisify } from 'node:util'
 
 const run = promisify(execFile)
-const FFMPEG = process.env.DSH_HER_FFMPEG ?? 'ffmpeg'
+/** The installed app carries its own ffmpeg next to the app's resources; development uses the one on PATH. */
+const bundled = typeof process.resourcesPath === 'string' ? join(process.resourcesPath, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg') : undefined
+const FFMPEG = process.env.DSH_HER_FFMPEG ?? (bundled !== undefined && existsSync(bundled) ? bundled : 'ffmpeg')
 
 async function ffmpeg(args: string[]): Promise<string> {
   try {
@@ -42,6 +46,14 @@ export async function probe(file: string): Promise<Probe> {
     durationMs: Math.round((Number(duration[1]) * 3600 + Number(duration[2]) * 60 + Number(duration[3])) * 1000),
     hasAudio: /Stream #[^\n]*Audio:/.test(info),
   }
+}
+
+/** Width and height of a still image. */
+export async function stillSize(file: string): Promise<{ width: number; height: number }> {
+  const info = await ffmpeg(['-i', file])
+  const size = /Stream #[^\n]*Video:[^\n]*?(\d{2,5})x(\d{2,5})/.exec(info)
+  if (size === null) throw new Error(`读不出图片尺寸：${file}`)
+  return { width: Number(size[1]), height: Number(size[2]) }
 }
 
 /** First or last frame of a clip, as a PNG. */
@@ -87,6 +99,18 @@ export async function keyToStacked(input: string, output: string, key: { r: numb
 export async function transcodeOpaque(input: string, output: string, width: number): Promise<void> {
   await ffmpeg(['-y', '-i', input, '-vf', `scale='min(${width},iw)':-2,format=yuv420p`,
     '-an', '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-movflags', '+faststart', '-map_metadata', '-1', output])
+}
+
+/**
+ * Play a clip forward and then backward, so it ends on its own first frame:
+ * a loop for a clip whose last frame drifted (generators that take only a
+ * first frame). Scaled to `width` first, since reversing holds every frame
+ * in memory; kept near-lossless for the keying or transcoding that follows.
+ */
+export async function loopBack(input: string, output: string, width: number): Promise<void> {
+  await ffmpeg(['-y', '-i', input, '-filter_complex',
+    `[0]scale='min(${width},iw)':-2,split[a][b];[b]reverse,trim=start_frame=1,setpts=PTS-STARTPTS[r];[a][r]concat=n=2:v=1:a=0,format=yuv420p`,
+    '-an', '-c:v', 'libx264', '-preset', 'medium', '-crf', '12', output])
 }
 
 export const MASK_WIDTH = 64

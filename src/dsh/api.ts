@@ -9,28 +9,39 @@
  */
 
 import type { Character } from '../core/index.ts'
-import type { PackSummary, WindowMode } from '../protocol/index.ts'
+import type { LookView, PackSummary, WindowMode } from '../protocol/index.ts'
 import type { Fact, Episode } from '../memory/store.ts'
 import type { ReportLine } from './import-status.ts'
+import type { LookProject, WorkshopCard } from '../core/workshop.ts'
+import type { ProjectStatus } from './workshop.ts'
+import type { InstallState } from './body-install.ts'
 
 export const API_BASE = '/api/dsh-her'
 
 export interface StateView {
   platform: string
   character: Character
-  model: { provider: string; model: string } | null
-  voice: { status: string; sid: number; speed: number }
+  /** The model she uses now; `chosen` = picked on the "她" page (else the config's or DSH's default). */
+  model: { provider: string; model: string; effort?: string; chosen: boolean } | null
+  /** status: listening (local recognition); speaking: her cloud voice. */
+  voice: { status: string; speaking: { status: string; service: string; error?: string }; id: string; speed: number }
   body: {
     connected: boolean
     /** A body process is running (it may still be connecting). */
     running: boolean
-    /** This install can start a development body. */
+    /** There is a body to start (the development one, or the installed app). */
     canStart: boolean
+    /** The installed body app: installing, updating, a newer version waiting for a restart. */
+    install: InstallState
     info?: { kind: string; version: string; os: string }
     pack?: PackSummary
     packs: PackSummary[]
     activePack?: string
     mode?: WindowMode
+    /** The look on screen, with its scenes (when a look rather than a single pack is chosen). */
+    look?: LookView
+    /** The body's screens (logical size, scale), for advice on sizes. */
+    screens?: Array<{ w: number; h: number; scale: number }>
   }
   import: { state: 'idle' | 'picking' | 'running' | 'done' | 'failed'; done: number; total: number; step: string; lines: ReportLine[] }
   heard?: { text: string; at: number }
@@ -42,11 +53,28 @@ export interface ApiRuntime {
   saveCharacter(patch: Partial<Character>): Character
   expandPersona(input: { name: string; idea: string; callYou: string; pronoun: string }): Promise<string>
   tryPersona(input: { name: string; persona: string; callYou: string; pronoun: string; history: Array<{ who: 'you' | 'her'; text: string }>; message: string }): Promise<string>
-  previewVoice(sid: number, speed: number, text: string): Promise<{ wav: string; durationMs: number } | undefined>
+  previewVoice(id: string, speed: number, text: string): Promise<{ audio: string; format: 'wav' | 'mp3'; durationMs: number }>
   startBody(): string
+  /** Download and install the body app (or a newer one); progress shows in the state. */
+  installBody(): void
+  /** Stop the running body and start it again (to use a newly installed version). */
+  restartBody(): Promise<void>
   setMode(mode: WindowMode): void
   pickPack(): void
   usePack(packId: string): void
+  setLook(change: { auto?: boolean; locked?: boolean; go?: string; on?: Record<string, boolean> }): void
+  /** 形象工坊: projects in the materials folder; create, save, open, frame a scene, import. */
+  workshopList(): Array<{ project: LookProject; status: ProjectStatus }>
+  workshopNew(name: string): { project: LookProject; status: ProjectStatus }
+  workshopSave(project: unknown): { project: LookProject; status: ProjectStatus }
+  /** Copy a project to a folder the user picks on the body (undefined: cancelled). */
+  workshopExport(id: string, media: boolean): Promise<{ dir: string; files: number } | undefined>
+  /** Bring in a project folder (or its 形象.json) the user picks on the body. */
+  workshopImportProject(): Promise<{ project: LookProject; status: ProjectStatus } | undefined>
+  workshopExamples(): Array<{ card: WorkshopCard; file: string; label: string; ready: boolean }>
+  workshopOpen(id: string): void
+  workshopFrame(id: string, sceneId: string): void
+  workshopImport(id: string): void
   memoryRemove(ids: string[]): number
   memoryConfirm(ids: string[]): number
   digest(): Promise<string>
@@ -85,11 +113,18 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
         if (p !== '他' && p !== '她' && p !== 'TA') throw new ApiError('人称只能是 他 / 她 / TA')
         patch.pronoun = p
       }
-      if (body.sid !== undefined || body.speed !== undefined) {
+      if (body.voice !== undefined || body.speed !== undefined) {
         const current = rt.state().character.voice
-        patch.voice = { sid: body.sid === undefined ? current.sid : num(body.sid, '音色'), speed: body.speed === undefined ? current.speed : num(body.speed, '语速') }
+        patch.voice = { id: body.voice === undefined ? current.id : str(body.voice, '音色'), speed: body.speed === undefined ? current.speed : num(body.speed, '语速') }
       }
       if (body.onboarded !== undefined) patch.onboarded = body.onboarded === true
+      if (body.model !== undefined) {
+        if (body.model === null) patch.model = undefined
+        else {
+          const m = body.model as Record<string, unknown>
+          patch.model = { provider: str(m.provider, '模型'), model: str(m.model, '模型'), ...(m.effort ? { effort: str(m.effort, '思考强度') } : {}) }
+        }
+      }
       rt.saveCharacter(patch)
       return withState()
     },
@@ -103,11 +138,7 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
         message: str(body.message, '消息'),
       }),
     }),
-    '/voice/preview': async body => {
-      const audio = await rt.previewVoice(num(body.sid, '音色'), num(body.speed ?? 1, '语速'), str(body.text ?? '你好呀，我在你桌面上等你好久啦。', '试听的话'))
-      if (audio === undefined) throw new ApiError('她的声音还没准备好（语音模型可能还在下载）')
-      return audio
-    },
+    '/voice/preview': async body => rt.previewVoice(str(body.voice, '音色'), num(body.speed ?? 1, '语速'), str(body.text ?? '你好呀，我在你桌面上等你好久啦。', '试听的话')),
     '/body/start': async () => withState({ message: rt.startBody() }),
     '/body/mode': async body => {
       const mode = str(body.mode, '模式') as WindowMode
@@ -121,6 +152,43 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
     },
     '/pack/use': async body => {
       rt.usePack(str(body.packId, '外形包'))
+      return withState()
+    },
+    '/look/set': async body => {
+      const change: Parameters<ApiRuntime['setLook']>[0] = {}
+      if (typeof body.auto === 'boolean') change.auto = body.auto
+      if (typeof body.locked === 'boolean') change.locked = body.locked
+      if (typeof body.go === 'string') change.go = body.go
+      if (typeof body.on === 'object' && body.on !== null) {
+        change.on = Object.fromEntries(Object.entries(body.on as Record<string, unknown>).filter(([, v]) => typeof v === 'boolean')) as Record<string, boolean>
+      }
+      rt.setLook(change)
+      return withState()
+    },
+    '/body/install': async () => {
+      rt.installBody()
+      return withState()
+    },
+    '/body/restart': async () => {
+      await rt.restartBody()
+      return withState()
+    },
+    '/workshop/list': async () => ({ projects: rt.workshopList() }),
+    '/workshop/new': async body => rt.workshopNew(str(body.name, '名字').trim()),
+    '/workshop/save': async body => rt.workshopSave(body.project),
+    '/workshop/export': async body => (await rt.workshopExport(str(body.id, '项目'), body.media === true)) ?? { cancelled: true },
+    '/workshop/import-project': async () => (await rt.workshopImportProject()) ?? { cancelled: true },
+    '/workshop/examples': async () => ({ examples: rt.workshopExamples() }),
+    '/workshop/open': async body => {
+      rt.workshopOpen(str(body.id, '项目'))
+      return {}
+    },
+    '/workshop/frame': async body => {
+      rt.workshopFrame(str(body.id, '项目'), str(body.scene, '场景'))
+      return {}
+    },
+    '/workshop/import': async body => {
+      rt.workshopImport(str(body.id, '项目'))
       return withState()
     },
     '/memory/remove': async body => withState({ removed: rt.memoryRemove(ids(body.ids)) }),

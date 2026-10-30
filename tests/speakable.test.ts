@@ -17,3 +17,9 @@ test('markdown, links, code and list bullets are not read out', () => {
 test('performance tags drive the body and are never spoken', () => {
   assert.equal(speakable('〔开心〕今天天气真好呀〔动作:wave〕'), '今天天气真好呀')
 })
+
+test('stage directions are not spoken; a long bracket is', () => {
+  assert.equal(speakable('【瞪他】赶紧睡（笑），真的(sighs)。'), '赶紧睡，真的。')
+  assert.equal(speakable('看[这里](https://a.b)。'), '看这里。')
+  assert.equal(speakable('那部电影（就是我们上次在电影院没看完的那部）挺好看。'), '那部电影（就是我们上次在电影院没看完的那部）挺好看。')
+})

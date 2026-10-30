@@ -4,9 +4,10 @@ lib/
 *.tsbuildinfo
 .DS_Store
 
-# Electron body build output.
+# Electron body build output, and packaged bodies (body/scripts/package.mjs).
 body/dist/
 body/out/
+release/
 
 # Voice models are downloaded on first use, never committed.
 models/
@@ -16,3 +17,29 @@ dev-assets/
 
 # Local dev-server launch config for the Claude app.
 .claude/
+
+# Scratch folders other agents leave behind (may hold signed download links).
+.tmp/
+
+# Code only: pictures, videos, audio, models and archives never go in the repository
+# (looks and examples live in ~/.dsh-her or in a Release's attachments).
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.bmp
+*.ico
+*.icns
+*.mp4
+*.mov
+*.webm
+*.mkv
+*.avi
+*.mp3
+*.wav
+*.m4a
+*.ogg
+*.flac
+*.onnx
+*.zip

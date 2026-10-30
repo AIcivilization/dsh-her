@@ -7,7 +7,9 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { herApi, type StateView } from './api.ts'
-import { BodyStatus, Dot, MemoryView, MicCheck, ModePicker, PackPicker, PersonaEditor, VoicePicker, type Apply } from './parts.tsx'
+import { voiceName } from '../core/voices.ts'
+import { Workshop } from './Workshop.tsx'
+import { BodyStatus, Dot, KeyHelp, MemoryView, MicCheck, ModelPicker, ModePicker, PackPicker, PersonaEditor, ScenePicker, VoicePicker, type Apply } from './parts.tsx'
 
 const POLL_MS = 2000
 
@@ -54,7 +56,7 @@ export function HerPage() {
   )
 }
 
-const STEPS = ['检查', '身体', '外形', '人格', '声音', '麦克风', '放到桌面'] as const
+const STEPS = ['检查', '身体', '外形', '人设', '声音', '麦克风', '放到桌面'] as const
 
 function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDone: () => void }) {
   const [step, setStep] = useState(0)
@@ -89,7 +91,9 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
         <div className="her-card">
           <h2>先看看准备好了没有</h2>
           <p>{state.model === null ? <><Dot tone="bad" />dsh 还没有可用的模型。请先在 dsh 设置里配好一个模型（比如 DeepSeek），再回来。</> : <><Dot tone="ok" />大脑用的模型：{state.model.provider} / {state.model.model}</>}</p>
-          <p><Dot tone={state.voice.status === 'ready' ? 'ok' : state.voice.status === 'off' ? 'off' : 'warn'} />本地语音：{voiceText(state.voice.status)}</p>
+          <p><Dot tone={toneOf(state.voice.speaking.status)} />她的声音：{speakingText(state.voice.speaking.status, state.voice.speaking.service)}</p>
+          {(state.voice.speaking.status === 'no-key' || state.voice.speaking.status === 'no-quota') && <KeyHelp state={state} />}
+          <p><Dot tone={toneOf(state.voice.status)} />听你说话：{listeningText(state.voice.status)}</p>
           <p><Dot tone="ok" />系统：{platformText(state.platform)}</p>
           {nav(state.model !== null, state.model === null ? '没有模型她没法说话' : undefined)}
         </div>
@@ -145,8 +149,8 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
   )
 }
 
-type Tab = 'overview' | 'look' | 'persona' | 'voice' | 'memory'
-const TABS: Array<[Tab, string]> = [['overview', '概况'], ['look', '外形'], ['persona', '人格'], ['voice', '声音'], ['memory', '她记得的事']]
+type Tab = 'overview' | 'settings' | 'memory' | 'workshop'
+const TABS: Array<[Tab, string]> = [['overview', '概况'], ['settings', '设置'], ['memory', '她记得的事'], ['workshop', '形象工坊']]
 
 function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; onWizard: () => void }) {
   const [tab, setTab] = useState<Tab>('overview')
@@ -166,33 +170,70 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
             <BodyStatus state={state} apply={apply} />
           </div>
           <div className="her-card">
-            <h2>放在哪里</h2>
-            <ModePicker state={state} apply={apply} />
-          </div>
-          <div className="her-card">
             <h2>大脑</h2>
-            <p>{state.model === null ? <><Dot tone="bad" />没有可用的模型</> : <><Dot tone="ok" />{state.model.provider} / {state.model.model}</>}</p>
-            <p><Dot tone={state.voice.status === 'ready' ? 'ok' : 'warn'} />本地语音：{voiceText(state.voice.status)}（音色 {state.character.voice.sid}）</p>
+            <p>{state.model === null ? <><Dot tone="bad" />没有可用的模型</> : <><Dot tone="ok" />{state.model.provider} / {state.model.model}{state.model.chosen ? '' : '（dsh 默认）'}</>}</p>
+            <p><Dot tone={toneOf(state.voice.speaking.status)} />她的声音：{speakingText(state.voice.speaking.status, state.voice.speaking.service)}（{voiceName(state.character.voice.id)}）</p>
+            {(state.voice.speaking.status === 'no-key' || state.voice.speaking.status === 'no-quota') && <KeyHelp state={state} />}
+            <p><Dot tone={toneOf(state.voice.status)} />听你说话：{listeningText(state.voice.status)}</p>
             <p className="her-muted">记得 {state.memory.facts.length} 件关于你的事、{state.memory.episodes.length} 个事件，写了 {state.memory.diary.length} 天日记。</p>
             {state.heard !== undefined && <p className="her-faint">最近听到：「{state.heard.text}」</p>}
           </div>
+          <p className="her-muted">改人设、换声音、外形、模型，都在"设置"里；她记住了什么，在"她记得的事"里。</p>
         </>
       )}
-      {tab === 'look' && <div className="her-card"><h2>外形</h2><PackPicker state={state} apply={apply} /></div>}
-      {tab === 'persona' && <div className="her-card"><h2>人格</h2><PersonaEditor state={state} apply={apply} /></div>}
-      {tab === 'voice' && <div className="her-card"><h2>声音</h2><VoicePicker state={state} apply={apply} saveLabel="保存" /></div>}
+      {tab === 'settings' && <Settings state={state} apply={apply} />}
       {tab === 'memory' && <MemoryView state={state} apply={apply} />}
+      {tab === 'workshop' && <Workshop state={state} apply={apply} />}
     </>
   )
 }
 
-function voiceText(status: string): string {
+const SECTIONS = [['persona', '人设'], ['voice', '声音'], ['look', '外形'], ['model', '模型'], ['place', '放在哪里']] as const
+
+/** Everything she can be set to, on one page; the links on top jump to each part. */
+function Settings({ state, apply }: { state: StateView; apply: Apply }) {
+  const jump = (id: string) => document.getElementById(`her-set-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  return (
+    <>
+      <div className="her-steps">
+        {SECTIONS.map(([id, label]) => <button key={id} className="her-step" onClick={() => jump(id)}>{label}</button>)}
+      </div>
+      <div className="her-card" id="her-set-persona"><h2>人设</h2><PersonaEditor state={state} apply={apply} /></div>
+      <div className="her-card" id="her-set-voice"><h2>声音</h2><VoicePicker state={state} apply={apply} saveLabel="用这个声音" /></div>
+      <div className="her-card" id="her-set-look"><h2>外形</h2><PackPicker state={state} apply={apply} /><ScenePicker state={state} apply={apply} /></div>
+      <div className="her-card" id="her-set-model"><h2>模型</h2><ModelPicker state={state} apply={apply} /></div>
+      <div className="her-card" id="her-set-place"><h2>放在哪里</h2><ModePicker state={state} apply={apply} /></div>
+    </>
+  )
+}
+
+function toneOf(status: string): 'ok' | 'warn' | 'bad' | 'off' {
+  if (status === 'ready') return 'ok'
+  if (status === 'off') return 'off'
+  if (status === 'no-key' || status === 'no-quota' || status === 'failed') return 'bad'
+  return 'warn'
+}
+
+function speakingText(status: string, service: string): string {
+  const name = service === 'edge' ? '微软 Edge' : '阿里云百炼'
   switch (status) {
-    case 'ready': return '已就绪'
-    case 'downloading': return '正在下载语音模型（约 400 MB，只下一次）'
-    case 'loading': return '正在加载'
+    case 'ready': return `已就绪（${name}）`
+    case 'checking': return `正在连接${name}`
+    case 'installing': return '正在准备 Edge 语音组件（第一次用，一两分钟）'
+    case 'no-key': return '还没有百炼的 API key，现在只用文字回答'
+    case 'no-quota': return '百炼的额度用完了，现在只用文字回答'
+    case 'failed': return `${name}的语音出错了，暂时只用文字（会自动重试）`
     case 'off': return '已关闭，只用文字'
-    case 'failed': return '出错了，暂时只用文字'
+    default: return status
+  }
+}
+
+function listeningText(status: string): string {
+  switch (status) {
+    case 'ready': return '已就绪（本地识别）'
+    case 'downloading': return '正在下载识别模型（约 170 MB，只下一次）'
+    case 'loading': return '正在加载'
+    case 'failed': return '出错了，暂时只能打字'
     default: return status
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "dsh-her",
-  "version": "0.1.0-dev.0",
+  "version": "0.1.0-beta.1",
   "description": "A desktop companion for DeepSeek Harness (dsh): she lives on your real desktop (on top of your windows or inside the wallpaper), talks with you by voice and remembers you. · DSH 桌面女友：住在你真正的桌面上，能语音聊天、记得你。",
   "type": "module",
   "main": "lib/index.js",
@@ -24,7 +24,8 @@
   "files": [
     "lib",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "examples"
   ],
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && tsc -p tsconfig.json && node scripts/build-client.mjs",

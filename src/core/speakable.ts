@@ -10,6 +10,8 @@ const MARKDOWN_MARKS = /[*_~#>|`]+/g
 const LIST_BULLET = /^\s*(?:[-+•]|\d+[.)、])\s+/
 /** Performance tags such as 〔开心〕 or 〔动作:wave〕 drive the body and are never spoken (M3). */
 const PERFORMANCE_TAG = /〔[^〕]*〕/g
+/** Stage directions the model writes despite her prompt: 【瞪他】, （笑）, (sighs). Short ones only: a long bracket is content. */
+const STAGE_DIRECTION = /【[^】]*】|（[^）]{1,8}）|\([^)]{1,12}\)/g
 
 export function speakable(text: string): string {
   return text
@@ -17,6 +19,7 @@ export function speakable(text: string): string {
     // A markdown link keeps its words; this must run before bare URLs are dropped.
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
     .replace(URL, '')
+    .replace(STAGE_DIRECTION, '')
     .replace(INLINE_CODE, '')
     .replace(LIST_BULLET, '')
     .replace(MARKDOWN_MARKS, '')

@@ -19,7 +19,7 @@ const TAG = /〔([^〕]{1,24})〕/g
 
 /** Light actions are acted inline; heavy ones (outfits, stored lines) go through the play_action tool. */
 export function isHeavy(action: PackSummary['actions'][number]): boolean {
-  return action.id.startsWith('outfit_') || action.id.startsWith('line_') || (action.durationMs ?? 0) > 6000
+  return action.id.startsWith('outfit_') || action.id.startsWith('line_') || action.id.startsWith('scene_') || (action.durationMs ?? 0) > 6000
 }
 
 export function extractCues(text: string, pack: PackSummary | undefined): { text: string; cues: Cue[] } {
@@ -54,9 +54,9 @@ export function performanceSection(pack: PackSummary | undefined): string {
     lines.push('标记放在对应那句话的开头，偶尔用，不要每句都加。')
   }
   if (heavy.length > 0) {
-    lines.push('需要较长时间的表演（离开画面、换衣服、说准备好的话），调用 play_action 工具，等它做完再接着说。调用前先简短说一句，比如"好，等我一下"：')
+    lines.push('需要较长时间的表演（离开画面、换衣服、换个地方、说准备好的话），调用 play_action 工具，等它做完再接着说。调用前先简短说一句，比如"好，等我一下"：')
     for (const action of heavy) lines.push(`- ${action.id}：${action.desc}`)
   }
-  lines.push('只有上面列出的表演能做；没列出的，用说的。')
+  lines.push('只有上面列出的表演能做，标记必须一字不差；不要自己编标记（比如〔歪头〕），也不要用【】或括号写动作；没列出的，用说的。')
   return lines.join('\n')
 }

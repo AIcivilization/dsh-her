@@ -49,10 +49,34 @@ test('states loop at the current anchor; a missing state falls back to idle ther
   assert.match(play(director, 1)[0]!, /^stand_idle/)
 })
 
-test('two idle loops alternate instead of repeating', () => {
+test('variants of the same state take turns, never twice running', () => {
   const director = new Director(clips, macros, 'stand')
   const ids = play(director, 10)
   for (let i = 1; i < ids.length; i++) assert.notEqual(ids[i], ids[i - 1])
+})
+
+test('a state only found elsewhere is reached (here by a cut), and idle brings her back', () => {
+  const pack = [
+    c('idle_a', 'main', 'main', 'state', 'idle'), c('idle_b', 'main', 'main', 'state', 'idle'),
+    c('fall_asleep', 'main', 'asleep', 'transition', 'transition', 9000), c('sleeping', 'asleep', 'asleep', 'state', 'sleep'),
+  ]
+  const director = new Director(pack, [], 'main')
+  play(director, 2)
+  director.setState('sleep')
+  assert.deepEqual(play(director, 3), ['fall_asleep', 'sleeping', 'sleeping'])
+  director.setState('idle')
+  assert.match(play(director, 1)[0]!, /^idle_/)
+  assert.equal(director.at, 'main')
+})
+
+test('a look with no clip leading to it is reached by a straight cut, and stays', async () => {
+  const looks = [c('a', 'look:a', 'look:a', 'state', 'idle'), c('b', 'look:b', 'look:b', 'state', 'idle'), c('j', 'look:jk', 'look:jk', 'state', 'idle')]
+  const director = new Director(looks, [{ action: 'look_jk', goTo: 'look:jk', jump: true }, { action: 'look_b', goTo: 'look:b', jump: true }], 'look:a')
+  assert.deepEqual(play(director, 2), ['a', 'a'])
+  const done = director.act('look_jk')
+  assert.deepEqual(play(director, 3), ['j', 'j', 'j'])
+  assert.deepEqual(await done, { ok: true })
+  assert.equal(director.at, 'look:jk')
 })
 
 test('an action elsewhere walks there first, then settles', async () => {

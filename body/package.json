@@ -1,6 +1,6 @@
 {
   "name": "dsh-her-body",
-  "version": "0.1.0-dev.0",
+  "version": "0.1.0-beta.1",
   "private": true,
   "type": "module",
   "description": "dsh-her body: the desktop app she lives in (on top of your windows or inside the wallpaper).",
@@ -9,6 +9,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "start": "npm run build && electron .",
+    "package": "node scripts/package.mjs",
     "dev-pack": "node scripts/make-dev-pack.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

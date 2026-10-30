@@ -22,23 +22,29 @@
  * Memory: files under `<home>/characters/<cid>/memory/` (src/memory). She
  * writes with `remember`, reads with `recall`, and her prompt carries what she
  * knows about you, her last diary days and what has a date today or tomorrow.
+ * A minute after each talk, a short note picks out of the new turns what is
+ * worth keeping (as candidates), so it shows on the "她记得的事" page at once.
  * Once a day (30 minutes after you last talked, or from 23:30) a digest reads
  * the day back from her session and writes her diary page and candidates.
  *
  * Her replies are also logged with timings to `<home>/logs/stream.jsonl`.
  */
 
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { buildSystemPrompt, extractCues, herPaths, invalidCharacter, judgeBargeIn, loadCharacter, memoryContext, performanceSection, readingMs, saveCharacter, speakable, type Character } from '../core/index.ts'
-import { digestPrompt, parseDigest, transcriptOf } from '../memory/digest.ts'
+import { buildSystemPrompt, extractCues, herPaths, invalidCharacter, judgeBargeIn, loadCharacter, memoryContext, performanceSection, readingMs, saveCharacter, serviceOf, speakable, type Character } from '../core/index.ts'
+import { digestPrompt, notePrompt, parseDigest, transcriptOf } from '../memory/digest.ts'
 import { dayOf, FileMemory } from '../memory/store.ts'
-import { PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type PackSummary, type WindowMode } from '../protocol/index.ts'
+import { PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type LookView, type PackSummary, type WindowMode } from '../protocol/index.ts'
 import { BrainServer } from '../server/brain-server.ts'
 import { API_BASE, apiHandlers, handle, type ApiRuntime } from './api.ts'
-import { bodyRunning, findDevBody, launchBody } from './body-launcher.ts'
+import { bodyRunning, findDevBody, launchBody, type LaunchPlan } from './body-launcher.ts'
+import { compareVersions, fetchManifest, install, installedBody, installedPlan, type InstallState } from './body-install.ts'
 import { IDLE_IMPORT, type ImportStatus } from './import-status.ts'
+import { DESK_DIR, newProject, sceneDir } from '../core/workshop.ts'
+import { exampleFile, examples, exportProject, findProject, importProject, listProjects, prepareImport, projectStatus, saveProject } from './workshop.ts'
 import type { HerConfig } from './config.ts'
 import { HerSession, type DshServices, type ModelRoute } from './her-session.ts'
 import { heardText, SpeechQueue } from '../voice/speech-queue.ts'
@@ -71,6 +77,9 @@ const DIGEST_IDLE_MS = 30 * 60_000
 const DIGEST_HOUR = 23
 const DIGEST_MINUTE = 30
 const DIGEST_CHECK_MS = 5 * 60_000
+/** A note is taken once you have been quiet this long and her reply is over. */
+const NOTE_QUIET_MS = 60_000
+const NOTE_CHECK_MS = 15_000
 
 const STOP_WORDS = new Set(['停', '停下', 'stop'])
 const MEMORY_WORDS = new Set(['记忆', 'memory'])
@@ -79,6 +88,9 @@ const DIAGNOSE = '诊断'
 
 /** How long after DSH starts to wait for a running body before starting one. */
 const LAUNCH_AFTER_MS = 3000
+/** The installed body checks the release for a newer version this soon after start, then this often. */
+const UPDATE_FIRST_MS = 60_000
+const UPDATE_CHECK_MS = 6 * 60 * 60_000
 /**
  * A turn that has not started this long after you spoke is stuck. Seen in M4:
  * an effort id the route does not accept (`off`) left her session silent with
@@ -120,7 +132,7 @@ export function apply(ctx: Context, config: HerConfig): void {
     persona: config.character.persona,
     callYou: '',
     pronoun: '他',
-    voice: { sid: config.voice.sid, speed: config.voice.speed },
+    voice: { id: config.voice.voice, speed: config.voice.speed },
     onboarded: false,
   })
   /** When you last talked to her, and the day of it (for the digest). */
@@ -172,6 +184,38 @@ export function apply(ctx: Context, config: HerConfig): void {
     return `${day} 整理好了：日记 1 篇，新的候选事实 ${added.facts} 条，事件 ${added.episodes} 条`
   }
 
+  /** Turns up to here have been noted (the daily digest still reads the whole day). */
+  let notedUntil = Date.now()
+  let noting: Promise<void> | undefined
+
+  /** Note what in the turns since the last note is worth keeping; never throws. */
+  const runNote = async (): Promise<void> => {
+    const id = session?.sessionId
+    const query = services?.sessionQuery
+    if (id === undefined || query === undefined) return
+    const from = notedUntil
+    const to = Date.now()
+    notedUntil = to
+    const lines = transcriptOf((await query.readSession(id)).events as Array<{ type: string; time?: number; data: unknown }>, from, to)
+    if (!lines.some(l => l.who === 'you')) return
+    const now = new Date()
+    const { facts, episodes } = memory.list()
+    const prompt = notePrompt(character.name, dayOf(now), lines, facts.map(f => f.text), episodes.map(e => (e.due === undefined ? e.text : `${e.text}（${e.due}）`)), character.pronoun)
+    const parsed = parseDigest(await complete(prompt.system, prompt.user, 800))
+    if (parsed === undefined) {
+      log({ event: 'note', error: 'unparsable' })
+      return
+    }
+    log({ event: 'note', lines: lines.length, ...memory.keep(parsed, now) })
+  }
+
+  const noteTick = () => {
+    if (noting !== undefined || current !== undefined || lastTalkAt <= notedUntil || Date.now() - lastTalkAt < NOTE_QUIET_MS) return
+    noting = runNote()
+      .catch((error: Error) => ctx.logger.warn(`dsh-her: note failed (${error.message})`))
+      .finally(() => { noting = undefined })
+  }
+
   /** Every few minutes: settle old candidates, and digest a day that has ended its talking. */
   const digestTick = () => {
     const now = new Date()
@@ -202,17 +246,91 @@ export function apply(ctx: Context, config: HerConfig): void {
   /** What the body reports about itself, for the "她" page. */
   let bodyPacks: PackSummary[] = []
   let activePack: string | undefined
+  let bodyLook: LookView | undefined
   let bodyMode: WindowMode | undefined
   let importStatus: ImportStatus = IDLE_IMPORT
   let lastHeard: { text: string; at: number } | undefined
   let discovery: { url: string; token: string } | undefined
   /** Actions sent to a body, waiting for its `act.done`. */
-  const pendingActs = new Map<string, (result: { ok: boolean; reason?: string }) => void>()
+  /** The installed body: download, check, install, update (body-install.ts). */
+  const devBody = (): ReturnType<typeof findDevBody> => (config.body.useDev ? findDevBody() : { missing: 'useDev is off' })
+  let installState: InstallState = { state: 'idle', dev: !('missing' in devBody()) }
+  /** The body to start: the development one in the repository when there is one, else the installed app. */
+  const bodyPlan = (): LaunchPlan | { missing: string } => {
+    const dev = devBody()
+    if (!('missing' in dev)) return dev
+    return installedPlan(paths.root) ?? { missing: '还没有安装，在「她」页面点"下载安装身体"' }
+  }
+  /**
+   * Install the release's body when there is none, or a newer one (`asked`:
+   * the user pressed the button, so a first install starts the body too).
+   * A development setup never updates itself.
+   */
+  const installLatest = async (asked: boolean): Promise<void> => {
+    if (installState.dev && !asked) return
+    const before = installedBody(paths.root)
+    if (!asked && before === undefined) return
+    installState = { ...installState, state: 'checking' }
+    try {
+      const manifest = await fetchManifest(config.body.releases)
+      installState = { ...installState, latest: manifest.version }
+      if (before !== undefined && compareVersions(manifest.version, before.version) <= 0) {
+        installState = { ...installState, state: 'idle' }
+        return
+      }
+      installState = { ...installState, state: 'downloading', done: 0, total: 0 }
+      const installed = await install(paths.root, config.body.releases, manifest, (done, total) => {
+        installState = { ...installState, state: done < total ? 'downloading' : 'installing', done, total }
+      })
+      installState = { ...installState, state: 'idle', installed: installed.version, restart: before !== undefined && (server?.bodies.length ?? 0) > 0 }
+      log({ event: 'body-installed', version: installed.version })
+      if (before === undefined && discovery !== undefined && (server?.bodies.length ?? 0) === 0 && !bodyRunning(paths.root)) {
+        const plan = bodyPlan()
+        if (!('missing' in plan)) launchBody(plan, { url: discovery.url, token: discovery.token, home: paths.root, pack: config.body.pack })
+      }
+    } catch (error) {
+      installState = { ...installState, state: 'failed', error: (error as Error).message }
+      ctx.logger.warn(`dsh-her: body install/update failed (${(error as Error).message})`)
+    }
+  }
+  /** Stop the running body (it writes its pid to body.json) and wait for it to go. */
+  const stopBody = async (): Promise<void> => {
+    let pid: number | undefined
+    try {
+      pid = (JSON.parse(readFileSync(join(paths.root, 'body.json'), 'utf8')) as { pid?: number }).pid
+    } catch {
+      return
+    }
+    if (typeof pid !== 'number') return
+    try {
+      process.kill(pid)
+    } catch {
+      return
+    }
+    for (let i = 0; i < 50 && bodyRunning(paths.root); i++) await new Promise(r => setTimeout(r, 100))
+  }
+  /** Folder dialogs open on the body, waiting for the user's choice. */
+  const folderPicks = new Map<string, (path: string | undefined) => void>()
+  /** Ask the body to show a folder dialog; undefined when cancelled. */
+  const pickFolder = (title: string, button: string, file?: string): Promise<string | undefined> => {
+    const body = server?.bodies.at(-1)
+    if (body === undefined) return Promise.reject(new Error('身体还没连上：选文件夹的窗口要在身体那边弹出来'))
+    const id = `f${Date.now().toString(36)}`
+    return new Promise(resolve => {
+      const timer = setTimeout(() => { folderPicks.delete(id); resolve(undefined) }, 10 * 60_000)
+      folderPicks.set(id, path => { clearTimeout(timer); resolve(path) })
+      body.send({ t: 'folder.pick', id, title, button, ...(file === undefined ? {} : { file }) })
+    })
+  }
+  /** Actions sent to a body and not done yet, with the body doing each. */
+  const pendingActs = new Map<string, { body: number; settle: (result: { ok: boolean; reason?: string }) => void }>()
   let nextAct = 1
 
   /** Have the body perform an action and wait (at most 90 s) for it to finish. */
   const playAction = (action: string): Promise<{ ok: boolean; reason?: string; transcript?: string }> => {
-    const body = server?.bodies.at(-1)
+    // The latest body that shows her (has packs), not a text-only client that connected after it.
+    const bodies = server?.bodies ?? []
+    const body = [...bodies].reverse().find(b => b.hello.packs.length > 0) ?? bodies.at(-1)
     log({ event: 'play-action', action, body: body?.id ?? null, packActions: bodyPack?.actions.map(a => a.id) ?? null })
     if (body === undefined) return Promise.resolve({ ok: false, reason: 'no body' })
     const known = bodyPack?.actions.find(a => a.id === action)
@@ -223,10 +341,13 @@ export function apply(ctx: Context, config: HerConfig): void {
         pendingActs.delete(id)
         resolve({ ok: false, reason: 'timeout' })
       }, 90_000)
-      pendingActs.set(id, result => {
-        clearTimeout(timer)
-        log({ event: 'act', action, ...result })
-        resolve(known.transcript === undefined || !result.ok ? result : { ...result, transcript: known.transcript })
+      pendingActs.set(id, {
+        body: body.id,
+        settle: result => {
+          clearTimeout(timer)
+          log({ event: 'act', action, ...result })
+          resolve(known.transcript === undefined || !result.ok ? result : { ...result, transcript: known.transcript })
+        },
       })
       body.send({ t: 'act', cid, id, action })
     })
@@ -264,7 +385,10 @@ export function apply(ctx: Context, config: HerConfig): void {
     }
   }
 
+  /** Her model: the "她" page's choice, else the plugin config's, else DSH's default. */
   const route = (): ModelRoute | undefined => {
+    const chosen = character.model
+    if (chosen !== undefined) return { provider: chosen.provider, model: chosen.model, ...(chosen.effort ? { reasoningEffort: chosen.effort } : {}) }
     const effort = config.reasoningEffort === '' ? {} : { reasoningEffort: config.reasoningEffort }
     if (config.provider !== '' && config.model !== '') return { provider: config.provider, model: config.model, ...effort }
     const selected = services?.agentDefaultModel?.currentSelection()
@@ -324,11 +448,13 @@ export function apply(ctx: Context, config: HerConfig): void {
   const onBodyMessage = (message: BodyMessage, audio: Uint8Array | undefined) => {
     switch (message.t) {
       case 'user.text': {
+        voice?.warm()
         const text = message.text.trim()
         if (text !== '') hear(text, 'text')
         break
       }
       case 'user.utterance': {
+        voice?.warm()
         if (message.text !== undefined) {
           broadcast({ t: 'heard', cid, uttId: message.uttId, text: message.text })
           if (message.text.trim() !== '') hear(message.text.trim(), 'voice')
@@ -362,7 +488,7 @@ export function apply(ctx: Context, config: HerConfig): void {
         interrupted(message.uid, message.seq, message.playedMs)
         break
       case 'act.done': {
-        const settle = pendingActs.get(message.id)
+        const settle = pendingActs.get(message.id)?.settle
         pendingActs.delete(message.id)
         settle?.({ ok: message.ok, ...(message.reason === undefined ? {} : { reason: message.reason }) })
         break
@@ -375,13 +501,48 @@ export function apply(ctx: Context, config: HerConfig): void {
       case 'mode.changed':
         bodyMode = message.mode
         break
+      case 'folder.picked':
+        folderPicks.get(message.id)?.(message.path)
+        folderPicks.delete(message.id)
+        break
+      case 'look.state':
+        bodyLook = message.look ?? undefined
+        break
       case 'pack.progress':
         importStatus = { ...importStatus, state: 'running', done: message.done, total: message.total, step: message.step }
         break
       case 'pack.report':
         importStatus = { ...importStatus, state: message.ok ? 'done' : 'failed', lines: message.lines }
         break
+      case 'panel.get':
+        broadcast(panel())
+        break
+      case 'panel.set': {
+        let error: string | undefined
+        try {
+          if (message.character !== undefined) api.saveCharacter(message.character)
+          if (message.forget !== undefined) api.memoryRemove(message.forget)
+          if (message.confirm !== undefined) api.memoryConfirm(message.confirm)
+        } catch (failure) {
+          error = (failure as Error).message
+        }
+        broadcast(panel(error))
+        break
+      }
     }
+  }
+
+  /** The body's main screen in device pixels, for photo sizes in the prompts. */
+  const mainScreen = (): { width: number; height: number } | undefined => {
+    const first = server?.bodies.at(-1)?.hello.caps.screens[0]
+    return first === undefined ? undefined : { width: Math.round(first.w * first.scale), height: Math.round(first.h * first.scale) }
+  }
+
+  /** Who she is and what she remembers, for the body's settings window. */
+  const panel = (error?: string): BrainMessage => {
+    const { facts, episodes, diary } = memory.list()
+    const { name, persona, callYou, pronoun } = character
+    return { t: 'panel', cid, character: { name, persona, callYou, pronoun }, memory: { facts, episodes, diary }, ...(error === undefined ? {} : { error }) }
   }
 
   /** The "她" page's view of everything, and what it can change. */
@@ -393,17 +554,20 @@ export function apply(ctx: Context, config: HerConfig): void {
       return {
         platform: process.platform,
         character,
-        model: target === undefined ? null : { provider: target.provider, model: target.model },
-        voice: { status: voice?.status ?? 'off', sid: character.voice.sid, speed: character.voice.speed },
+        model: target === undefined ? null : { provider: target.provider, model: target.model, ...(target.reasoningEffort === undefined ? {} : { effort: target.reasoningEffort }), chosen: character.model !== undefined },
+        voice: { status: voice?.status ?? 'off', speaking: voice?.speaking ?? { status: 'off', service: serviceOf(character.voice.id) }, id: character.voice.id, speed: character.voice.speed },
         body: {
           connected: body !== undefined,
           running: body !== undefined || bodyRunning(paths.root),
-          canStart: !('missing' in findDevBody()),
+          canStart: !('missing' in bodyPlan()),
+          install: { ...installState, ...(installedBody(paths.root) === undefined ? {} : { installed: installedBody(paths.root)!.version }) },
           ...(body === undefined ? {} : { info: { kind: body.hello.body.kind, version: body.hello.body.version, os: body.hello.body.os } }),
           ...(bodyPack === undefined ? {} : { pack: bodyPack }),
           packs: bodyPacks,
           ...(activePack === undefined ? {} : { activePack }),
           ...(bodyMode === undefined ? {} : { mode: bodyMode }),
+          ...(bodyLook === undefined ? {} : { look: bodyLook }),
+          ...(body === undefined ? {} : { screens: body.hello.caps.screens.map(({ w, h, scale }) => ({ w, h, scale })) }),
         },
         import: importStatus,
         ...(lastHeard === undefined ? {} : { heard: lastHeard }),
@@ -412,12 +576,20 @@ export function apply(ctx: Context, config: HerConfig): void {
     },
     saveCharacter: patch => {
       const next: Character = { ...character, ...patch, voice: { ...character.voice, ...patch.voice } }
+      if ('model' in patch && patch.model === undefined) delete next.model
       const problem = invalidCharacter(next)
       if (problem !== undefined) throw new Error(problem)
+      const modelChanged = JSON.stringify(next.model) !== JSON.stringify(character.model)
       saveCharacter(dir, next)
       character = next
-      voice?.setVoice(next.voice.sid, next.voice.speed)
-      log({ event: 'character', name: next.name, sid: next.voice.sid, onboarded: next.onboarded })
+      if (modelChanged) {
+        // The model is fixed when her session is opened: reopen it on the new one (her history stays).
+        cut()
+        void session?.dispose().then(open)
+        log({ event: 'model', ...(route() ?? {}) })
+      }
+      voice?.setVoice(next.voice.id, next.voice.speed)
+      log({ event: 'character', name: next.name, voice: next.voice.id, onboarded: next.onboarded })
       return next
     },
     expandPersona: async ({ name, idea, callYou, pronoun }) => complete(
@@ -435,18 +607,31 @@ export function apply(ctx: Context, config: HerConfig): void {
       [...history.map(h => `${h.who === 'you' ? '对方' : '你'}：${h.text}`), `对方：${message}`, '（只回复你接下来说的话，不要带"你："前缀。）'].join('\n'),
       300,
     ),
-    previewVoice: async (sid, speed, text) => {
-      const audio = await voice?.preview(text, sid, speed)
-      return audio === undefined ? undefined : { wav: Buffer.from(audio.audio).toString('base64'), durationMs: audio.durationMs }
+    previewVoice: async (id, speed, text) => {
+      if (voice === undefined) throw new Error('她的声音还没准备好')
+      const audio = await voice.preview(text, id, speed)
+      return { audio: Buffer.from(audio.audio).toString('base64'), format: audio.format, durationMs: audio.durationMs }
     },
     startBody: () => {
       if (server?.bodies.length) return '身体已经连上了'
       if (bodyRunning(paths.root)) return '身体已经在运行，正在连接'
-      const plan = findDevBody()
-      if ('missing' in plan) return `找不到身体程序（缺 ${plan.missing}）`
+      const plan = bodyPlan()
+      if ('missing' in plan) return `找不到身体程序：${plan.missing}`
       if (discovery === undefined) return '大脑还没准备好'
       launchBody(plan, { url: discovery.url, token: discovery.token, home: paths.root, pack: config.body.pack })
       return '已经启动，几秒钟后会连上'
+    },
+    installBody: () => {
+      if (installState.state === 'downloading' || installState.state === 'installing' || installState.state === 'checking') return
+      void installLatest(true)
+    },
+    restartBody: async () => {
+      if (discovery === undefined) throw new Error('大脑还没准备好')
+      await stopBody()
+      const plan = bodyPlan()
+      if ('missing' in plan) throw new Error(`找不到身体程序：${plan.missing}`)
+      launchBody(plan, { url: discovery.url, token: discovery.token, home: paths.root, pack: config.body.pack })
+      installState = { ...installState, restart: false }
     },
     setMode: mode => broadcast({ t: 'mode', cid, mode }),
     pickPack: () => {
@@ -458,6 +643,61 @@ export function apply(ctx: Context, config: HerConfig): void {
     usePack: packId => {
       if (!bodyPacks.some(p => p.packId === packId)) throw new Error('没有这个外形包')
       broadcast({ t: 'pack.use', packId })
+    },
+    workshopList: () => listProjects(),
+    workshopNew: name => {
+      if (name === '') throw new Error('先给形象起个名字')
+      return saveProject(newProject(`p${Date.now().toString(36)}`, name), mainScreen())
+    },
+    workshopSave: project => saveProject(project, mainScreen()),
+    workshopExport: async (id, media) => {
+      const dest = await pickFolder('导出到哪个文件夹', '导出到这里')
+      return dest === undefined ? undefined : exportProject(id, dest, media)
+    },
+    workshopImportProject: async () => {
+      const path = await pickFolder('选一个形象项目（文件夹，或里面的 形象.json）', '导入', '形象.json')
+      return path === undefined ? undefined : importProject(path, mainScreen())
+    },
+    workshopExamples: () => examples(paths.root),
+    workshopOpen: id => {
+      const found = findProject(id)
+      if (found === undefined) throw new Error('找不到这个项目')
+      const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open'
+      spawn(opener, [found.dir], { detached: true, stdio: 'ignore' }).unref()
+    },
+    workshopFrame: (id, sceneId) => {
+      const found = findProject(id)
+      const scene = found?.project.scenes.find(s => s.id === sceneId)
+      if (found === undefined || scene === undefined) throw new Error('找不到这个场景')
+      const body = server?.bodies.at(-1)
+      if (body === undefined) throw new Error('身体还没连上：框人物区要在身体那边的窗口里做')
+      body.send({ t: 'scene.frame', dir: join(found.dir, sceneDir(scene)), name: scene.name })
+    },
+    workshopImport: id => {
+      const found = findProject(id)
+      if (found === undefined) throw new Error('找不到这个项目')
+      const body = server?.bodies.at(-1)
+      if (body === undefined) throw new Error('身体还没连上，导入要在身体所在的电脑上做')
+      const status = projectStatus(found.project, found.dir)
+      if (!status.importable) throw new Error('还没有可以导入的部分：至少要有参考图和桌宠的 3 段，或者一个框好人物区的场景和它的 3 段')
+      prepareImport(found.project, found.dir)
+      const ready = (folder: string) => status.parts.find(p => p.folder === folder)?.enough === true
+      const { project } = found
+      importStatus = { ...IDLE_IMPORT, state: 'running' }
+      body.send({
+        t: 'look.import', id: project.id, name: project.name, dir: found.dir,
+        ...(project.desk.on && ready(DESK_DIR) ? { desk: DESK_DIR } : {}),
+        ...(project.default === undefined ? {} : { default: project.default }),
+        scenes: project.scenes.filter(s => ready(sceneDir(s)) && status.parts.find(p => p.folder === sceneDir(s))?.framed === true).map(s => ({
+          id: s.id, name: s.name, folder: sceneDir(s),
+          ...(s.hours !== undefined || s.user !== undefined ? { when: { ...(s.hours === undefined ? {} : { hours: s.hours }), ...(s.user === undefined ? {} : { user: s.user }) } } : {}),
+        })),
+      })
+    },
+    setLook: change => {
+      if (bodyLook === undefined) throw new Error('现在用的不是多场景的形象')
+      if (change.go !== undefined && !bodyLook.scenes.some(s => s.id === change.go)) throw new Error('没有这个场景')
+      broadcast({ t: 'look.set', ...change })
     },
     memoryRemove: ids => memory.remove(ids),
     memoryConfirm: ids => memory.confirm(ids),
@@ -518,7 +758,7 @@ export function apply(ctx: Context, config: HerConfig): void {
     } as ConstructorParameters<typeof HerSession>[0])
     if (services !== undefined) open()
 
-    voice = new Voice(paths.models, { ...config.voice, sid: character.voice.sid, speed: character.voice.speed }, ctx.logger)
+    voice = new Voice(paths.models, join(paths.root, 'edge-tts'), { ...config.voice, voice: character.voice.id, speed: character.voice.speed }, ctx.logger)
     const herVoice = voice
     void herVoice.start()
     speech = new SpeechQueue(text => herVoice.synthesize(speakable(text)), {
@@ -530,7 +770,7 @@ export function apply(ctx: Context, config: HerConfig): void {
         }
         const stream = nextStream++
         if (seq === 0) log({ event: 'first-audio', uid, sinceSendMs: sentAt === undefined ? null : Date.now() - sentAt, durationMs: audio.durationMs })
-        server?.broadcastWithAudio({ t: 'speak.seg', cid, uid, seq, text, durationMs: audio.durationMs, format: 'wav', stream, ...withCues }, stream, audio.audio)
+        server?.broadcastWithAudio({ t: 'speak.seg', cid, uid, seq, text, durationMs: audio.durationMs, format: audio.format, stream, ...withCues }, stream, audio.audio)
       },
       end(uid) {
         broadcast({ t: 'speak.end', cid, uid })
@@ -553,10 +793,14 @@ export function apply(ctx: Context, config: HerConfig): void {
         }
       },
       message: (_client, message, audio) => onBodyMessage(message, audio),
-      closed: () => {
+      closed: client => {
         bodyPack = server?.bodies.at(-1)?.hello.packs[0]
-        for (const settle of pendingActs.values()) settle({ ok: false, reason: 'no body' })
-        pendingActs.clear()
+        // Only what that body was doing is lost; another body (or a text-only client) leaving changes nothing.
+        for (const [id, pending] of pendingActs) {
+          if (pending.body !== client.id) continue
+          pendingActs.delete(id)
+          pending.settle({ ok: false, reason: 'no body' })
+        }
       },
     })
     let launchTimer: NodeJS.Timeout | undefined
@@ -566,9 +810,9 @@ export function apply(ctx: Context, config: HerConfig): void {
       if (config.body.launch !== 'auto') return
       launchTimer = setTimeout(() => {
         if (brain.bodies.length > 0 || bodyRunning(paths.root)) return
-        const plan = findDevBody()
+        const plan = bodyPlan()
         if ('missing' in plan) {
-          ctx.logger.warn(`dsh-her: no body to start (missing ${plan.missing})`)
+          ctx.logger.info(`dsh-her: no body to start yet (${plan.missing}); the "她" page offers to install it`)
           return
         }
         const pid = launchBody(plan, { url: started.url, token: started.token, home: paths.root, pack: config.body.pack })
@@ -577,12 +821,22 @@ export function apply(ctx: Context, config: HerConfig): void {
       launchTimer.unref()
     }, (error: Error) => ctx.logger.warn(`dsh-her: body server failed to start (${error.message})`))
 
+    // The installed body keeps itself up to date: a check soon after start, then every few hours.
+    const updateFirst = setTimeout(() => void installLatest(false), UPDATE_FIRST_MS)
+    const updateTimer = setInterval(() => void installLatest(false), UPDATE_CHECK_MS)
+    updateFirst.unref()
+    updateTimer.unref()
     const digestTimer = setInterval(digestTick, DIGEST_CHECK_MS)
+    const noteTimer = setInterval(noteTick, NOTE_CHECK_MS)
+    noteTimer.unref()
     digestTimer.unref()
 
     return async () => {
       clearTimeout(launchTimer)
+      clearTimeout(updateFirst)
+      clearInterval(updateTimer)
       clearInterval(digestTimer)
+      clearInterval(noteTimer)
       clearTimeout(stuckTimer)
       herVoice.stop()
       voice = undefined
@@ -601,6 +855,16 @@ export function apply(ctx: Context, config: HerConfig): void {
     for (const [path, handler] of Object.entries(apiHandlers(api))) {
       webCtx.effect(() => connection.fetch.register({ path: `${API_BASE}${path}`, methods: ['POST'], requestBody: 'buffered', fetch: request => handle(handler, request) }))
     }
+    // 形象工坊's example pictures and clips, as files (`?f=reference.png`); only the named slots.
+    webCtx.effect(() => connection.fetch.register({
+      path: `${API_BASE}/example`, methods: ['GET'], requestBody: 'buffered',
+      fetch: async request => {
+        const file = exampleFile(paths.root, new URL(request.url).searchParams.get('f') ?? '')
+        if (file === undefined) return new Response('not found', { status: 404 })
+        const type = file.endsWith('.mp4') ? 'video/mp4' : file.endsWith('.png') ? 'image/png' : 'application/octet-stream'
+        return new Response(readFileSync(file), { headers: { 'content-type': type, 'cache-control': 'no-cache' } })
+      },
+    }))
   })
 
   ctx.inject([...SERVICES], (serviceCtx) => {

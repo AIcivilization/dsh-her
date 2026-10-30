@@ -47,6 +47,23 @@ export interface PackSummary {
   hitParts: string[]
 }
 
+/**
+ * A look on the body: one character in several scenes and how they switch
+ * (docs/形象工坊与多场景.md §5). Its pack id in `pack.list` is `look:<id>`.
+ */
+export interface LookView {
+  id: string
+  name: string
+  scenes: Array<{ id: string; name: string; when: string; on: boolean }>
+  current: string
+  /** Switching by time of day and by whether you are around. */
+  auto: boolean
+  /** Held in the current scene until asked to move. */
+  locked: boolean
+  /** It has a desk-pet version ("浮在最上层" shows that instead of the scene). */
+  desk: boolean
+}
+
 export interface BodyCaps {
   audioOut: AudioFormat[]
   micIn?: { formats: string[]; vad?: string }
@@ -92,8 +109,16 @@ export type BodyMessage =
   | { t: 'mode.changed'; cid: string; mode: WindowMode; pos?: { x: number; y: number; screen?: number } }
   | { t: 'pack.progress'; id: string; done: number; total: number; step: string }
   | { t: 'pack.report'; id: string; ok: boolean; pack?: PackSummary; lines: Array<{ level: 'ok' | 'warn' | 'error'; text: string }> }
+  /** The body's settings window wants who she is and what she remembers (answered with `panel`). */
+  | { t: 'panel.get'; cid: string }
+  /** Changes made in the body's settings window; answered with a fresh `panel`. */
+  | { t: 'panel.set'; cid: string; character?: Partial<PanelCharacter>; forget?: string[]; confirm?: string[] }
   /** The packs this body has imported, and the one on screen. */
   | { t: 'pack.list'; packs: PackSummary[]; active?: string }
+  /** The look on screen and its scenes (null: a single pack, no look). */
+  | { t: 'look.state'; look: LookView | null }
+  /** Answer to `folder.pick`: what the user chose (none: cancelled). */
+  | { t: 'folder.picked'; id: string; path?: string }
   | { t: 'error'; code: string; message: string }
 
 // ── brain → body ────────────────────────────────────────────────────────────
@@ -104,6 +129,20 @@ export interface Welcome {
   sessionId: string
   characters: CharacterView[]
   config: { mic: 'push-to-talk' | 'always'; bargeIn: boolean }
+}
+
+/** What the body's settings window can show and change about her. */
+export interface PanelCharacter {
+  name: string
+  persona: string
+  callYou: string
+  pronoun: '他' | '她' | 'TA'
+}
+
+export interface PanelMemory {
+  facts: Array<{ id: string; text: string; status: 'confirmed' | 'candidate'; sensitive: boolean; createdAt: string }>
+  episodes: Array<{ id: string; text: string; at: string; due?: string }>
+  diary: string[]
 }
 
 export type BrainMessage =
@@ -132,8 +171,28 @@ export type BrainMessage =
   /** Let the user choose a folder on the body's computer and import it (progress and report follow). */
   | { t: 'pack.pick'; id: string }
   | { t: 'pack.import'; id: string; dir: string }
-  /** Show this imported pack from now on. */
+  /** Show this imported pack (or `look:<id>`) from now on. */
   | { t: 'pack.use'; packId: string }
+  /** Change how the look on screen switches scenes, or go to one now. */
+  | { t: 'look.set'; auto?: boolean; locked?: boolean; go?: string; on?: Record<string, boolean> }
+  /**
+   * Import a 形象工坊 project (folders on the body's computer): each part with
+   * clips becomes a pack, tied together as look `id`, and shown. Progress and
+   * the report come back as `pack.progress` / `pack.report`.
+   */
+  | {
+    t: 'look.import'; id: string; name: string; dir: string; desk?: string; default?: string
+    scenes: Array<{ id: string; name: string; folder: string; when?: { hours?: string; user?: 'active' | 'idle' } }>
+  }
+  /** Open 做场景 on a project's scene folder: its plate.png is the photo, scene.json and crop.png are written there. */
+  | { t: 'scene.frame'; dir: string; name: string }
+  /**
+   * Let the user choose a folder (or, with `file`, also a file of that
+   * extension) on the body's computer; answered with `folder.picked`.
+   */
+  | { t: 'folder.pick'; id: string; title: string; button: string; file?: string }
+  /** Who she is and what she remembers, for the body's settings window; `error` when a change was refused. */
+  | { t: 'panel'; cid: string; character: PanelCharacter; memory: PanelMemory; error?: string }
 
 export type AnyMessage = BodyMessage | BrainMessage
 

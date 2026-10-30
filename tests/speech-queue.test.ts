@@ -7,7 +7,7 @@ function recorder(delayMs = 1, fail?: string) {
   const synth = async (text: string): Promise<Synthesized | undefined> => {
     await new Promise(resolve => setTimeout(resolve, delayMs))
     if (text === fail) throw new Error('boom')
-    return { audio: new TextEncoder().encode(text), durationMs: [...text].length * 100 }
+    return { audio: new TextEncoder().encode(text), durationMs: [...text].length * 100, format: 'wav' }
   }
   const queue = new SpeechQueue(synth, {
     sentence: (uid, seq, text, audio) => events.push(`${uid}#${seq} ${text}${audio === undefined ? ' (no audio)' : ` ${audio.durationMs}ms`}`),
@@ -48,6 +48,27 @@ test('a sentence that fails to synthesize still shows, without audio', async () 
   queue.end('a')
   await queue.idle()
   assert.deepEqual(events, ['a#0 坏句子。 (no audio)', 'a#1 好句子。 400ms', 'a end'])
+})
+
+test('the next sentences are synthesized at the same time, and still come out in order', async () => {
+  let running = 0
+  let most = 0
+  const events: string[] = []
+  // Later sentences finish first: order must come from the queue, not from the service.
+  const synth = async (text: string): Promise<Synthesized | undefined> => {
+    most = Math.max(most, ++running)
+    await new Promise(resolve => setTimeout(resolve, 60 - [...text].length * 10))
+    running--
+    return { audio: new Uint8Array(1), durationMs: 100, format: 'mp3' }
+  }
+  const queue = new SpeechQueue(synth, { sentence: (uid, seq, text) => events.push(`${uid}#${seq} ${text}`), end: uid => events.push(`${uid} end`) })
+  const started = Date.now()
+  for (const [seq, text] of ['一。', '二二。', '三三三。', '四四四四。'].entries()) queue.say('a', seq, text)
+  queue.end('a')
+  await queue.idle()
+  assert.deepEqual(events, ['a#0 一。', 'a#1 二二。', 'a#2 三三三。', 'a#3 四四四四。', 'a end'])
+  assert.equal(most, 3, 'three at a time')
+  assert.ok(Date.now() - started < 140, `took ${Date.now() - started} ms`)
 })
 
 test('heard text: whole sentences before the cut, and the played share of the cut one', () => {

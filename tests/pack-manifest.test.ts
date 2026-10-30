@@ -44,3 +44,13 @@ test('a minimal pack is one anchor with idle and talk', () => {
   assert.equal(pack.start, 'stand')
   assert.deepEqual(pack.macros, [])
 })
+
+test('notes, old versions and extra photo shapes are not reported as unknown', () => {
+  const pack = inferPack([
+    'plate.png', 'plate_16x9.png', 'scene.json', 'crop.png', 'stand_idle_01.mp4', 'stand_talk_01.mp4',
+    '提示词.txt', '重做清单.txt', 'MiniMax生成任务.md', '测试版/stand_idle_01.mp4', 'lines/line_hi.mp4',
+  ])
+  assert.deepEqual(pack.unknown, [])
+  assert.deepEqual(pack.clips.map(c => c.source).sort(), ['lines/line_hi.mp4', 'stand_idle_01.mp4', 'stand_talk_01.mp4'])
+  assert.equal(pack.plate, 'plate.png')
+})

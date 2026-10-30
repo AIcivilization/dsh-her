@@ -17,19 +17,26 @@ export interface Character {
   callYou: string
   /** How she refers to you in her notes and memories. */
   pronoun: Pronoun
-  voice: { sid: number; speed: number }
+  /** A CosyVoice voice id (voices.ts), and how fast she talks. */
+  voice: { id: string; speed: number }
+  /** Her model; undefined = the plugin config's, else DSH's default. `effort` empty = the route's default. */
+  model?: { provider: string; model: string; effort?: string }
   /** The wizard has been completed once. */
   onboarded: boolean
 }
 
 export function loadCharacter(dir: string, defaults: Character): Character {
   try {
-    const saved = JSON.parse(readFileSync(join(dir, 'character.json'), 'utf8')) as Partial<Character>
+    const saved = JSON.parse(readFileSync(join(dir, 'character.json'), 'utf8')) as Partial<Character> & { voice?: { id?: unknown; speed?: unknown } }
     return {
       ...defaults,
       ...saved,
       pronoun: saved.pronoun === '他' || saved.pronoun === '她' || saved.pronoun === 'TA' ? saved.pronoun : defaults.pronoun,
-      voice: { ...defaults.voice, ...saved.voice },
+      // Settings saved before the cloud voice name a local speaker number instead: keep the speed only.
+      voice: {
+        id: typeof saved.voice?.id === 'string' ? saved.voice.id : defaults.voice.id,
+        speed: typeof saved.voice?.speed === 'number' ? saved.voice.speed : defaults.voice.speed,
+      },
     }
   } catch {
     return defaults
@@ -49,7 +56,8 @@ export function invalidCharacter(c: Character): string | undefined {
   if (c.persona.trim() === '') return '人设不能是空的'
   if ([...c.persona].length > 3000) return '人设太长了（最多 3000 字）'
   if ([...c.callYou].length > 20) return '称呼最多 20 个字'
-  if (!Number.isInteger(c.voice.sid) || c.voice.sid < 0 || c.voice.sid > 102) return '音色编号要在 0 到 102 之间'
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(c.voice.id)) return '音色不对'
   if (!(c.voice.speed >= 0.5 && c.voice.speed <= 2)) return '语速要在 0.5 到 2 之间'
+  if (c.model !== undefined && (c.model.provider.trim() === '' || c.model.model.trim() === '')) return '模型不对'
   return undefined
 }

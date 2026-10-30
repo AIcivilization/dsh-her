@@ -1,6 +1,7 @@
 /**
- * Local voice models (sherpa-onnx). They are downloaded on first use into
- * `<home>/models`, never shipped in the package. Design: docs/语音方案.md.
+ * Local speech recognition models (sherpa-onnx). They are downloaded on first
+ * use into `<home>/models`, never shipped in the package. Her own voice is in
+ * the cloud (cosyvoice.ts). Design: docs/语音方案.md.
  */
 
 import { execFile } from 'node:child_process'
@@ -13,7 +14,7 @@ import { promisify } from 'node:util'
 const RELEASES = 'https://github.com/k2-fsa/sherpa-onnx/releases/download'
 
 export interface ModelSpec {
-  id: 'asr' | 'tts' | 'vad'
+  id: 'asr' | 'vad'
   /** Directory (or file, for a bare .onnx) it unpacks to under the models dir. */
   name: string
   url: string
@@ -27,15 +28,6 @@ export const MODELS: readonly ModelSpec[] = [
     name: 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09',
     url: `${RELEASES}/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09.tar.bz2`,
     bytes: 165_783_878,
-    archive: true,
-  },
-  // fp32, not the 147 MB int8 build: on Apple M1 Pro int8 ran at RTF 0.84 and
-  // fp32 at 0.35 with 4 threads (M0 bench, docs/M0验证记录.md).
-  {
-    id: 'tts',
-    name: 'kokoro-multi-lang-v1_1',
-    url: `${RELEASES}/tts-models/kokoro-multi-lang-v1_1.tar.bz2`,
-    bytes: 364_855_331,
     archive: true,
   },
   {

@@ -1,5 +1,5 @@
 /**
- * Download the local voice models into `$DSH_HER_HOME/models` (default
+ * Download the local speech recognition models into `$DSH_HER_HOME/models` (default
  * ~/.dsh-her). The plugin does the same on first use; this is for development.
  */
 

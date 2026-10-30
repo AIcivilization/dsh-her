@@ -4,8 +4,9 @@
  * answers with (the page never shows a local guess).
  */
 
-import { useState } from 'react'
-import { herApi, playWav, type Result, type StateView } from './api.ts'
+import { useEffect, useState } from 'react'
+import { SERVICE_NAMES, VOICES, type VoiceService } from '../core/voices.ts'
+import { herApi, modelCatalog, playAudio, type ModelGroup, type Result, type StateView } from './api.ts'
 
 export type Apply = (call: Promise<Result<{ state: StateView }>>) => Promise<boolean>
 
@@ -22,14 +23,36 @@ export function Dot({ tone }: { tone: 'ok' | 'warn' | 'bad' | 'off' }) {
 export function BodyStatus({ state, apply }: { state: StateView; apply: Apply }) {
   const [message, setMessage] = useState<string>()
   const body = state.body
+  const install = body.install
   const start = async () => {
     const result = await herApi.startBody()
     if (result.ok) setMessage(result.message)
     await apply(Promise.resolve(result))
   }
+  const busy = install.state === 'checking' || install.state === 'downloading' || install.state === 'installing'
+  const progress = busy && (
+    <div>
+      <div className="her-progress"><div style={{ width: `${install.total ? Math.round(((install.done ?? 0) / install.total) * 100) : 0}%` }} /></div>
+      <p className="her-muted">{install.state === 'checking' ? '正在看有没有新版本…' : install.state === 'installing' ? '正在安装…' : `正在下载身体程序 ${install.latest ?? ''}（${mb(install.done)} / ${mb(install.total)} MB）`}</p>
+    </div>
+  )
+  const failed = install.state === 'failed' && <p className="her-danger">下载安装没成功：{install.error}</p>
   if (body.connected) {
     return (
-      <p><Dot tone="ok" />身体已连上（{body.info?.os}，版本 {body.info?.version}）{body.pack === undefined ? '' : `，外形：${body.pack.name}`}</p>
+      <div>
+        <p><Dot tone="ok" />身体已连上（{body.info?.os}，版本 {body.info?.version}）{body.pack === undefined ? '' : `，外形：${body.pack.name}`}
+          {!install.dev && !busy && <button className="her-btn link" onClick={() => void apply(herApi.installBody())}>检查更新</button>}
+          {!install.dev && !busy && install.latest !== undefined && install.restart !== true && install.state === 'idle' && <span className="her-muted">（已是最新：{install.latest}）</span>}
+        </p>
+        {install.restart === true && (
+          <div className="her-row">
+            <span>新版本 {install.installed} 已经装好，重启一下身体就用上了。</span>
+            <button className="her-btn primary" onClick={() => void apply(herApi.restartBody())}>重启身体</button>
+          </div>
+        )}
+        {progress}
+        {failed}
+      </div>
     )
   }
   return (
@@ -39,13 +62,20 @@ export function BodyStatus({ state, apply }: { state: StateView; apply: Apply })
         <div className="her-row">
           {body.canStart
             ? <button className="her-btn primary" onClick={() => void start()}>启动身体</button>
-            : <span className="her-muted">这台电脑上还没有安装身体程序。正式版会在这里一键下载安装（M6）。</span>}
+            : <>
+                <button className="her-btn primary" disabled={busy} onClick={() => void apply(herApi.installBody())}>下载安装身体</button>
+                <span className="her-muted">她在桌面上的样子是一个单独的小程序（约 150 MB），装在 dsh-her 自己的文件夹里，装好就自动启动。</span>
+              </>}
         </div>
       )}
+      {progress}
+      {failed}
       {message !== undefined && <p className="her-muted">{message}</p>}
     </div>
   )
 }
+
+const mb = (bytes: number | undefined) => ((bytes ?? 0) / 1e6).toFixed(0)
 
 export function PackPicker({ state, apply }: { state: StateView; apply: Apply }) {
   const body = state.body
@@ -57,7 +87,7 @@ export function PackPicker({ state, apply }: { state: StateView; apply: Apply })
         {body.packs.map(pack => (
           <button key={pack.packId} className={`her-choice ${pack.packId === body.activePack ? 'on' : ''}`} onClick={() => void apply(herApi.usePack(pack.packId))}>
             {pack.name}
-            <small>{pack.layer === 'scene' ? '壁纸场景' : '桌宠'} · {pack.actions.length} 个动作{pack.emotions.length > 0 ? ` · ${pack.emotions.length} 种情绪` : ''}</small>
+            <small>{pack.packId.startsWith('look:') ? '多场景形象' : pack.layer === 'scene' ? '壁纸场景' : '桌宠'} · {pack.actions.filter(a => !a.id.startsWith('scene_')).length} 个动作{pack.emotions.length > 0 ? ` · ${pack.emotions.length} 种情绪` : ''}</small>
           </button>
         ))}
         {body.packs.length === 0 && <p className="her-muted">还没有导入过外形包。</p>}
@@ -153,47 +183,126 @@ export function PersonaEditor({ state, apply, onSaved, saveLabel = '保存' }: {
   )
 }
 
-/** Speaker ids worth trying first (Kokoro v1.1 has 103; the rest are reachable by number). */
-const SUGGESTED = [3, 8, 13, 20, 28, 35, 45, 55, 62, 75]
+/** Shown when her cloud voice has no key (how to add one; never typed into this page) or no quota left. */
+export function KeyHelp({ state }: { state: StateView }) {
+  if (state.voice.speaking.status === 'no-quota') {
+    return (
+      <div className="her-warn">
+        <p>百炼账号的额度用完了，她现在只用文字回答。</p>
+        <p>到阿里云百炼控制台开通按量付费；如果已经开通，把"仅使用免费额度"关掉。弄好后最多半分钟她就能说话，不用重启。</p>
+        <p className="her-faint">{state.voice.speaking.error}</p>
+      </div>
+    )
+  }
+  return (
+    <div className="her-warn">
+      <p>她的声音用阿里云百炼（CosyVoice），还没有找到 API key，现在只用文字回答。</p>
+      {state.platform === 'darwin'
+        ? <p>在终端运行下面这条命令，按提示粘贴 key（两次，屏幕上不显示），不用重启：<br /><code>security add-generic-password -a dsh-her -s dsh-her-dashscope -w</code></p>
+        : <p>把 key 设成环境变量 <code>DASHSCOPE_API_KEY</code>，然后重启 dsh。</p>}
+      <p className="her-faint">key 不会存进任何文件，也不要贴到聊天里。</p>
+    </div>
+  )
+}
 
 export function VoicePicker({ state, apply, onSaved, saveLabel = '用这个声音' }: { state: StateView; apply: Apply; onSaved?: () => void; saveLabel?: string }) {
-  const [sid, setSid] = useState(state.character.voice.sid)
+  const [voice, setVoice] = useState(state.character.voice.id)
   const [speed, setSpeed] = useState(state.character.voice.speed)
   const [error, setError] = useState<string>()
-  const [playing, setPlaying] = useState<number>()
-  const ready = state.voice.status === 'ready'
-  const listen = async (which: number) => {
-    setSid(which)
+  const [playing, setPlaying] = useState<string>()
+  const { status: speaking, error: speakingError } = state.voice.speaking
+  const listen = async (which: string) => {
+    setVoice(which)
     setPlaying(which)
     setError(undefined)
-    const result = await herApi.previewVoice(which, speed, `你好呀，我是${state.character.name}，我在你桌面上等你好久啦。`)
+    const result = await herApi.previewVoice(which, speed, `你好呀，我是${state.character.name}，我在你桌面上等你好久啦。今天过得怎么样？`)
     setPlaying(undefined)
-    if (result.ok) playWav(result.wav)
+    if (result.ok) playAudio(result.audio, result.format)
     else setError(result.message)
   }
   const save = async () => {
-    if (await apply(herApi.saveCharacter({ sid, speed }))) onSaved?.()
+    if (await apply(herApi.saveCharacter({ voice, speed }))) onSaved?.()
   }
   return (
     <div>
-      {!ready && <p className="her-warn">她的本地语音还没准备好（{state.voice.status === 'downloading' ? '模型下载中' : state.voice.status}）。准备好之前，她只用文字回答。</p>}
-      <div className="her-grid">
-        {SUGGESTED.map(n => (
-          <button key={n} className={`her-choice ${n === sid ? 'on' : ''}`} disabled={!ready} onClick={() => void listen(n)}>
-            音色 {n}<small>{playing === n ? '正在合成…' : '点一下试听'}</small>
-          </button>
-        ))}
-      </div>
+      {(speaking === 'no-key' || speaking === 'no-quota') && <KeyHelp state={state} />}
+      {speaking === 'off' && <p className="her-warn">她的声音已关闭（插件设置里 voice.enabled 是 false），只用文字回答。</p>}
+      {speaking === 'installing' && <p className="her-muted">第一次用，正在准备 Edge 语音组件（一两分钟）…</p>}
+      {speaking === 'failed' && <p className="her-warn">她的声音刚才出错了：{speakingError ?? '未知原因'}。会自动重试。</p>}
+      {(['edge', 'cosyvoice'] as VoiceService[]).map(service => (
+        <div key={service}>
+          <label className="her-label">{SERVICE_NAMES[service]}</label>
+          <div className="her-grid">
+            {VOICES.filter(v => v.service === service).map(v => (
+              <button key={v.id} className={`her-choice ${v.id === voice ? 'on' : ''}`} disabled={speaking === 'off'} onClick={() => void listen(v.id)}>
+                {v.name}<small>{playing === v.id ? '正在合成…' : `${v.desc} · 点一下试听`}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
       <div className="her-row">
-        <span className="her-muted">或者输入编号（0–102）：</span>
-        <input className="her-input" style={{ width: 80 }} type="number" min={0} max={102} value={sid} onChange={e => setSid(Number(e.target.value))} />
-        <button className="her-btn" disabled={!ready} onClick={() => void listen(sid)}>试听</button>
         <span className="her-muted">语速 {speed.toFixed(1)}</span>
         <input type="range" min={0.7} max={1.4} step={0.1} value={speed} onChange={e => setSpeed(Number(e.target.value))} />
+        <button className="her-btn" disabled={speaking === 'off'} onClick={() => void listen(voice)}>用这个语速试听</button>
       </div>
-      <p className="her-faint">想要更像真人、或者用你自己的声音：云端克隆音色（阿里云百炼）还没接上，之后会加在这里。</p>
+      <p className="her-faint">Edge 的声音免费，但不是微软公开的正式接口，可能哪天失效；百炼的声音更稳，要 key 和付费额度。用你自己录的声音克隆，之后会加在这里。</p>
       {error !== undefined && <p className="her-error">{error}</p>}
       <div className="her-row"><button className="her-btn primary" onClick={() => void save()}>{saveLabel}</button></div>
+    </div>
+  )
+}
+
+const DEFAULT_CHOICE = ''
+
+export function ModelPicker({ state, apply }: { state: StateView; apply: Apply }) {
+  const chosen = state.character.model
+  const [groups, setGroups] = useState<ModelGroup[]>()
+  const [loadError, setLoadError] = useState<string>()
+  const [choice, setChoice] = useState(chosen === undefined ? DEFAULT_CHOICE : `${chosen.provider}/${chosen.model}`)
+  const [effort, setEffort] = useState(chosen?.effort ?? '')
+  const [saved, setSaved] = useState(false)
+  useEffect(() => {
+    void modelCatalog().then(result => {
+      if (result.ok) setGroups(result.groups)
+      else setLoadError(result.message)
+    })
+  }, [])
+  const [provider, model] = choice === DEFAULT_CHOICE ? [undefined, undefined] : [choice.slice(0, choice.indexOf('/')), choice.slice(choice.indexOf('/') + 1)]
+  const efforts = groups?.find(g => g.id === provider)?.models.find(m => m.id === model)?.reasoning?.efforts ?? []
+  const nameOf = (p: string, m: string) => {
+    const group = groups?.find(g => g.id === p)
+    return `${group?.name ?? p} · ${group?.models.find(x => x.id === m)?.name ?? m}`
+  }
+  const save = async () => {
+    setSaved(false)
+    const value = provider === undefined ? null : { provider, model, ...(effort === '' ? {} : { effort }) }
+    if (await apply(herApi.saveCharacter({ model: value }))) setSaved(true)
+  }
+  return (
+    <div>
+      <p className="her-muted">
+        现在用的：{state.model === null ? '没有可用的模型' : `${nameOf(state.model.provider, state.model.model)}${state.model.effort ? `（思考：${state.model.effort}）` : ''}`}
+        {state.model !== null && !state.model.chosen && '（dsh 的默认模型）'}
+      </p>
+      {loadError !== undefined && <p className="her-error">拿不到 dsh 的模型列表：{loadError}</p>}
+      <div className="her-row">
+        <select className="her-select" style={{ flex: 1, minWidth: 220 }} value={choice} disabled={groups === undefined} onChange={e => { setChoice(e.target.value); setEffort('') }}>
+          <option value={DEFAULT_CHOICE}>跟随 dsh 的默认模型</option>
+          {groups?.map(g => (
+            <optgroup key={g.id} label={g.name}>
+              {g.models.map(m => <option key={m.id} value={`${g.id}/${m.id}`}>{m.name}</option>)}
+            </optgroup>
+          ))}
+        </select>
+        <select className="her-select" style={{ width: 150 }} value={effort} disabled={efforts.length === 0} onChange={e => setEffort(e.target.value)}>
+          <option value="">思考：默认</option>
+          {efforts.map(x => <option key={x.id} value={x.id}>思考：{x.name}</option>)}
+        </select>
+        <button className="her-btn primary" disabled={groups === undefined} onClick={() => void save()}>用这个模型</button>
+      </div>
+      {saved && <p className="her-ok">已换好，从她的下一句话开始生效；之前聊过的都还在。</p>}
+      <p className="her-faint">聊天要的是快：选 Flash 一类的快模型、思考选 Low（或 Off），她开口会快很多。模型的账号和价格在 dsh 的设置里管。</p>
     </div>
   )
 }
@@ -207,6 +316,30 @@ export function MicCheck({ state }: { state: StateView }) {
       <p>她脚下的小圆点亮起表示在听，变绿表示听到了声音。</p>
       <p>{fresh ? <><Dot tone="ok" />我听到了：「{state.heard!.text}」</> : <span className="her-muted">还没听到……</span>}</p>
       <p className="her-faint">听不清时：换个安静的地方，或者检查系统设置里选的麦克风。外放时她的声音可能被当成你在说话，戴耳机效果最好。</p>
+    </div>
+  )
+}
+
+/** The scenes of the look on screen: which one she is in, when each comes up, switching on or off. */
+export function ScenePicker({ state, apply }: { state: StateView; apply: Apply }) {
+  const look = state.body.look
+  if (look === undefined) return null
+  return (
+    <div className="her-scenes">
+      <p><b>{look.name}</b> 的场景{look.desk ? '（"浮在最上层"时显示桌宠，换场景在其他两种模式下看得到）' : ''}</p>
+      <div className="her-row">
+        <label><input type="checkbox" checked={look.auto} onChange={e => void apply(herApi.setLook({ auto: e.target.checked }))} /> 自动换场景</label>
+        <label><input type="checkbox" checked={look.locked} onChange={e => void apply(herApi.setLook({ locked: e.target.checked }))} /> 待在现在这里不动</label>
+      </div>
+      {look.scenes.map(scene => (
+        <div key={scene.id} className="her-row her-scene">
+          <label><input type="checkbox" checked={scene.on} disabled={scene.id === look.current} onChange={e => void apply(herApi.setLook({ on: { [scene.id]: e.target.checked } }))} /> {scene.name}</label>
+          {scene.id === look.current && <span className="her-tag ok">现在在这</span>}
+          <span className="her-muted">{scene.when}</span>
+          <button className="her-btn" disabled={scene.id === look.current || !scene.on} onClick={() => void apply(herApi.setLook({ go: scene.id }))}>现在去这里</button>
+        </div>
+      ))}
+      <p className="her-muted">自动换场景时，每个场景至少待 20 分钟，你们说话的时候不换。跟她说"去卧室吧""就待在这"也行。</p>
     </div>
   )
 }
@@ -226,7 +359,12 @@ export function ModePicker({ state, apply }: { state: StateView; apply: Apply })
 
 export function MemoryView({ state, apply }: { state: StateView; apply: Apply }) {
   const [report, setReport] = useState<string>()
-  const { facts, episodes, diary, lastDigestDay } = state.memory
+  const { diary, lastDigestDay } = state.memory
+  // Newest first, so what she just noted is on top.
+  const facts = [...state.memory.facts].reverse()
+  const episodes = [...state.memory.episodes].reverse()
+  const today = new Date().toDateString()
+  const isNew = (at: string) => new Date(at).toDateString() === today
   const digest = async () => {
     setReport('正在整理…')
     const result = await herApi.digest()
@@ -249,11 +387,12 @@ export function MemoryView({ state, apply }: { state: StateView; apply: Apply })
     <div>
       <div className="her-card">
         <h2>关于你（{facts.length}）</h2>
-        <p className="her-muted">她自己记下的直接生效；每天整理时发现的先"待确认"，7 天后自动确认，敏感的要你点确认。</p>
+        <p className="her-muted">她聊天时自己记下的直接生效；聊完一分钟后她会把刚才的话过一遍，挑出来的先"待确认"，7 天后自动确认，敏感的要你点确认。</p>
         <ul className="her-list">
           {facts.map(f => (
             <li key={f.id}>
               <span className="grow">{f.text}</span>
+              {isNew(f.createdAt) && <span className="her-tag ok">今天</span>}
               {f.status === 'candidate' && <span className="her-tag warn">待确认</span>}
               {f.sensitive && <span className="her-tag bad">敏感</span>}
               {f.status === 'candidate' && <button className="her-btn small" onClick={() => void apply(herApi.memoryConfirm([f.id]))}>确认</button>}
@@ -271,6 +410,7 @@ export function MemoryView({ state, apply }: { state: StateView; apply: Apply })
             <li key={e.id}>
               <span className="her-faint">{e.at.slice(0, 10)}</span>
               <span className="grow">{e.text}</span>
+              {isNew(e.at) && <span className="her-tag ok">今天</span>}
               {e.due !== undefined && <span className="her-tag">{e.due}</span>}
               <button className="her-btn small" onClick={() => forget(e.id, e.text)}>忘掉</button>
             </li>
@@ -280,7 +420,7 @@ export function MemoryView({ state, apply }: { state: StateView; apply: Apply })
       </div>
       <div className="her-card">
         <h2>她的日记（{diary.length} 天）</h2>
-        <p className="her-muted">每天你最后一次和她说话 30 分钟后（或 23:30 以后）她会整理一次。上次整理：{lastDigestDay ?? '还没有'}</p>
+        <p className="her-muted">日记每天写一篇：你最后一次和她说话 30 分钟后（或 23:30 以后）。上次写到：{lastDigestDay ?? '还没有'}</p>
         <p>{diary.length === 0 ? <span className="her-muted">还没有</span> : diary.join('、')}</p>
         <div className="her-row">
           <button className="her-btn" onClick={() => void digest()}>现在整理今天</button>

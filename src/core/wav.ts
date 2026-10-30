@@ -1,13 +1,31 @@
 /** Minimal PCM16 mono WAV encoding/decoding for speech audio. */
 
 export function encodeWav(samples: Float32Array, sampleRate: number): Uint8Array {
-  const bytes = new Uint8Array(44 + samples.length * 2)
+  const bytes = wavHeader(samples.length * 2, sampleRate)
+  const view = new DataView(bytes.buffer)
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]!))
+    view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true)
+  }
+  return bytes
+}
+
+/** Wrap raw little-endian PCM16 mono (as a cloud voice sends it) in a WAV header. */
+export function wavFromPcm16(pcm: Uint8Array, sampleRate: number): Uint8Array {
+  const bytes = wavHeader(pcm.byteLength, sampleRate)
+  bytes.set(pcm, 44)
+  return bytes
+}
+
+/** A WAV file of `dataBytes` PCM16 mono bytes, header filled in, data zeroed. */
+function wavHeader(dataBytes: number, sampleRate: number): Uint8Array {
+  const bytes = new Uint8Array(44 + dataBytes)
   const view = new DataView(bytes.buffer)
   const ascii = (offset: number, text: string) => {
     for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i))
   }
   ascii(0, 'RIFF')
-  view.setUint32(4, 36 + samples.length * 2, true)
+  view.setUint32(4, 36 + dataBytes, true)
   ascii(8, 'WAVE')
   ascii(12, 'fmt ')
   view.setUint32(16, 16, true)
@@ -18,11 +36,7 @@ export function encodeWav(samples: Float32Array, sampleRate: number): Uint8Array
   view.setUint16(32, 2, true)
   view.setUint16(34, 16, true)
   ascii(36, 'data')
-  view.setUint32(40, samples.length * 2, true)
-  for (let i = 0; i < samples.length; i++) {
-    const s = Math.max(-1, Math.min(1, samples[i]!))
-    view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true)
-  }
+  view.setUint32(40, dataBytes, true)
   return bytes
 }
 

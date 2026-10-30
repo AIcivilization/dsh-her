@@ -1,6 +1,8 @@
 // Calls to the plugin's endpoints on DSH's own authenticated `/api` channel.
 
 import type { StateView } from '../dsh/api.ts'
+import type { LookProject, WorkshopCard } from '../core/workshop.ts'
+import type { ProjectStatus } from '../dsh/workshop.ts'
 
 export type { StateView }
 
@@ -30,18 +32,56 @@ export const herApi = {
   expandPersona: (input: { name: string; idea: string; callYou: string; pronoun: string }) => post<{ persona: string }>('/persona/expand', input),
   tryPersona: (input: { name: string; persona: string; callYou: string; pronoun: string; history: Array<{ who: 'you' | 'her'; text: string }>; message: string }) =>
     post<{ reply: string }>('/persona/try', input),
-  previewVoice: (sid: number, speed: number, text?: string) => post<{ wav: string; durationMs: number }>('/voice/preview', { sid, speed, ...(text === undefined ? {} : { text }) }),
+  previewVoice: (voice: string, speed: number, text?: string) => post<{ audio: string; format: 'wav' | 'mp3'; durationMs: number }>('/voice/preview', { voice, speed, ...(text === undefined ? {} : { text }) }),
   startBody: () => post<WithState & { message: string }>('/body/start'),
+  installBody: () => post<WithState>('/body/install'),
+  restartBody: () => post<WithState>('/body/restart'),
   setMode: (mode: string) => post<WithState>('/body/mode', { mode }),
   pickPack: () => post<WithState>('/pack/pick'),
   usePack: (packId: string) => post<WithState>('/pack/use', { packId }),
+  workshopList: () => post<{ projects: Array<{ project: LookProject; status: ProjectStatus }> }>('/workshop/list'),
+  workshopNew: (name: string) => post<{ project: LookProject; status: ProjectStatus }>('/workshop/new', { name }),
+  workshopSave: (project: LookProject) => post<{ project: LookProject; status: ProjectStatus }>('/workshop/save', { project }),
+  workshopExport: (id: string, media: boolean) => post<{ dir: string; files: number } | { cancelled: true }>('/workshop/export', { id, media }),
+  workshopImportProject: () => post<{ project: LookProject; status: ProjectStatus } | { cancelled: true }>('/workshop/import-project'),
+  workshopExamples: () => post<{ examples: Array<{ card: WorkshopCard; file: string; label: string; ready: boolean }> }>('/workshop/examples'),
+  workshopOpen: (id: string) => post<Record<string, never>>('/workshop/open', { id }),
+  workshopFrame: (id: string, scene: string) => post<Record<string, never>>('/workshop/frame', { id, scene }),
+  workshopImport: (id: string) => post<WithState>('/workshop/import', { id }),
+  setLook: (change: { auto?: boolean; locked?: boolean; go?: string; on?: Record<string, boolean> }) => post<WithState>('/look/set', change),
   memoryRemove: (ids: string[]) => post<WithState & { removed: number }>('/memory/remove', { ids }),
   memoryConfirm: (ids: string[]) => post<WithState & { confirmed: number }>('/memory/confirm', { ids }),
   digest: () => post<WithState & { report: string }>('/memory/digest'),
   exportMemory: () => post<{ markdown: string }>('/memory/export'),
 }
 
-/** Play a WAV given as base64. */
-export function playWav(base64: string): void {
-  void new Audio(`data:audio/wav;base64,${base64}`).play()
+export interface ModelGroup {
+  id: string
+  name: string
+  models: Array<{ id: string; name: string; reasoning?: { efforts: Array<{ id: string; name: string }>; defaultEffort?: string } }>
+}
+
+/** The models DSH can route to, grouped by provider: the same call DSH's own model picker makes. */
+export async function modelCatalog(): Promise<Result<{ default?: { provider: string; model: string }; groups: ModelGroup[] }>> {
+  try {
+    const res = await fetch(new URL('/api/session/modelCatalog', document.baseURI), {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId: crypto.randomUUID(), method: 'session/modelCatalog', payload: { args: {} } }),
+    })
+    const reply = await res.json() as { result?: { ok: boolean; value?: { default?: { provider: string; model: string }; routableProviders?: string[]; groups?: ModelGroup[] }; error?: { message?: string } } }
+    const value = reply.result?.value
+    if (reply.result?.ok !== true || value === undefined) return { ok: false, message: reply.result?.error?.message ?? `HTTP ${res.status}` }
+    const routable = value.routableProviders
+    const groups = (value.groups ?? []).filter(g => routable === undefined || routable.includes(g.id))
+    return { ok: true, groups, ...(value.default === undefined ? {} : { default: value.default }) }
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/** Play audio (WAV or MP3) given as base64. */
+export function playAudio(base64: string, format: 'wav' | 'mp3'): void {
+  void new Audio(`data:audio/${format === 'mp3' ? 'mpeg' : 'wav'};base64,${base64}`).play()
 }

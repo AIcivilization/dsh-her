@@ -69,6 +69,35 @@ export function digestPrompt(name: string, day: string, transcript: TranscriptLi
   return { system, user }
 }
 
+/**
+ * Right after a talk: what in these few turns is worth keeping, so it shows
+ * on the "她记得的事" page at once (the diary still waits for the day's digest).
+ * Same answer shape as the digest, without the diary; parseDigest reads it.
+ */
+export function notePrompt(name: string, day: string, transcript: TranscriptLine[], knownFacts: string[], knownEvents: string[] = [], pronoun = '他'): { system: string; user: string } {
+  const p = pronoun
+  const system = [
+    `你是"${name}"，刚和对方聊完几句，正在把以后用得上的事记到小本子上。提到对方时用"${p}"。`,
+    '只输出一个 JSON 对象，不要任何别的文字：',
+    ` {"facts": [{"text": "关于对方的新事实，一句话，比如「${p}不吃香菜」", "sensitive": false}],`,
+    '  "episodes": [{"text": "以后值得提起的具体事情，一句话", "due": "YYYY-MM-DD，有具体日期才写"}]}',
+    '规则：',
+    '- facts 只写关于对方的、长期成立的事（称呼、喜好、忌讳、工作和生活、重要的人、生日）；已经知道的不要重复；没有就给空数组。',
+    '- 涉及健康、钱、证件、他人隐私的事实，sensitive 写 true。',
+    `- episodes 写具体的事（比如"${p}下周三去面试""${p}今晚吃了番茄炒蛋"），把"明天""下周三"换算成具体日期；已经记下的不要重复；没有就给空数组。`,
+    '- 客套话、闲聊里没有信息的不记。只根据这段聊天，不要编造。',
+  ].join('\n')
+  const user = [
+    `今天是 ${day}。`,
+    knownFacts.length === 0 ? '已经知道的关于对方的事：（还没有）' : `已经知道的关于对方的事：\n${knownFacts.map(f => `- ${f}`).join('\n')}`,
+    knownEvents.length === 0 ? '' : `已经记下的事件：\n${knownEvents.map(e => `- ${e}`).join('\n')}`,
+    '',
+    '刚才的聊天：',
+    ...transcript.map(l => `${l.who === 'you' ? '对方' : '我'}：${l.text}`),
+  ].join('\n')
+  return { system, user }
+}
+
 /** The first JSON object in the model's answer, checked and cleaned; undefined if there is none. */
 export function parseDigest(answer: string): DigestResult | undefined {
   const start = answer.indexOf('{')

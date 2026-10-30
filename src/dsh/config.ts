@@ -1,5 +1,5 @@
 import Schema from '@deepseek-ai/schemastery'
-import { SAMPLE_PERSONA } from '../core/index.ts'
+import { DEFAULT_VOICE, SAMPLE_PERSONA } from '../core/index.ts'
 import type { VoiceConfig } from '../voice/voice.ts'
 
 export interface HerConfig {
@@ -23,6 +23,10 @@ export interface HerConfig {
     launch: 'auto' | 'off'
     /** Appearance pack directory passed to the body; empty = the body's default. */
     pack: string
+    /** Where the body app is downloaded from: the release's address, ending with the folder that has body-latest.json. */
+    releases: string
+    /** Start the development body in the repository when there is one (off: behave like a release install). */
+    useDev: boolean
   }
   voice: VoiceConfig & {
     /** How the body listens: one utterance per shortcut press, or all the time. */
@@ -44,12 +48,14 @@ export const Config: Schema<HerConfig> = Schema.object({
   body: Schema.object({
     launch: Schema.union(['auto', 'off']).default('auto').description('Start the body app with DSH'),
     pack: Schema.string().default('').description('Appearance pack directory (empty = body default)'),
+    releases: Schema.string().default('https://github.com/AIcivilization/dsh-her/releases/latest/download/').description('Where the body app is downloaded from (the folder with body-latest.json)'),
+    useDev: Schema.boolean().default(true).description('Use the development body in the repository when there is one (off: like a release install)'),
   }).default({}),
   voice: Schema.object({
-    engine: Schema.union(['local', 'off']).default('local').description('Her voice: local (sherpa-onnx, CPU) or off (text only)'),
-    sid: Schema.natural().max(102).default(3).description('Local voice: Kokoro speaker id (0–102)'),
+    enabled: Schema.boolean().default(true).description('Her voice; off = she only writes'),
+    voice: Schema.string().default(DEFAULT_VOICE).description('Her first voice: a Microsoft Edge voice (free, via edge-tts) or an Alibaba Cloud CosyVoice voice (key in DASHSCOPE_API_KEY or the macOS keychain); the "她" page can change it'),
     speed: Schema.number().min(0.5).max(2).default(1).description('Speaking speed'),
-    threads: Schema.natural().min(1).max(16).default(4).description('CPU threads for local voice'),
+    threads: Schema.natural().min(1).max(16).default(4).description('CPU threads for local speech recognition'),
     mic: Schema.union(['push-to-talk', 'always']).default('push-to-talk').description('Microphone: one utterance per shortcut press, or always listening'),
   }).default({}),
 }) as Schema<HerConfig>

@@ -13,6 +13,10 @@
  * frame (which is the anchor pose), and one idle clip plays every 20–40 s.
  * Any interaction wakes her at once.
  *
+ * Sleep: a pack with a sleep state (at its own place, reached by a falling-
+ * asleep clip) has her fall asleep after SLEEP_AFTER_MS without interaction;
+ * any interaction wakes her.
+ *
  * For "stacked" packs each video stays hidden and a WebGL canvas shows it
  * (see stacked.ts).
  */
@@ -26,6 +30,7 @@ const FADE_S = 0.3
 const LEAD_S = 0.45
 export const REST_AFTER_MS = 2 * 60_000
 const REST_GAP_MS: [number, number] = [20_000, 40_000]
+export const SLEEP_AFTER_MS = 10 * 60_000
 
 export interface Slot {
   video: HTMLVideoElement
@@ -56,6 +61,11 @@ export class Player {
     this.byId = new Map(pack.clips.map(c => [c.id, c]))
     this.director = new Director(pack.clips, pack.macros, pack.start)
     this.events = events
+    if (pack.clips.some(c => c.role === 'state' && c.name === 'sleep')) {
+      window.setInterval(() => {
+        if (this.director.wanted === 'idle' && Date.now() - this.lastInteraction > SLEEP_AFTER_MS) this.director.setState('sleep')
+      }, 30_000)
+    }
     this.slots = [0, 1].map(() => makeSlot(stage, pack.layout))
     for (const slot of this.slots) {
       slot.video.addEventListener('timeupdate', () => this.nearEnd(slot))
@@ -68,7 +78,8 @@ export class Player {
   }
 
   get resting(): boolean {
-    return Date.now() - this.lastInteraction > REST_AFTER_MS && !this.director.urgent && this.director.wanted === 'idle'
+    const quiet = this.director.wanted === 'idle' || (this.director.wanted === 'sleep' && this.director.at !== this.director.start)
+    return Date.now() - this.lastInteraction > REST_AFTER_MS && !this.director.urgent && quiet
   }
 
   async start(): Promise<void> {
@@ -78,6 +89,7 @@ export class Player {
   /** Something happened (talk, touch, typing): stay awake; leave a still frame now. */
   touch(): void {
     this.lastInteraction = Date.now()
+    if (this.director.wanted === 'sleep') this.director.setState('idle')
     if (this.restTimer !== undefined || this.current.video.ended) {
       window.clearTimeout(this.restTimer)
       this.restTimer = undefined

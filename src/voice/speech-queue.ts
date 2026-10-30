@@ -1,11 +1,14 @@
 /**
  * Turns her replies into audio sentence by sentence, in order.
  *
- * Synthesis is serial: one sentence at a time across all replies, so the
- * first sentence of a reply is never queued behind a later one. Each result
- * is emitted as soon as it is ready (the body queues playback), and a reply's
+ * The next few sentences are synthesized at once (AHEAD), so while one plays
+ * the following ones are already on their way; a slow voice service only
+ * makes the first sentence of a reply wait. Sentences are started and
+ * emitted strictly in order, across replies, so the first sentence of a reply
+ * is never queued behind a later one. Each result is emitted as soon as it
+ * and everything before it are ready (the body queues playback), and a reply's
  * end is emitted after its last sentence. Cancelling a reply drops what has
- * not been synthesized yet and suppresses anything still in flight.
+ * not been emitted yet; synthesis already running for it is thrown away.
  *
  * A sentence whose synthesis fails is still emitted, without audio, so the
  * subtitle shows and the reply goes on.
@@ -16,6 +19,7 @@ import type { Cue } from '../protocol/index.ts'
 export interface Synthesized {
   audio: Uint8Array
   durationMs: number
+  format: 'wav' | 'mp3'
 }
 
 export interface SpeechOut {
@@ -30,7 +34,12 @@ export interface SentSentence {
   durationMs: number
 }
 
-type Job = { uid: string; kind: 'sentence'; seq: number; text: string; cues: Cue[] } | { uid: string; kind: 'end' }
+/** Sentences being synthesized at the same time, counted from the next to emit. */
+const AHEAD = 3
+
+type Job =
+  | { uid: string; kind: 'sentence'; seq: number; text: string; cues: Cue[]; audio?: Promise<Synthesized | undefined> }
+  | { uid: string; kind: 'end' }
 
 export class SpeechQueue {
   private readonly jobs: Job[] = []
@@ -48,6 +57,7 @@ export class SpeechQueue {
   say(uid: string, seq: number, text: string, cues: Cue[] = []): void {
     if (this.cancelled.has(uid)) return
     this.jobs.push({ uid, kind: 'sentence', seq, text, cues })
+    this.startAhead()
     void this.pump()
   }
 
@@ -74,22 +84,32 @@ export class SpeechQueue {
     while (this.running || this.jobs.length > 0) await new Promise(resolve => setTimeout(resolve, 5))
   }
 
+  /** Start synthesizing the first AHEAD sentences still to emit. */
+  private startAhead(): void {
+    let sentences = 0
+    for (const job of this.jobs) {
+      if (job.kind !== 'sentence') continue
+      if (++sentences > AHEAD) break
+      job.audio ??= this.synth(job.text).catch(() => undefined)
+    }
+  }
+
   private async pump(): Promise<void> {
     if (this.running) return
     this.running = true
     try {
-      for (let job = this.jobs.shift(); job !== undefined; job = this.jobs.shift()) {
+      for (let job = this.jobs[0]; job !== undefined; job = this.jobs[0]) {
         if (job.kind === 'end') {
+          this.jobs.shift()
           this.out.end(job.uid)
           continue
         }
-        let audio: Synthesized | undefined
-        try {
-          audio = await this.synth(job.text)
-        } catch {
-          audio = undefined
-        }
-        if (this.cancelled.has(job.uid)) continue
+        this.startAhead()
+        const audio = await job.audio
+        // Cancelled while it was synthesized: cancel() already took it out.
+        if (this.jobs[0] !== job) continue
+        this.jobs.shift()
+        this.startAhead()
         const record = this.sent.get(job.uid) ?? []
         record.push({ seq: job.seq, text: job.text, durationMs: audio?.durationMs ?? 0 })
         this.sent.set(job.uid, record)

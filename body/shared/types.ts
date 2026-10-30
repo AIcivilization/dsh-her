@@ -34,6 +34,25 @@ export interface PackClipInfo {
   transcript?: string
 }
 
+export interface SceneLayout {
+  width: number
+  height: number
+  region: { x: number; y: number; width: number; height: number }
+  /**
+   * The same scene as photos of other shapes (for example 16:9 and 21:9 next
+   * to a 16:10 one), each with where her region sits on it. The body shows
+   * the one closest to the screen's shape.
+   */
+  plates?: ScenePlate[]
+}
+
+export interface ScenePlate {
+  file: string
+  width: number
+  height: number
+  region: { x: number; y: number; width: number; height: number }
+}
+
 export interface PackInfo {
   id: string
   name: string
@@ -41,9 +60,17 @@ export interface PackInfo {
   layout: PackLayout
   start: string
   clips: PackClipInfo[]
-  macros: Array<{ action: string; desc: string; goTo: string; then?: string }>
-  /** Scene packs: the empty scene, shown behind her in the wallpaper layer. */
+  macros: Array<{ action: string; desc: string; goTo: string; then?: string; jump?: boolean }>
+  /** Scene packs: the full-screen photo, shown behind her in the wallpaper layer. */
   plateUrl?: string
+  /**
+   * Scene packs made of a full-screen photo and small clips: the photo's size
+   * and the region of it her clips cover (photo pixels). The photo fills the
+   * screen; the clips play exactly over that region.
+   */
+  scene?: SceneLayout
+  /** Width / height of her picture; the window takes this shape so nothing is cut off. */
+  aspect?: number
 }
 
 export interface BodyConfig {
@@ -58,11 +85,43 @@ export interface BodyConfig {
   mute: boolean
 }
 
+export interface ScreenInfo {
+  /** Logical size (points / CSS pixels). */
+  width: number
+  height: number
+  /** Device pixels per logical pixel. */
+  scale: number
+  primary: boolean
+}
+
 export type { LinkStatus }
 
 /** What the preload exposes to the page as `window.her`. */
+/** What a clip of a development pack is used for, as the "画面" tab offers it. */
+export type ClipUse = 'idle' | 'listen' | 'talk' | 'think' | 'shy' | 'happy' | 'fall-asleep' | 'sleep' | 'none'
+
+export interface ClipsView {
+  packId: string
+  name: string
+  /** Only development packs (clips.json) can be laid out here; imported packs go by their file names. */
+  editable: boolean
+  clips: Array<{ id: string; url: string; desc: string; use: ClipUse; durationMs: number }>
+}
+
 export interface HerBridge {
   config(): Promise<BodyConfig>
+  /** The current pack's clips and what each is used for. */
+  clips(): Promise<ClipsView>
+  /** 做场景: choose the full-screen photo (undefined when cancelled). */
+  pickScenePhoto(): Promise<{ path: string; url: string; width: number; height: number } | undefined>
+  /** 做场景 on a 形象工坊 scene folder: its photo (plate.png). */
+  scenePhotoIn(dir: string): Promise<{ ok: boolean; photo?: { path: string; url: string; width: number; height: number }; message?: string }>
+  /** 做场景: write the scene folder (photo, scene.json, crop.png) and show it in the file manager; `dir`: frame that 形象工坊 folder. */
+  saveScene(input: { path: string; name: string; region: SceneLayout['region']; dir?: string }): Promise<{ ok: boolean; dir?: string; message?: string }>
+  /** The screens, for the 做场景 tab's advice (logical size and scale factor). */
+  screens(): Promise<ScreenInfo[]>
+  /** Save what each clip is used for (and its description); she picks it up at once. */
+  saveClips(changes: Array<{ id: string; use: ClipUse; desc: string }>): Promise<{ ok: boolean; message?: string }>
   /** Tell main whether the pointer is over her (overlay click-through). */
   hit(onHer: boolean): void
   drag(dx: number, dy: number): void
@@ -83,4 +142,6 @@ export interface HerBridge {
   onTalk(listener: () => void): void
   /** The menu switched how the microphone listens. */
   onMicMode(listener: (mode: MicMode) => void): void
+  /** She is moving to another scene: fade out (the next scene loads after). */
+  onFadeOut(listener: () => void): void
 }

@@ -1,7 +1,7 @@
 /**
- * Start the body app when no body is connected. M1 knows only the development
- * layout (the repository's `body/` next to this package, built with
- * `npm run build` there); the installed app comes with the wizard in M5.
+ * Start the body app when no body is connected: the development body (the
+ * repository's `body/` next to this package, built with `npm run build`
+ * there) when there is one, else the installed app (body-install.ts).
  *
  * The Electron binary is found through `node_modules/electron/path.txt`, not
  * `require('electron')`: inside the DSH desktop app that require returns

@@ -4,7 +4,9 @@
  * Anchors are nodes, clips are edges; a loop clip starts and ends at the same
  * anchor. The director knows where she is and what is wanted:
  * - a state (idle, listen, think, talk, sleep): loops at the current anchor,
- *   idle when the pack has none for that state there. Off screen she does not
+ *   taking turns between that state's variants there (never the same one
+ *   twice running); idle when the pack has none for that state there, unless
+ *   another anchor has it (then she goes there). Off screen she does not
  *   stay: any state brings her back to the start pose.
  * - one-shot requests, first come first served: an action (a loop clip, or a
  *   macro: walk to an anchor then maybe play an action), an emotion, a stored
@@ -31,6 +33,8 @@ export interface Macro {
   action: string
   goTo: string
   then?: string
+  /** No clip leads there: cut (crossfade) straight to the anchor's loop. */
+  jump?: boolean
 }
 
 interface Request {
@@ -39,6 +43,7 @@ interface Request {
   /** For a macro: the anchor to reach, then the action to play there (if any). */
   goTo?: string
   then?: string
+  jump?: boolean
   settle: (result: { ok: boolean; reason?: string }) => void
   /** The clip that completes the request once it has played. */
   last?: string
@@ -91,7 +96,7 @@ export class Director<C extends GraphClip = GraphClip> {
     return new Promise(settle => {
       const macro = this.macros.get(action)
       if (macro !== undefined) {
-        this.requests.push({ kind: 'action', name: action, goTo: macro.goTo, ...(macro.then === undefined ? {} : { then: macro.then }), settle })
+        this.requests.push({ kind: 'action', name: action, goTo: macro.goTo, ...(macro.then === undefined ? {} : { then: macro.then }), ...(macro.jump === true ? { jump: true } : {}), settle })
       } else if (this.canDo(action)) {
         this.requests.push({ kind: 'action', name: action, settle })
       } else {
@@ -156,6 +161,12 @@ export class Director<C extends GraphClip = GraphClip> {
   private stepFor(request: Request): C | undefined {
     if (request.goTo !== undefined && this.anchor !== request.goTo) {
       const path = this.path(this.anchor, a => a === request.goTo, true)
+      if ((path === undefined || path.length === 0) && request.jump === true) {
+        const loop = this.clips.find(c => c.from === request.goTo && c.to === request.goTo && c.role === 'state' && c.name === 'idle')
+          ?? this.clips.find(c => c.from === request.goTo && c.to === request.goTo)
+        if (loop !== undefined && request.then === undefined) request.last = loop.id
+        return loop
+      }
       if (path === undefined || path.length === 0) return undefined
       const step = path[0]!
       // Arriving with nothing to play there completes the macro.
@@ -181,9 +192,20 @@ export class Director<C extends GraphClip = GraphClip> {
       const back = this.path(this.anchor, a => a === this.start, true)?.[0]
       if (back !== undefined) return back
     }
-    const loops = (name: string) => this.clips.filter(c => c.from === this.anchor && c.to === this.anchor && c.role === 'state' && c.name === name)
-    const pool = loops(this.state)
-    const chosen = this.pick(pool.length > 0 ? pool : loops('idle'))
+    const loops = (anchor: string, name: string) => this.clips.filter(c => c.from === anchor && c.to === anchor && c.role === 'state' && c.name === name)
+    // The wanted state is somewhere else (she sleeps at another place): walk there, or cut there if no clip leads.
+    if (loops(this.anchor, this.state).length === 0) {
+      const elsewhere = this.clips.find(c => c.role === 'state' && c.name === this.state && c.from === c.to && c.from !== 'off')?.from
+      if (elsewhere !== undefined) return this.path(this.anchor, a => a === elsewhere)?.[0] ?? this.pick(loops(elsewhere, this.state))!
+      // No idle where she is (a place only for sleeping): back to where she started.
+      if (loops(this.anchor, 'idle').length === 0 && loops(this.start, 'idle').length > 0) {
+        return this.path(this.anchor, a => a === this.start)?.[0] ?? this.pick(loops(this.start, 'idle'))!
+      }
+    }
+    // Variants of the same state at the same place take turns, so a few seconds of video read as one long take;
+    // a different state, place, action or look only comes when asked.
+    const pool = loops(this.anchor, this.state)
+    const chosen = this.pick(pool.length > 0 ? pool : loops(this.anchor, 'idle'))
       ?? this.pick(this.clips.filter(c => c.from === this.anchor && c.to === this.anchor))
     if (chosen === undefined) throw new Error(`no clip to play at ${this.anchor}`)
     return chosen

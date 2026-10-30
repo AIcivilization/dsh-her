@@ -9,7 +9,8 @@
  *   <A>_exit_<dir>.mp4                 A → off
  *   off_enter_<dir>[_<outfit>].mp4     off → the standing anchor (of that outfit)
  *   lines/line_<name>.mp4 (+ .wav .txt)  a stored line, at the start anchor
- *   plate.png                          empty scene (scene packs)
+ *   plate.png                          empty scene (scene packs), or the full-screen photo
+ *   scene.json                         the photo's size and her region on it (from 做场景…)
  * An anchor may carry an outfit: `stand@jk`. Outfits only change off screen.
  *
  * Pure: no file system, so it is tested in Node.
@@ -92,12 +93,19 @@ export function inferPack(files: string[], read: (path: string) => string | unde
   for (const file of [...files].sort()) {
     const name = file.split('/').at(-1)!
     if (name.startsWith('.')) continue
+    // Old versions and working folders ("测试版/") sit beside the clips; only lines/ is part of the pack.
+    if (file.includes('/') && !file.startsWith('lines/')) continue
     let m: RegExpExecArray | null
     if ((m = ANCHOR_IMAGE.exec(file)) !== null) {
       touch(m[1]!)
       anchors[m[1]!]!.image = file
     } else if (file === 'plate.png' || file === 'plate.jpg') {
       plate = file
+    } else if (file === 'scene.json' || file === 'crop.png' || file === 'crop.jpg' || /^plate_[\w-]+\.(png|jpe?g)$/.test(file)) {
+      // Written by "做场景…": where her region is on the photo (read by the importer), the cut-out to generate clips from,
+      // and the same photo in other shapes (listed in scene.json).
+    } else if (/\.(txt|md)$/.test(file)) {
+      // Notes beside the clips: prompts, instructions, the redo list.
     } else if ((m = TRANSITION.exec(file)) !== null) {
       touch(m[1]!); touch(m[2]!)
       clips.push({ id: name.replace(/\.\w+$/, ''), source: file, from: m[1]!, to: m[2]!, role: 'transition', name: 'transition', interruptible: false })

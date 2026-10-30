@@ -25,7 +25,8 @@
  */
 
 import type { BrainMessage, Cue } from '../../src/protocol/index.ts'
-import type { BodyConfig, HerBridge, LinkStatus, MicMode, PackClipInfo, PackLayout } from '../shared/types.ts'
+import type { BodyConfig, HerBridge, LinkStatus, MicMode, PackClipInfo, PackLayout, SceneLayout } from '../shared/types.ts'
+import { fitScene } from '../shared/fit.ts'
 import { Bubble } from './bubble.ts'
 import { Mic } from './mic.ts'
 import { Player } from './player.ts'
@@ -135,6 +136,11 @@ function makeHitTest(layout: PackLayout): (x: number, y: number) => boolean {
   const canvas = document.createElement('canvas')
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!
   return (x, y) => {
+    if (player === undefined) {
+      // The placeholder (no look yet) is what you can click and drag.
+      const box = document.querySelector('#empty .face')?.getBoundingClientRect()
+      return box !== undefined && x >= box.left && x < box.right && y >= box.top && y < box.bottom
+    }
     const video = player?.current.video
     if (video === undefined || video.videoWidth === 0) return false
     const frameW = video.videoWidth
@@ -386,17 +392,50 @@ window.her.onMicMode(setMicMode)
 window.her.onBrain(onBrain)
 window.her.onStatus(status => { linkStatus = status })
 
+/**
+ * A full-screen photo with her clips over one region of it: the photo covers
+ * the window the way a wallpaper does (scaled to fill, centred, the overflow
+ * cut), and the stage takes the same transform, so the clips sit on exactly
+ * the pixels they were cut from. Her bubble floats just above her.
+ */
+function layoutScene(scene: SceneLayout, plateUrl: string): void {
+  document.body.classList.add('region')
+  const plate = document.getElementById('plate') as HTMLImageElement
+  const fill = document.getElementById('plate-fill') as HTMLImageElement
+  plate.src = plateUrl
+  fill.src = plateUrl
+  const stage = document.getElementById('stage')!
+  const bubble = document.getElementById('bubble')!
+  const place = () => {
+    const { innerWidth: w, innerHeight: h } = window
+    const fit = fitScene(scene, w, h)
+    document.body.classList.toggle('fill', !fit.covers)
+    Object.assign(plate.style, { left: `${fit.left}px`, top: `${fit.top}px`, width: `${scene.width * fit.scale}px`, height: `${scene.height * fit.scale}px` })
+    const box = fit.region
+    Object.assign(stage.style, { left: `${box.x}px`, top: `${box.y}px`, width: `${box.width}px`, height: `${box.height}px` })
+    Object.assign(bubble.style, { left: `${Math.max(16, Math.min(box.x + box.width * 0.05, w - w * 0.3 - 16))}px`, bottom: `${Math.max(16, h - box.y - box.height * 0.15)}px` })
+  }
+  place()
+  window.addEventListener('resize', place)
+}
+
 async function main(): Promise<void> {
   const config = await window.her.config()
   document.body.classList.add(config.mode)
   if (config.pack.layer === 'scene') {
     document.body.classList.add('scene')
-    if (config.pack.plateUrl !== undefined) document.documentElement.style.setProperty('--plate', `url("${config.pack.plateUrl}")`)
+    if (config.pack.plateUrl !== undefined) {
+      document.body.classList.add('plate')
+      document.documentElement.style.setProperty('--plate', `url("${config.pack.plateUrl}")`)
+    }
   }
+  if (config.pack.scene !== undefined && config.pack.plateUrl !== undefined) layoutScene(config.pack.scene, config.pack.plateUrl)
   document.documentElement.style.setProperty('--her-w', `${config.her.width}px`)
   document.documentElement.style.setProperty('--her-h', `${config.her.height}px`)
+  document.documentElement.style.setProperty('--her-aspect', String(config.her.width / config.her.height))
   muted = config.mute
-  player = new Player(stage, config.pack, { started: clipStarted })
+  if (config.pack.clips.length === 0) document.body.classList.add('empty')
+  else player = new Player(stage, config.pack, { started: clipStarted })
   speech = new SpeechPlayer({
     sentence: (uid, seq, text, durationMs, cues) => {
       perform(cues)
@@ -415,8 +454,9 @@ async function main(): Promise<void> {
   }, config.mute)
   // While she talks and barge-in is off, the microphone ignores what it hears.
   window.setInterval(() => { mic.paused = !bargeIn && speech?.speaking === true }, 100)
+  window.her.onFadeOut(() => document.body.classList.add('leaving'))
   if (config.debug) installDebugHooks()
-  await player.start()
+  await player?.start()
   wireInput()
   if (config.mode === 'overlay') wireOverlay(config)
   else window.addEventListener('contextmenu', () => window.her.menu())
