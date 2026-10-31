@@ -26,6 +26,7 @@ import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
 import { wavFromPcm16 } from '../core/index.ts'
+import { fetchChecked } from '../net.ts'
 import { MING_MODEL, MING_MODEL_BYTES } from './ming-model.ts'
 import { installUv, run, uvEnv } from './uv.ts'
 
@@ -345,7 +346,7 @@ export class MingVoice {
 
 /** One file from `url` into `target`, checked against its size and SHA-256 before it takes the file's place. */
 async function download(url: string, target: string, file: { size: number; sha256: string }, onProgress: (got: number) => void): Promise<void> {
-  const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(3_600_000) })
+  const res = await fetchChecked(url, { signal: AbortSignal.timeout(3_600_000) })
   if (!res.ok || res.body === null) throw new Error(`HTTP ${res.status}`)
   const hash = createHash('sha256')
   let got = 0

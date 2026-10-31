@@ -1,4 +1,5 @@
 import Schema from '@deepseek-ai/schemastery'
+import { DEFAULT_MIRRORS } from '../net.ts'
 import { DEFAULT_VOICE, SAMPLE_PERSONA } from '../core/index.ts'
 import type { VoiceConfig } from '../voice/voice.ts'
 
@@ -27,6 +28,8 @@ export interface HerConfig {
     releases: string
     /** Start the development body in the repository when there is one (off: behave like a release install). */
     useDev: boolean
+    /** Prefixes put before a GitHub address when GitHub cannot be reached (net.ts); every file through them is checked. */
+    mirrors: string[]
   }
   voice: VoiceConfig & {
     /** How the body listens: one utterance per shortcut press, or all the time. */
@@ -50,6 +53,7 @@ export const Config: Schema<HerConfig> = Schema.object({
     pack: Schema.string().default('').description('Appearance pack directory (empty = body default)'),
     releases: Schema.string().default('https://github.com/AIcivilization/dsh-her/releases/latest/download/').description('Where the body app is downloaded from (the folder with body-latest.json)'),
     useDev: Schema.boolean().default(true).description('Use the development body in the repository when there is one (off: like a release install)'),
+    mirrors: Schema.array(String).default([...DEFAULT_MIRRORS]).description('GitHub mirrors tried when github.com cannot be reached (body, voice models, Ming); files are checked by size and SHA-256. Empty: GitHub only'),
   }).default({}),
   voice: Schema.object({
     enabled: Schema.boolean().default(true).description('Her voice; off = she only writes'),

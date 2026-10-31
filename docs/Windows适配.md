@@ -1,4 +1,4 @@
-# Windows 适配（2026-10-31，代码写好，等 Win11 实测）
+# Windows 适配（2026-10-31，0.3.0 发布；0.3.1 修了下载）
 
 > 之前 Windows 只写了一部分代码，从没跑过：插件能装进 Windows 版 dsh，但不会给 Windows 装身体，她出不来。这一轮把缺的补上，由 GitHub 的 Windows 机器自动打包、试启动；真正的显示、壁纸、麦克风要在你的 Win11 上测。
 
@@ -16,6 +16,15 @@
 | 自动检查（`.github/workflows/ci.yml`） | 每次推送：插件的类型检查和单元测试在 Linux、Windows、macOS 上各跑一遍；检查 Windows 自带的 tar 能不能解 `.tar.bz2`（语音识别模型是这个格式）；在 Windows 上打身体的包、解压、`--smoke` 启动一次；包作为构建产物保留 |
 
 **本机 Ming** 在 Windows 上还不能用（只支持 Apple 芯片），设置里会写明原因；要等 [Ming跨平台.md](Ming跨平台.md) 里的 audio.cpp 版。Edge 和百炼的声音不受影响。
+
+## 网络：GitHub 连不上时（0.3.1）
+
+Win11 上第一次"下载安装身体"报 `fetch failed`：插件连 GitHub 时网络就断了。常见的两种情况：电脑靠代理软件（Clash 等）上 GitHub，浏览器走系统代理，但插件用的 Node 的 fetch 不管系统代理；或者 GitHub 的下载服务器直连被重置。改成：
+
+- **走系统代理**：在 DSH 桌面版里，下载用 Electron 的网络（和浏览器一样跟着系统代理）。命令行版 dsh 还是 Node 的 fetch。
+- **自动换镜像**：GitHub 连不上时，依次试 `body.mirrors` 里的镜像（默认 `https://ghfast.top/`、`https://gh-proxy.com/`，插件设置里可以改，清空就只用 GitHub）。身体的 zip、语音识别模型、uv、Ming 模型都这样下。
+- **镜像不可信，所以都要校验**：经过镜像的每个文件都按事先知道的大小和 SHA-256 核对（这一版给语音识别模型也补上了校验值）。核对用的 `body-latest.json` 只从 GitHub 本身读，不走镜像；GitHub 读不到时，用发布 npm 时放进包里的那一份（`lib/body-release.json`，发布前由 `scripts/embed-body-release.mjs` 从这一版的 GitHub Release 取来），npm 在国内有镜像，读得到。
+- **报错说人话**：比如"连不上 github.com（连接被拒绝或被重置）。如果你平时通过代理上 GitHub，打开代理软件的'系统代理'再试……"，不再是 `fetch failed`。
 
 ## 发布时怎么带上 Windows 版
 

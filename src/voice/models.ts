@@ -5,6 +5,8 @@
  */
 
 import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { fetchChecked } from '../net.ts'
 import { systemTar } from '../platform.ts'
 import { createWriteStream, existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
@@ -20,6 +22,8 @@ export interface ModelSpec {
   name: string
   url: string
   bytes: number
+  /** Checked before use: the file may come through a mirror (net.ts). */
+  sha256: string
   archive: boolean
 }
 
@@ -29,6 +33,7 @@ export const MODELS: readonly ModelSpec[] = [
     name: 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09',
     url: `${RELEASES}/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09.tar.bz2`,
     bytes: 165_783_878,
+    sha256: '7305f7905bfcf77fa0b39388a313f3da35c68d971661a65475b56fb2162c8e63',
     archive: true,
   },
   {
@@ -36,6 +41,7 @@ export const MODELS: readonly ModelSpec[] = [
     name: 'silero_vad.onnx',
     url: `${RELEASES}/asr-models/silero_vad.onnx`,
     bytes: 643_854,
+    sha256: '9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6',
     archive: false,
   },
 ]
@@ -58,17 +64,23 @@ export async function fetchModel(
   onProgress?: (received: number, total: number) => void,
 ): Promise<void> {
   mkdirSync(modelsDir, { recursive: true })
-  const response = await fetch(spec.url)
+  const response = await fetchChecked(spec.url)
   if (!response.ok || response.body === null) throw new Error(`下载失败 ${spec.url}（HTTP ${response.status}）`)
-  const total = Number(response.headers.get('content-length') ?? spec.bytes)
+  const total = spec.bytes
   const partial = join(modelsDir, `${spec.name}.download`)
   let received = 0
+  const hash = createHash('sha256')
   const body = Readable.fromWeb(response.body as import('node:stream/web').ReadableStream<Uint8Array>)
   body.on('data', (chunk: Buffer) => {
     received += chunk.byteLength
+    hash.update(chunk)
     onProgress?.(received, total)
   })
   await pipeline(body, createWriteStream(partial))
+  if (received !== spec.bytes || hash.digest('hex') !== spec.sha256) {
+    rmSync(partial, { force: true })
+    throw new Error(`下载的 ${spec.name} 校验不对（可能没下完或被改过），已经删掉，下次再试`)
+  }
   if (!spec.archive) {
     renameSync(partial, modelPath(modelsDir, spec))
     return

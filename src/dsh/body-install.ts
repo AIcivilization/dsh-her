@@ -20,6 +20,8 @@ import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { promisify } from 'node:util'
+import { fileURLToPath } from 'node:url'
+import { fetchChecked, httpFetch, NetError } from '../net.ts'
 import { systemTar } from '../platform.ts'
 import type { LaunchPlan } from './body-launcher.ts'
 
@@ -122,10 +124,46 @@ export function installedPlan(home: string): LaunchPlan | undefined {
 /** `base` + file: the release's download address ends with a slash, or the file is appended after one. */
 const at = (base: string, file: string) => `${base.replace(/\/?$/, '/')}${file}`
 
+/**
+ * The release's manifest, from GitHub itself (through the system proxy when
+ * there is one), never from a mirror: it carries the checksums that make a
+ * mirror's zip safe to use.
+ */
 export async function fetchManifest(base: string): Promise<BodyManifest> {
-  const res = await fetch(at(base, MANIFEST), { redirect: 'follow', signal: AbortSignal.timeout(20_000) })
+  let res: Response
+  try {
+    res = await httpFetch(at(base, MANIFEST), { redirect: 'follow', signal: AbortSignal.timeout(20_000) })
+  } catch (error) {
+    throw new NetError(at(base, MANIFEST), error)
+  }
   if (!res.ok) throw new Error(`读不到发布信息（${res.status}）：${at(base, MANIFEST)}`)
   return validateManifest(await res.json())
+}
+
+/**
+ * The manifest of this plugin's own release, put into the npm package when it
+ * was published (scripts/embed-body-release.mjs). The npm registry (and its
+ * mirrors) is reachable where GitHub is not, so a first install can still
+ * know what to download and how to check it.
+ */
+export function bundledRelease(file = fileURLToPath(new URL('../body-release.json', import.meta.url))): { manifest: BodyManifest; base: string } | undefined {
+  try {
+    const { base, manifest } = JSON.parse(readFileSync(file, 'utf8')) as { base: string; manifest: unknown }
+    return typeof base === 'string' && base.startsWith('https://github.com/') ? { base, manifest: validateManifest(manifest) } : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** What to install: the newest release on GitHub, or, when GitHub cannot be reached, this plugin's own. */
+export async function latestRelease(base: string): Promise<{ manifest: BodyManifest; base: string }> {
+  try {
+    return { manifest: await fetchManifest(base), base }
+  } catch (error) {
+    const bundled = bundledRelease()
+    if (error instanceof NetError && bundled !== undefined) return bundled
+    throw error
+  }
 }
 
 /**
@@ -140,7 +178,8 @@ export async function install(home: string, base: string, manifest: BodyManifest
   const downloads = join(root, 'download')
   mkdirSync(downloads, { recursive: true })
   const zip = join(downloads, asset.file)
-  const res = await fetch(at(base, asset.file), { redirect: 'follow' })
+  // From GitHub, or a mirror when GitHub cannot be reached: the size and SHA-256 below decide either way.
+  const res = await fetchChecked(at(base, asset.file))
   if (!res.ok || res.body === null) throw new Error(`下载失败（${res.status}）`)
   const hash = createHash('sha256')
   let done = 0

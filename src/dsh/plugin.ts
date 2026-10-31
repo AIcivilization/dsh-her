@@ -41,7 +41,7 @@ import { PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type LookView, t
 import { BrainServer } from '../server/brain-server.ts'
 import { API_BASE, apiHandlers, handle, type ApiRuntime } from './api.ts'
 import { bodyRunning, findDevBody, launchBody, type LaunchPlan } from './body-launcher.ts'
-import { compareVersions, fetchManifest, install, installedBody, installedPlan, type InstallState } from './body-install.ts'
+import { compareVersions, install, installedBody, installedPlan, latestRelease, type InstallState } from './body-install.ts'
 import { IDLE_IMPORT, type ImportStatus } from './import-status.ts'
 import { DESK_DIR, newProject, sceneDir } from '../core/workshop.ts'
 import { exampleFile, examples, exportProject, findProject, importProject, listProjects, prepareImport, projectStatus, saveProject } from './workshop.ts'
@@ -49,6 +49,7 @@ import type { HerConfig } from './config.ts'
 import { HerSession, type DshServices, type ModelRoute } from './her-session.ts'
 import { heardText, SpeechQueue } from '../voice/speech-queue.ts'
 import { Voice } from '../voice/voice.ts'
+import { setMirrors } from '../net.ts'
 import { defaultIdleMinutes, MingVoice } from '../voice/ming.ts'
 import { MING_STEPS, OwnVoices, prepareRecording } from '../voice/ming-voices.ts'
 
@@ -130,6 +131,7 @@ interface ReplyTrace {
 
 export function apply(ctx: Context, config: HerConfig): void {
   const paths = herPaths(config.home)
+  setMirrors(config.body.mirrors)
   const cid = config.character.id
   const dir = join(paths.characters, cid)
   let services: DshServices | undefined
@@ -312,14 +314,14 @@ export function apply(ctx: Context, config: HerConfig): void {
     if (!asked && before === undefined) return
     installState = { ...installState, state: 'checking' }
     try {
-      const manifest = await fetchManifest(config.body.releases)
+      const { manifest, base } = await latestRelease(config.body.releases)
       installState = { ...installState, latest: manifest.version }
       if (before !== undefined && compareVersions(manifest.version, before.version) <= 0) {
         installState = { ...installState, state: 'idle' }
         return
       }
       installState = { ...installState, state: 'downloading', done: 0, total: 0 }
-      const installed = await install(paths.root, config.body.releases, manifest, (done, total) => {
+      const installed = await install(paths.root, base, manifest, (done, total) => {
         installState = { ...installState, state: done < total ? 'downloading' : 'installing', done, total }
       })
       installState = { ...installState, state: 'idle', installed: installed.version, restart: before !== undefined && (server?.bodies.length ?? 0) > 0 }

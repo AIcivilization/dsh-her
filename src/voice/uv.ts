@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { fetchChecked } from '../net.ts'
 import { systemTar } from '../platform.ts'
 
 export function run(cmd: string, args: string[], timeout: number, env?: NodeJS.ProcessEnv): Promise<string> {
@@ -43,7 +44,7 @@ export async function installUv(uvHome: string): Promise<string> {
   const dir = join(uvHome, UV_VERSION)
   const found = [join(dir, 'uv'), join(dir, 'uv.exe'), join(dir, asset.file.replace(/\.(tar\.gz|zip)$/, ''), 'uv')].find(p => existsSync(p))
   if (found !== undefined) return found
-  const res = await fetch(`https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${asset.file}`, { redirect: 'follow', signal: AbortSignal.timeout(300_000) })
+  const res = await fetchChecked(`https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${asset.file}`, { signal: AbortSignal.timeout(300_000) })
   if (!res.ok) throw new Error(`下载 uv 失败（${res.status}）`)
   const bytes = Buffer.from(await res.arrayBuffer())
   if (createHash('sha256').update(bytes).digest('hex') !== asset.sha256) throw new Error('下载的 uv 校验不对，没有使用')
