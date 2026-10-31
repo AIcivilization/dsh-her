@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  clipPrompt, customClip, describe, isAdult, minimaxTask, newProject, newScene, plannedClips, presetClips, referencePrompt, screenColor, validateProject,
+  clipList, clipPrompt, comfyuiList, customClip, describe, generatorInfo, isAdult, minimaxTask, newProject, newScene, plannedClips, presetClips, promptsFile, referencePrompt, screenColor, validateProject,
 } from '../src/core/workshop.ts'
 import { examples, exportProject, importProject, listProjects, prepareImport, projectStatus, saveProject } from '../src/dsh/workshop.ts'
 
@@ -68,6 +68,36 @@ test('the task lists every ticked clip with its first frame and destination', ()
   assert.match(task, /Hailuo-2\.3/)
 })
 
+test('each tool gets its settings; a hand-filled one its name, settings and prefix', () => {
+  const project = newProject('p1', '测试')
+  project.scenes.push(newScene('s1', '卧室'))
+  assert.match(promptsFile(project, 'desk'), /用MiniMax Code：MiniMax-Hailuo-2\.3/)
+  project.generator = 'kling'
+  assert.match(promptsFile(project, 'desk'), /用可灵：图生视频/)
+  assert.match(generatorInfo(project).how, /^在可灵里/)
+  project.generator = 'manual'
+  assert.equal(generatorInfo(project).name, '你用的工具')
+  project.custom = { name: 'Runway', settings: '720P，10 秒', prefix: 'herlora，' }
+  assert.match(promptsFile(project, 'desk'), /用Runway：720P，10 秒/)
+  const clip = project.desk.clips[0]!
+  assert.ok(clipPrompt(project, 'desk', clip).startsWith('herlora。参考图中'))
+  project.generator = 'kling'
+  assert.ok(clipPrompt(project, 'desk', clip).startsWith('参考图中'), 'the prefix is only for the hand-filled tool')
+  assert.throws(() => validateProject({ ...project, generator: 'nope' }), /工具/)
+})
+
+test('the clip list and the ComfyUI list name every clip', () => {
+  const project = newProject('p1', '测试')
+  project.generator = 'comfyui'
+  project.scenes.push(newScene('s1', '卧室'))
+  assert.match(clipList(project, '/root'), /## 卧室 \/ stand_talk_02（必须）/)
+  const list = JSON.parse(comfyuiList(project, '/root')) as { negative: string; clips: Array<{ image: string; output: string; prompt: string }> }
+  assert.equal(list.clips.length, plannedClips(project).length)
+  assert.equal(list.clips[0]!.image, '/root/参考图.png')
+  assert.equal(list.clips.at(-1)!.output, '/root/场景-卧室/stand_talk_02.mp4')
+  assert.match(list.negative, /换脸/)
+})
+
 test('saving writes the folders and prompts; status follows the files', () => {
   const root = mkdtempSync(join(tmpdir(), 'her-workshop-'))
   try {
@@ -75,10 +105,16 @@ test('saving writes the folders and prompts; status follows the files', () => {
     project.scenes.push(newScene('s1', '卧室'))
     const saved = saveProject(project, { width: 3024, height: 1964 }, root)
     const dir = saved.status.dir
-    for (const file of ['形象.json', '参考图提示词.txt', 'MiniMax生成任务.md', '桌宠/提示词.txt', '场景-卧室/提示词.txt', '场景-卧室/照片提示词.txt']) {
+    for (const file of ['形象.json', '参考图提示词.txt', '生成清单.md', 'MiniMax生成任务.md', '桌宠/提示词.txt', '场景-卧室/提示词.txt', '场景-卧室/照片提示词.txt']) {
       assert.ok(existsSync(join(dir, file)), file)
     }
     assert.match(readFileSync(join(dir, '场景-卧室/照片提示词.txt'), 'utf8'), /3024×1964/)
+    // Another tool: its own task file, and MiniMax's goes.
+    saveProject({ ...project, generator: 'comfyui' }, undefined, root)
+    assert.ok(existsSync(join(dir, 'ComfyUI生成清单.json')))
+    assert.ok(!existsSync(join(dir, 'MiniMax生成任务.md')))
+    saveProject(project, undefined, root)
+    assert.ok(!existsSync(join(dir, 'ComfyUI生成清单.json')))
     assert.equal(saved.status.importable, false)
 
     // The desk pet's minimum and the reference picture: importable.

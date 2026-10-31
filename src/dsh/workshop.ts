@@ -5,7 +5,9 @@
  *   形象.json              the project (character card, scenes, clips)
  *   参考图提示词.txt        how to make 参考图.png, her "ID photo"
  *   参考图.png             (the user's) — also the desk pet's anchor
- *   MiniMax生成任务.md      every clip, for MiniMax Code
+ *   生成清单.md            every clip: first frame, file, prompt
+ *   MiniMax生成任务.md      the same, as a task for MiniMax Code (when that is the tool)
+ *   ComfyUI生成清单.json    the same, for a ComfyUI script (when that is the tool)
  *   桌宠/提示词.txt         + the desk pet's clips
  *   场景-卧室/提示词.txt     + 照片提示词.txt, plate.png, scene.json, crop.png, clips
  *
@@ -13,13 +15,13 @@
  * never touched. Importing hands the folders to the body (same computer).
  */
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, extname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  DESK_DIR, EXAMPLE_FILES, EXAMPLE_SLOTS, minimaxTask, PROJECT_FILE, promptsFile, REFERENCE_FILE, referencePrompt, safeName, sceneDir, scenePhotoPrompt, validateProject,
-  type LookProject, type WorkshopCard,
+  clipList, comfyuiList, DESK_DIR, EXAMPLE_FILES, EXAMPLE_SLOTS, minimaxTask, PROJECT_FILE, promptsFile, REFERENCE_FILE, referencePrompt, safeName, sceneDir, scenePhotoPrompt, validateProject,
+  type Generator, type LookProject, type WorkshopCard,
 } from '../core/workshop.ts'
 
 export const MATERIALS_DIR = join(homedir(), 'Documents', 'dsh-her 素材')
@@ -119,7 +121,13 @@ export function saveProject(input: unknown, screen?: { width: number; height: nu
     referencePrompt(project),
     '',
   ].join('\n'))
-  write(join(dir, 'MiniMax生成任务.md'), minimaxTask(project, dir))
+  write(join(dir, '生成清单.md'), clipList(project, dir))
+  // The tool's own task file; another tool's, left from before, goes.
+  const taskFiles: Array<[string, Generator, (p: LookProject, d: string) => string]> = [['MiniMax生成任务.md', 'minimax', minimaxTask], ['ComfyUI生成清单.json', 'comfyui', comfyuiList]]
+  for (const [file, generator, make] of taskFiles) {
+    if (project.generator === generator) write(join(dir, file), make(project, dir))
+    else rmSync(join(dir, file), { force: true })
+  }
   if (project.desk.on) {
     mkdirSync(join(dir, DESK_DIR), { recursive: true })
     write(join(dir, DESK_DIR, '提示词.txt'), promptsFile(project, 'desk'))

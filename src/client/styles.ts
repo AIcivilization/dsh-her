@@ -28,9 +28,12 @@ export const STYLES = `
 .her-card h2{font-size:15px;font-weight:600;margin:0 0 6px}
 .her-card p{margin:4px 0}
 .her-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}
-.her-fold{display:flex;align-items:baseline;gap:8px;width:100%;border:none;background:none;padding:0;color:${TEXT};font:inherit;cursor:pointer;text-align:left}
+.her-fold{display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;padding:0;color:${TEXT};font:inherit;cursor:pointer;text-align:left}
 .her-fold h2{margin:0}
-.her-fold-arrow{color:${MUTED};width:14px;font-size:15px;line-height:1}
+.her-fold-arrow{flex:none;display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:${LAYER2};color:${ACCENT};transition:transform .15s,background .15s}
+.her-fold-arrow.open{transform:rotate(90deg)}
+.her-fold:hover .her-fold-arrow{background:${HOVER}}
+.her-fold:focus-visible{outline:2px solid ${ACCENT};outline-offset:4px;border-radius:6px}
 .her-fold-sum{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
 .her-examples{margin-top:12px}
 .her-example-row{display:flex;gap:10px;flex-wrap:wrap}

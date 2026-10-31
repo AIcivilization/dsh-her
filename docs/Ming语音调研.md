@@ -1,0 +1,81 @@
+# 调研：本地部署 Ming-3.0-tts（2026-10-31）
+
+> 只是调研，还没写代码，也没下载模型。数字除了注明"本机"的，都来自官方或移植方的说明，没有在这台电脑上测过。
+
+## 它是什么
+
+- 蚂蚁 inclusionAI 2026 年 10 月开源的语音合成模型，**MIT 许可**（可以商用、可以随插件分发下载地址）。
+- 两个版本：
+  - **0.5B**：普通的小模型，基于 Qwen2.5-0.5B。
+  - **tiny**：MoE，总共 7.9B、每次用 1.3B。中文质量和 0.5B 差不多，能做多人播客。
+- 中文、英文，加德、西、法、韩、日；还能说四川话、粤语。输出 44.1 kHz 单声道。
+- 中文错字率 0.80%（seed-tts-eval），在 Artificial Analysis 的开源模型里，"可控声音"排第一。
+- 对她最有用的几项：
+  - **克隆**：给一小段参考录音和它的文字，就能用这个声音说任何话。
+  - **声音设计**：用一句话描述声音（"二十多岁、温柔、有点慵懒的女声"），不用参考录音。
+  - **内置声音**：比如 灵小柔、灵楷。
+  - **情绪、语速、音高、音量**：可以分别控制。
+  - **14 种插在文字里的标记**：叹气、笑、咳嗽、犹豫、惊讶等，比如 `[Sigh] 雨还没停。`。
+
+## 官方代码在 Mac 上不能直接用
+
+- 官方只在 NVIDIA H800、H20 上测过，固定用 torch 2.6、CUDA 12.4、transformers 4.46.3。
+- 代码里默认用 `cuda:0`，有 3 处把 `autocast` 写死成 cuda，也没有提到 Mac。
+- 适合有 NVIDIA 显卡的 Windows 或 Linux 用户，不适合我们的主要用户。
+
+## 在用户电脑上跑的三条路
+
+| 路子 | 平台 | 大小 / 内存 | 速度（RTF，越小越快） | 现状 |
+|---|---|---|---|---|
+| **MLX**：`mlx-audio` ≥ 0.6.1 加 `mlx-community/Ming-3.0-tts-0.5B-8bit` | 只能 Apple 芯片的 Mac | 模型 1.6 GB，运行时内存峰值 2.2 GB | M4 Pro 上 0.39 | 能用：克隆、内置声音、声音设计（`--instruct`）、情绪都支持。有一个 OpenAI 兼容的服务模式 `mlx_audio.server`。缺点见下 |
+| **audio.cpp**：GGUF，`audio-cpp/Ming-3.0-TTS-0.5B-GGUF` | 主要是 NVIDIA；Metal 没提 | q8 1.74 GB，显存约 1.9 GB | RTX 5090 上 0.17（比官方 Python 快 3.9 倍） | 不需要 Python。适合以后的 Windows 版 |
+| **ONNX**：`onnx-community/Ming-3.0-tts-0.5B-ONNX` | 理论上哪里都行（我们已经在用 onnxruntime） | 没写 | 没测 | 只是导出，作者写明 `EXPORTED_NOT_VALIDATED`。提示词拼接、流匹配、停止判断都要自己写，现在不考虑 |
+
+MLX 版的已知问题（移植方写明的）：
+
+- 没有移植文字规范化，数字要先写成汉字（"3 点"→"三点"）。这一步我们自己在 Node 里做就行。
+- 偶尔停不下来，结尾会有一点低噪音。要裁掉结尾的静音，必要时换个随机种子重来。
+- 克隆只用参考录音和文字，还没用上声纹向量。相似度可能比官方版差一点。
+
+## 放进 dsh-her 会是什么样
+
+现在的声音有三种：本地的 kokoro（sherpa-onnx，快，但声音一般）、Edge（要联网，不是官方接口）、百炼 CosyVoice（云端，要 key）。Ming 可以做第四种：**本地、离线、免费、能克隆、有情绪**，只给 Apple 芯片的 Mac。
+
+建议的做法（先讨论，不急着写）：
+
+1. **安装**：和 Edge 一样，用已经有的 uv（固定版本、校验过）建一个独立的 Python 环境 `<home>/ming`，装固定版本的 `mlx-audio`。
+   - 模型从 Hugging Face 下载，国内可以从 ModelScope 下载。
+   - 设置里点一下才装，要写明"大约下载 2 GB，占用 2 GB 内存"。删掉这个文件夹就是卸载。
+2. **常驻进程**：不能像 Edge 那样一句启动一次（加载模型要好几秒）。
+   - 起一个常驻的 Python 进程，模型只加载一次，通过 stdin/stdout 一行一个 JSON 收发句子。
+   - 也可以直接用 `mlx_audio.server`。但它的 HTTP 接口能不能传克隆和情绪参数还要确认，所以倾向自己写一个几十行的小脚本。
+3. **她的声音要固定**：每次用声音设计生成，声音都会有点不一样。
+   - 做法是在设置里先"设计"几次，用户挑一个满意的，保存成参考录音 `<home>/voice/ming-ref.wav`。
+   - 以后都用克隆。也可以直接用内置的 灵小柔。
+   - 克隆真人声音要本人同意，和外形的规矩一样。
+4. **情绪跟着大脑走**：大脑已经会给出 happy、shy、sleepy 这些动作提示，可以顺手映射成 Ming 的情绪参数。叹气、笑这些标记，可以让大脑在合适的时候写进回复里。
+5. **延迟**：它不是流式的，一句话要整句合成完才能播。
+   - 按 RTF 0.4–0.8 算（M1 Pro 应该比 M4 Pro 慢），一句 3 秒的话要等 1.2–2.4 秒。和 Edge 现在的 2.5 秒差不多。
+   - 语音队列已经会提前合成下一句，所以主要影响的是第一句。可以让第一句尽量短。
+
+## 还不知道、需要实测的
+
+- 在你的 M1 Pro 上：真实 RTF、第一句要等多久、内存占用、长时间开着会不会发热。
+- 灵小柔和声音设计出来的中文好不好听；情绪和叹气、笑这些标记在 MLX 版里效果如何。
+- tiny 的 4bit MLX 版（`mlx-community/Ming-3.0-tts-tiny-4bit`）是不是更好，值不值得多占内存。
+- `mlx_audio.server` 能不能传克隆参数。
+
+**实测需要下载**：
+
+- `mlx-audio` 和它依赖的包，几百 MB，装进一个临时文件夹；
+- 0.5B-8bit 模型，约 1.6 GB。
+
+要你同意后再做。测完写进 `docs/语音方案.md`，再决定要不要接进去。
+
+## 来源
+
+- 官方代码：https://github.com/inclusionAI/Ming-3.0-tts
+- 官方模型：https://huggingface.co/inclusionAI/Ming-3.0-tts-0.5B ，ModelScope：https://modelscope.cn/models/inclusionAI/Ming-3.0-tts-0.5b
+- MLX 版：https://huggingface.co/mlx-community/Ming-3.0-tts-0.5B-8bit ，mlx-audio：https://github.com/Blaizzy/mlx-audio
+- GGUF 版：https://huggingface.co/audio-cpp/Ming-3.0-TTS-0.5B-GGUF
+- ONNX 版：https://huggingface.co/onnx-community/Ming-3.0-tts-0.5B-ONNX

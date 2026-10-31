@@ -4,7 +4,7 @@
  * (dsh/workshop.ts), the "她" page edits the project.
  *
  * Prompts come in three layers:
- * - rules: fixed, by kind (desk pet or scene) and generator;
+ * - rules: fixed, by kind (desk pet or scene);
  * - who she is: one sentence from the character card, the same in every
  *   image and every clip, so she stays the same person;
  * - the action: one per clip, preset or the user's own.
@@ -110,7 +110,55 @@ export interface ProjectScene {
   clips: ClipPlan[]
 }
 
-export type Generator = 'minimax' | 'manual'
+/** The tool the clips are made with. `manual` is any other tool, described in `custom`. */
+export type Generator = 'minimax' | 'comfyui' | 'jimeng' | 'kling' | 'hailuo' | 'wanx' | 'vidu' | 'manual'
+
+export interface GeneratorInfo {
+  name: string
+  /** One line in the picker. */
+  label: string
+  /** The settings every clip uses, written at the top of each 提示词.txt. */
+  settings: string
+  /** How the clips get made, in the last card. */
+  how: string
+}
+
+const WEB_HOW = '一段段生成：上传首帧，粘贴提示词（有"负面提示词"框就把负面提示词也粘进去，有"尾帧"就也放首帧那张图），下载后按文件名存进对应的文件夹。「生成清单.md」里每段都列好了。'
+
+export const GENERATORS: Record<Exclude<Generator, 'manual'>, GeneratorInfo> = {
+  minimax: {
+    name: 'MiniMax Code', label: 'MiniMax Code（给它任务文件，自动生成下载）',
+    settings: 'MiniMax-Hailuo-2.3 图生视频，1080P，6 秒。',
+    how: '在 MiniMax Code 里说："按 <项目文件夹>/MiniMax生成任务.md 生成"，它会一段段生成、下载、存好。',
+  },
+  comfyui: {
+    name: 'ComfyUI', label: 'ComfyUI（本地，Wan 2.2 等图生视频工作流）',
+    settings: '图生视频工作流（比如 Wan 2.2 I2V），尺寸和首帧同比例、短边 720 以上，约 5 秒（16 fps 时 81 帧），负面提示词放进负面节点，每段用同一套参数。',
+    how: '用你的图生视频工作流一段段跑，或者用脚本读「ComfyUI生成清单.json」（每段的首帧、提示词、负面提示词、保存路径）批量跑。输出存成清单里的文件名。',
+  },
+  jimeng: { name: '即梦', label: '即梦（网页 / App）', settings: '图生视频，1080P，5 秒。', how: `在即梦里${WEB_HOW}` },
+  kling: { name: '可灵', label: '可灵（网页 / App）', settings: '图生视频，1080P，5 秒。', how: `在可灵里${WEB_HOW}` },
+  hailuo: { name: '海螺 AI', label: '海螺 AI（MiniMax 的网页版）', settings: '图生视频，1080P，6 秒。', how: `在海螺 AI 里${WEB_HOW}` },
+  wanx: { name: '通义万相', label: '通义万相（网页 / 阿里云百炼）', settings: '图生视频，1080P，5 秒。', how: `在通义万相里${WEB_HOW}` },
+  vidu: { name: 'Vidu', label: 'Vidu（网页）', settings: '图生视频，1080P，4–5 秒。', how: `在 Vidu 里${WEB_HOW}` },
+}
+
+/** For `manual`: the tool's name, its settings, and words every clip's prompt starts with (a LoRA trigger word, a style). */
+export interface CustomGenerator {
+  name: string
+  settings: string
+  prefix: string
+}
+
+export const MANUAL_LABEL = '手工填写（别的工具，自己写名字和设置）'
+
+/** The project's tool, a custom one filled in from `custom`. */
+export function generatorInfo(project: Pick<LookProject, 'generator' | 'custom'>): GeneratorInfo {
+  if (project.generator !== 'manual' && project.generator in GENERATORS) return GENERATORS[project.generator]
+  const name = project.custom?.name.trim() || '你用的工具'
+  const settings = project.custom?.settings.trim() || '图生视频，和首帧同比例，1080P，5–6 秒，每段用同一套设置。'
+  return { name, label: MANUAL_LABEL, settings, how: `在${name}里${WEB_HOW}` }
+}
 
 export interface LookProject {
   format: typeof PROJECT_FORMAT
@@ -122,6 +170,8 @@ export interface LookProject {
   /** The scene when no rule matches (an id in `scenes`). */
   default?: string
   generator: Generator
+  /** Filled in when `generator` is `manual`. */
+  custom?: CustomGenerator
   createdAt: string
 }
 
@@ -193,7 +243,8 @@ export const NEGATIVE = '换脸, 身份漂移, 发型变化, 服装变化, 年�
 
 /** The full prompt of one clip: rules, who she is, the action. */
 export function clipPrompt(project: LookProject, kind: 'desk' | 'scene', clip: ClipPlan, scene?: ProjectScene): string {
-  return `${rules(project, kind, scene)}她是：${describe(project.card)}。${clip.action}。`
+  const prefix = project.generator === 'manual' ? project.custom?.prefix.trim() ?? '' : ''
+  return `${prefix === '' ? '' : `${prefix.replace(/[，。,.\s]+$/, '')}。`}${rules(project, kind, scene)}她是：${describe(project.card)}。${clip.action}。`
 }
 
 /** The reference picture: her on a plain screen, full length. It is also the desk pet's anchor. */
@@ -246,13 +297,45 @@ export function promptsFile(project: LookProject, part: 'desk' | ProjectScene): 
   return [
     `${project.name} · ${part === 'desk' ? '桌宠' : part.name} · 视频提示词`,
     '',
-    `首帧（和尾帧，工具支持的话）：${first}。比例和首帧一致，5–6 秒，选 1080P。`,
+    `用${generatorInfo(project).name}：${generatorInfo(project).settings}`,
+    `首帧（和尾帧，工具支持的话）：${first}。比例和首帧一致。`,
     '生成好的视频按下面的文件名命名（.mp4），放进这个文件夹。',
     '',
     `负面提示词：${NEGATIVE}`,
     '',
     ...clips.filter(c => c.off !== true).flatMap(c => [`${c.file}.mp4${c.required === true ? '（必须）' : ''}`, clipPrompt(project, kind, c, scene), '']),
   ].join('\n')
+}
+
+/** 生成清单.md: every clip with its first frame, where it goes and its prompt, for any tool. */
+export function clipList(project: LookProject, root: string): string {
+  const tool = generatorInfo(project)
+  const lines = [
+    `# ${project.name} · 视频片段清单（${tool.name}）`,
+    '',
+    `统一设置：${tool.settings}`,
+    '提示词原样使用；首尾接不上没关系，导入时会自动处理成循环。已经有的 mp4 不用重做。',
+    '',
+    `负面提示词（工具有这个框就用）：${NEGATIVE}`,
+    '',
+  ]
+  for (const item of plannedClips(project)) {
+    lines.push(`## ${item.part} / ${item.clip.file}${item.clip.required === true ? '（必须）' : ''}`, `- 首帧：\`${root}/${item.first}\``, `- 保存到：\`${root}/${item.folder}/${item.clip.file}.mp4\``, `- 提示词：${item.prompt}`, '')
+  }
+  return lines.join('\n')
+}
+
+/** ComfyUI生成清单.json: the same list for a script that drives a ComfyUI workflow. */
+export function comfyuiList(project: LookProject, root: string): string {
+  return `${JSON.stringify({
+    format: 'dsh-her-clips@1',
+    settings: GENERATORS.comfyui.settings,
+    negative: NEGATIVE,
+    clips: plannedClips(project).map(item => ({
+      part: item.part, name: item.clip.file, required: item.clip.required === true,
+      image: `${root}/${item.first}`, output: `${root}/${item.folder}/${item.clip.file}.mp4`, prompt: item.prompt,
+    })),
+  }, null, 2)}\n`
 }
 
 /** The task file for MiniMax Code: one uniform setting, at most 5 at a time, download as each finishes. */
@@ -305,6 +388,8 @@ export function validateProject(value: unknown): LookProject {
   if (!isAdult(p.card.age)) throw new Error('年龄只能是成年人（比如"二十多岁"或"25 岁"）')
   if (!Array.isArray(p.scenes) || typeof p.desk !== 'object' || !Array.isArray(p.desk?.clips)) throw new Error('项目内容不完整')
   if (!p.desk.on && p.scenes.length === 0) throw new Error('桌宠和场景至少要有一个')
+  if (p.generator !== 'manual' && !(p.generator in GENERATORS)) throw new Error('不认识这个生成工具')
+  if (p.custom !== undefined && (typeof p.custom !== 'object' || p.custom === null || [p.custom.name, p.custom.settings, p.custom.prefix].some(v => typeof v !== 'string'))) throw new Error('手工填写的工具信息不对')
   const names = new Set<string>()
   for (const scene of p.scenes) {
     if (typeof scene.id !== 'string' || typeof scene.name !== 'string' || scene.name.trim() === '' || !Array.isArray(scene.clips)) throw new Error('场景要有名字')

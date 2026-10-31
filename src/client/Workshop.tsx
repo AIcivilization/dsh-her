@@ -1,15 +1,15 @@
 /**
  * 形象工坊 (docs/形象工坊与多场景.md §4): make a look of your own. Pick who
  * she is on a character card, the scenes she lives in and the clips she
- * needs; the brain writes a folder with every prompt (and a task file for
- * MiniMax Code). Once pictures and clips are in, frame each scene's photo
+ * needs; the brain writes a folder with every prompt (and a clip list, as a
+ * task file for MiniMax Code or a JSON list for ComfyUI). Once pictures and clips are in, frame each scene's photo
  * on the body and import the whole look.
  */
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import {
-  CARD_CHOICES, CARD_LABELS, clipPrompt, customClip, describe, DESK_DIR, newScene, POSE_WORDS, referencePrompt, sceneDir, scenePhotoPrompt,
-  type CharacterCard, type ClipPlan, type LookProject, type Pose, type ProjectScene, type WorkshopCard,
+  CARD_CHOICES, CARD_LABELS, clipPrompt, customClip, describe, DESK_DIR, GENERATORS, generatorInfo, MANUAL_LABEL, newScene, POSE_WORDS, referencePrompt, sceneDir, scenePhotoPrompt,
+  type CharacterCard, type ClipPlan, type Generator, type LookProject, type Pose, type ProjectScene, type WorkshopCard,
 } from '../core/workshop.ts'
 import type { ProjectStatus } from '../dsh/workshop.ts'
 import { herApi, type StateView } from './api.ts'
@@ -146,7 +146,7 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
     <>
       <div className="her-card">
         <h2>形象工坊</h2>
-        <p className="her-muted">做一个你自己的她：选好她的样子、她住在哪些场景里，这里会把每一张图、每一段视频的提示词都写好，放进「文稿 / dsh-her 素材」里的一个文件夹。你用豆包、即梦、MiniMax 这些工具生成，放回文件夹，再一键导入。</p>
+        <p className="her-muted">做一个你自己的她：选好她的样子、她住在哪些场景里，这里会把每一张图、每一段视频的提示词都写好，放进「文稿 / dsh-her 素材」里的一个文件夹。你用即梦、可灵、MiniMax、ComfyUI 这些工具生成，放回文件夹，再一键导入。</p>
         <div className="her-grid">
           {items.map(item => (
             <button key={item.project.id} className={`her-choice ${item.project.id === open ? 'on' : ''}`} onClick={() => choose(item)}>
@@ -180,12 +180,32 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
               </div>
               <div style={{ flex: 1, minWidth: 160 }}>
                 <label className="her-label">用什么生成视频</label>
-                <select className="her-select" value={draft.generator} onChange={e => edit(p => { p.generator = e.target.value as LookProject['generator'] })}>
-                  <option value="minimax">MiniMax Code（给它任务文件，自动生成下载）</option>
-                  <option value="manual">即梦、可灵等（自己一段段复制提示词）</option>
+                <select className="her-select" value={draft.generator} onChange={e => edit(p => {
+                  p.generator = e.target.value as Generator
+                  if (p.generator === 'manual') p.custom ??= { name: '', settings: '', prefix: '' }
+                })}>
+                  {(Object.keys(GENERATORS) as Array<keyof typeof GENERATORS>).map(id => <option key={id} value={id}>{GENERATORS[id].label}</option>)}
+                  <option value="manual">{MANUAL_LABEL}</option>
                 </select>
               </div>
             </div>
+            {draft.generator === 'manual' && draft.custom !== undefined && (
+              <div className="her-row">
+                <div style={{ flex: 1, minWidth: 140 }}>
+                  <label className="her-label">工具名字</label>
+                  <input className="her-input" value={draft.custom.name} placeholder="比如 Runway、PixVerse、自己的工作流" onChange={e => edit(p => { p.custom!.name = e.target.value })} />
+                </div>
+                <div style={{ flex: 2, minWidth: 220 }}>
+                  <label className="her-label">统一设置（写进每个提示词文件的开头）</label>
+                  <input className="her-input" value={draft.custom.settings} placeholder={generatorInfo({ generator: 'manual' }).settings} onChange={e => edit(p => { p.custom!.settings = e.target.value })} />
+                </div>
+                <div style={{ flex: '1 1 100%' }}>
+                  <label className="her-label">每段提示词前面加（可以不填；比如 LoRA 触发词、画风词）</label>
+                  <input className="her-input" value={draft.custom.prefix} onChange={e => edit(p => { p.custom!.prefix = e.target.value })} />
+                </div>
+              </div>
+            )}
+            <p className="her-muted">统一设置：{generatorInfo(draft).settings}</p>
             <CardEditor card={draft.card} onChange={card => edit(p => { p.card = card })} />
             <label className="her-label">角色描述（每张图、每段视频都用这一句，她才是同一个人；可以直接改）</label>
             <textarea className="her-textarea" style={{ minHeight: 60 }} value={draft.card.sentence} placeholder={describe({ ...draft.card, sentence: '' })} onChange={e => edit(p => { p.card.sentence = e.target.value })} />
@@ -227,8 +247,8 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
 
           {fold('import', '5. 生成、导入', status.importable ? '可以导入了' : '片段还不够', false, <>
             <ol className="her-muted" style={{ margin: '4px 0', paddingLeft: 18 }}>
-              <li>每一步填完点"保存这一步"：提示词写进项目文件夹{draft.generator === 'minimax' ? '，还有给 MiniMax Code 的「MiniMax生成任务.md」' : ''}。</li>
-              <li>{draft.generator === 'minimax' ? '在 MiniMax Code 里说："按 <项目文件夹>/MiniMax生成任务.md 生成"。' : '在即梦、可灵里一段段生成，按提示词里的文件名存进对应的文件夹。'}</li>
+              <li>每一步填完点"保存这一步"：提示词写进项目文件夹，所有片段列在「生成清单.md」{draft.generator === 'minimax' ? '，还有给 MiniMax Code 的「MiniMax生成任务.md」' : draft.generator === 'comfyui' ? '，还有给脚本用的「ComfyUI生成清单.json」' : ''}。</li>
+              <li>{generatorInfo(draft).how}</li>
               <li>场景的照片放好后点"框人物区"；片段齐了就"导入这个形象"。每部分至少要 3 段（待机、说话 ×2），其他的以后补，再导入一次就会更新。</li>
             </ol>
             <div className="her-row">
@@ -270,7 +290,9 @@ function Fold({ title, summary, done, open, onToggle, children }: { card: Worksh
   return (
     <div className="her-card">
       <button className="her-fold" onClick={onToggle} aria-expanded={open}>
-        <span className="her-fold-arrow">{open ? '▾' : '▸'}</span>
+        <span className={`her-fold-arrow${open ? ' open' : ''}`} aria-hidden="true">
+          <svg viewBox="0 0 16 16" width="14" height="14"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </span>
         <h2>{title}</h2>
         {!open && <span className={`her-fold-sum ${done ? 'her-ok' : 'her-muted'}`}>{summary}</span>}
       </button>
