@@ -28,13 +28,18 @@ export const STYLES = `
 .her-card h2{font-size:15px;font-weight:600;margin:0 0 6px}
 .her-card p{margin:4px 0}
 .her-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}
-.her-fold{display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;padding:0;color:${TEXT};font:inherit;cursor:pointer;text-align:left}
-.her-fold h2{margin:0}
-.her-fold-arrow{flex:none;display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:${LAYER2};color:${ACCENT};transition:transform .15s,background .15s}
+.her-fold{display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;padding:2px 0;color:${TEXT};font:inherit;cursor:pointer;text-align:left}
+.her-fold h2{margin:0;flex:none}
+.her-fold-arrow{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:${ACCENT};color:${ON_ACCENT};transition:transform .15s,opacity .15s}
 .her-fold-arrow.open{transform:rotate(90deg)}
-.her-fold:hover .her-fold-arrow{background:${HOVER}}
+.her-fold:hover .her-fold-arrow{opacity:.85}
 .her-fold:focus-visible{outline:2px solid ${ACCENT};outline-offset:4px;border-radius:6px}
 .her-fold-sum{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.her-fold-toggle{flex:none;font-size:12px;padding:3px 12px;border-radius:999px;border:1px solid ${LINE};background:${LAYER2};color:${TEXT}}
+.her-fold:hover .her-fold-toggle{background:${HOVER}}
+.her-foldcard.open .her-fold{margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid ${LINE}}
+.her-subtabs{margin:4px 0 6px}
+.her-badge-inline{margin:0 0 0 6px;font-size:10px;padding:0 5px}
 .her-examples{margin-top:12px}
 .her-example-row{display:flex;gap:10px;flex-wrap:wrap}
 .her-example{margin:0;width:150px}
@@ -62,6 +67,20 @@ export const STYLES = `
 .her-step{font-size:12px;padding:3px 10px;border-radius:999px;background:${LAYER1};color:${MUTED};border:none;cursor:pointer;font-family:inherit}
 .her-step.on{background:${ACCENT};color:${ON_ACCENT}}
 .her-step.done{color:${OK}}
+.her-badge{display:inline-block;font-size:11px;line-height:16px;padding:0 6px;margin-right:6px;border-radius:999px;background:${ACCENT};color:${ON_ACCENT};font-weight:600}
+.her-choice.trying{border-style:dashed;border-color:${ACCENT}}
+.her-now{margin:2px 0 8px}
+.her-now b{font-weight:600}
+.her-now .her-dot{margin-left:10px}
+.her-pending{position:sticky;bottom:8px;z-index:2;display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0;padding:8px 12px;border-radius:10px;border:1px dashed ${ACCENT};background:${v("bg-layer-1-solid", "Canvas")};box-shadow:0 4px 16px rgba(0,0,0,.25)}
+.her-pending span{flex:1;min-width:200px}
+.her-alert{border:1px solid ${DANGER};border-radius:10px;padding:8px 12px;color:${TEXT}}
+.her-card.her-alert{padding:14px 16px}
+.her-card.her-alert h2{color:${DANGER}}
+.her-summary{display:grid;grid-template-columns:auto 1fr auto auto;gap:6px 12px;align-items:center}
+.her-summary-row{display:contents}
+.her-summary-row b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.her-summary-note{font-size:12px;color:${MUTED};white-space:nowrap}
 .her-tabs{display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap}
 .her-tab{border:none;background:none;color:${MUTED};padding:6px 10px;border-radius:8px;cursor:pointer;font:inherit}
 .her-tab.on{background:${LAYER2};color:${TEXT};font-weight:600}

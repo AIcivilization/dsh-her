@@ -20,12 +20,12 @@
  * Needs the internet; not an official Microsoft API, so it may stop working.
  */
 
-import { execFile } from 'node:child_process'
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { installUv, run, uvEnv } from './uv.ts'
 
 /** audio-24khz-48kbitrate-mono-mp3: constant bitrate, so bytes give the duration. */
 const MP3_BYTES_PER_MS = 48_000 / 8 / 1000
@@ -40,15 +40,6 @@ export interface EdgeAudio {
 }
 
 export type EdgeStatus = 'missing' | 'installing' | 'ready' | 'failed'
-
-function run(cmd: string, args: string[], timeout: number, env?: NodeJS.ProcessEnv): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(cmd, args, { timeout, maxBuffer: 8 << 20, ...(env === undefined ? {} : { env: { ...process.env, ...env } }) }, (error, stdout, stderr) => {
-      if (error !== null) reject(new Error(String(stderr || error.message).trim().split('\n').slice(-2).join(' ')))
-      else resolve(String(stdout))
-    })
-  })
-}
 
 const venvBin = (root: string, name: string) => join(root, win ? 'Scripts' : 'bin', win ? `${name}.exe` : name)
 
@@ -134,11 +125,11 @@ export class EdgeVoice {
         // No Python here: uv brings one of its own, kept next to edge-tts.
         const uvHome = join(dirname(this.ownDir), 'uv')
         const uv = await installUv(uvHome)
-        const env = { UV_PYTHON_INSTALL_DIR: join(uvHome, 'python'), UV_CACHE_DIR: join(uvHome, 'cache'), UV_NO_CONFIG: '1' }
+        const env = uvEnv(uvHome)
         if (!existsSync(venvPython)) await run(uv, ['venv', '--quiet', '--python', '3.12', this.ownDir], 600_000, env)
         await run(uv, ['pip', 'install', '--quiet', '--python', venvPython, '--upgrade', 'edge-tts'], 300_000, env)
         // The downloads are installed now; only the Python itself must stay.
-        await rm(env.UV_CACHE_DIR, { recursive: true, force: true })
+        await rm(env.UV_CACHE_DIR!, { recursive: true, force: true })
       }
       if (this.bin() === undefined) throw new Error('装完了却找不到 edge-tts')
       this.state = 'ready'
@@ -169,35 +160,4 @@ async function findPython(): Promise<string | undefined> {
     }
   }
   return undefined
-}
-
-/** uv, pinned: version and the SHA-256 of each download (from the release's .sha256 files). */
-const UV_VERSION = '0.11.26'
-const UV_ASSETS: Record<string, { file: string; sha256: string }> = {
-  'darwin-arm64': { file: 'uv-aarch64-apple-darwin.tar.gz', sha256: '8f7fbf1708399b921857bce71e1d60f0d3ccf52a30caebc1c1a2f175dce13ab6' },
-  'darwin-x64': { file: 'uv-x86_64-apple-darwin.tar.gz', sha256: '922b460202707dd5f4ccacbadbe7f6a546cc46e82a99bf50ca99a7977a78eddd' },
-  'win32-x64': { file: 'uv-x86_64-pc-windows-msvc.zip', sha256: '4e1278ede866be6c0bf32d2f466cc6de7a9fb399ecf20c9ce2d186e52424be47' },
-}
-
-/** The uv binary in `uvHome`, downloaded and checked the first time. */
-async function installUv(uvHome: string): Promise<string> {
-  const key = `${process.platform}-${process.arch}`
-  const asset = UV_ASSETS[key]
-  if (asset === undefined) throw new Error(`这台电脑（${key}）没有 Python，也没有现成的办法自动装：请先装 Python 3`)
-  const dir = join(uvHome, UV_VERSION)
-  const found = [join(dir, 'uv'), join(dir, 'uv.exe'), join(dir, asset.file.replace(/\.(tar\.gz|zip)$/, ''), 'uv')].find(p => existsSync(p))
-  if (found !== undefined) return found
-  const res = await fetch(`https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${asset.file}`, { redirect: 'follow', signal: AbortSignal.timeout(300_000) })
-  if (!res.ok) throw new Error(`下载 uv 失败（${res.status}）`)
-  const bytes = Buffer.from(await res.arrayBuffer())
-  if (createHash('sha256').update(bytes).digest('hex') !== asset.sha256) throw new Error('下载的 uv 校验不对，没有使用')
-  await mkdir(dir, { recursive: true })
-  const archive = join(dir, asset.file)
-  await writeFile(archive, bytes)
-  // tar reads both the .tar.gz and (Windows 10+) the .zip.
-  await run('tar', ['-xf', archive, '-C', dir], 120_000)
-  await rm(archive, { force: true })
-  const uv = [join(dir, 'uv'), join(dir, 'uv.exe'), join(dir, asset.file.replace(/\.(tar\.gz|zip)$/, ''), 'uv')].find(p => existsSync(p))
-  if (uv === undefined) throw new Error('uv 解压后找不到')
-  return uv
 }

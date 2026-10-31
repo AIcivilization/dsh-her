@@ -34,7 +34,7 @@ import { spawn } from 'node:child_process'
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { buildSystemPrompt, extractCues, herPaths, invalidCharacter, judgeBargeIn, loadCharacter, memoryContext, performanceSection, readingMs, saveCharacter, serviceOf, speakable, type Character } from '../core/index.ts'
+import { buildSystemPrompt, DEFAULT_VOICE, extractCues, extractSounds, herPaths, invalidCharacter, judgeBargeIn, loadCharacter, memoryContext, OWN_PREFIX, performanceSection, readingMs, saveCharacter, serviceOf, SOUND_SECTION, speakable, withSounds, type Character } from '../core/index.ts'
 import { digestPrompt, notePrompt, parseDigest, transcriptOf } from '../memory/digest.ts'
 import { dayOf, FileMemory } from '../memory/store.ts'
 import { PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type LookView, type PackSummary, type WindowMode } from '../protocol/index.ts'
@@ -49,6 +49,8 @@ import type { HerConfig } from './config.ts'
 import { HerSession, type DshServices, type ModelRoute } from './her-session.ts'
 import { heardText, SpeechQueue } from '../voice/speech-queue.ts'
 import { Voice } from '../voice/voice.ts'
+import { defaultIdleMinutes, MingVoice } from '../voice/ming.ts'
+import { MING_STEPS, OwnVoices, prepareRecording } from '../voice/ming-voices.ts'
 
 interface CommandsLike {
   register(definition: {
@@ -69,8 +71,27 @@ interface LlmLike {
     system?: string
     messages: Array<{ role: 'user'; content: Array<{ type: 'text'; text: string }> }>
     maxTokens?: number
-  }): AsyncIterable<{ type: string; text?: string; reason?: unknown }>
+  }): AsyncIterable<{ type: string; text?: string; reason?: unknown; error?: unknown; message?: unknown }>
 }
+
+/** The error a model stream chunk carries, if any (an `error` chunk, or a finish whose reason is an error). */
+function chunkError(chunk: { type: string; reason?: unknown; error?: unknown; message?: unknown }): string | undefined {
+  const reason = chunk.reason as { kind?: string; error?: { message?: string } } | undefined
+  if (chunk.type === 'error') return String((chunk.error as { message?: string } | undefined)?.message ?? chunk.message ?? '模型出错了')
+  if (reason?.kind === 'error') return reason.error?.message ?? '模型出错了'
+  return undefined
+}
+
+/** What to tell you when her model failed: the likely fix, in plain words. */
+export function explainModelError(message: string, model: string): string {
+  if (/no API key|api[_ ]?key|401|unauthori[sz]ed/i.test(message)) return `她用的模型（${model}）没有 API key，没法回答。到「她 → 设置 → 模型」换一个能用的模型，或者在 dsh 的设置里给它填上 key。`
+  if (/quota|insufficient|balance|余额|429/i.test(message)) return `她用的模型（${model}）额度不够或请求太多，暂时没法回答。可以等一会儿，或在「她 → 设置 → 模型」换一个。`
+  if (/timeout|timed out|ECONN|network|fetch failed/i.test(message)) return `连不上她用的模型（${model}），检查一下网络，或者换一个模型。`
+  return `她用的模型（${model}）出错了：${message.slice(0, 160)}`
+}
+
+/** After a failed digest, wait this long before trying again (the model is probably not usable yet). */
+const DIGEST_RETRY_MS = 60 * 60_000
 
 /** The digest runs this long after you last talked, or from DIGEST_HOUR:DIGEST_MINUTE. */
 const DIGEST_IDLE_MS = 30 * 60_000
@@ -120,6 +141,10 @@ export function apply(ctx: Context, config: HerConfig): void {
   /** Resolves on the first sentence of the next reply. */
   let onFirstSentence: (() => void) | undefined
   let voice: Voice | undefined
+  /** The local Ming voice (made with the voice) and her own Ming voices. */
+  let ming: MingVoice | undefined
+  const ownVoices = new OwnVoices(join(paths.root, 'voices', 'ming'))
+  const usesMing = () => serviceOf(character.voice.id) === 'ming'
   let speech: SpeechQueue | undefined
   let nextStream = 1
   /** What you heard of her last cut-off reply; told to her before your next turn. */
@@ -138,10 +163,22 @@ export function apply(ctx: Context, config: HerConfig): void {
   /** When you last talked to her, and the day of it (for the digest). */
   let lastTalkAt = 0
   let digesting: Promise<string> | undefined
+  /** A digest that failed is not tried again before this (it ran every few minutes against a model with no key). */
+  let digestRetryAt = 0
+  /** The last reply that came out empty because her model failed; cleared by the next sentence she says. */
+  let problem: { text: string; at: number } | undefined
 
   /** Write her diary page for `day` and keep what is worth keeping; a short report. */
   const digest = (day: string): Promise<string> => {
-    digesting ??= runDigest(day).finally(() => { digesting = undefined })
+    digesting ??= runDigest(day)
+      .then(report => {
+        if (report.includes('失败')) digestRetryAt = Date.now() + DIGEST_RETRY_MS
+        return report
+      }, (error: Error) => {
+        digestRetryAt = Date.now() + DIGEST_RETRY_MS
+        throw error
+      })
+      .finally(() => { digesting = undefined })
     return digesting
   }
 
@@ -156,6 +193,8 @@ export function apply(ctx: Context, config: HerConfig): void {
       system, messages: [{ role: 'user', content: [{ type: 'text', text: user }] }], maxTokens,
     })) {
       if (chunk.type === 'text-delta' && typeof chunk.text === 'string') answer += chunk.text
+      const error = chunkError(chunk)
+      if (error !== undefined) throw new Error(error)
     }
     return answer.trim()
   }
@@ -220,6 +259,7 @@ export function apply(ctx: Context, config: HerConfig): void {
   const digestTick = () => {
     const now = new Date()
     memory.settle(now)
+    if (now.getTime() < digestRetryAt) return
     const done = memory.lastDigestDay()
     if (lastTalkAt === 0) {
       // DSH restarted since you last talked: catch up on yesterday, if it was never digested.
@@ -364,12 +404,19 @@ export function apply(ctx: Context, config: HerConfig): void {
   const broadcast = (message: BrainMessage) => server?.broadcast(message)
 
   /** A reply with no words: record what the turn did instead (tool calls, reasoning only, errors). */
-  const logQuietTurn = async () => {
+  /** Log the end of her session after a reply with no words; the model's error, when the turn ended on one. */
+  const logQuietTurn = async (): Promise<string | undefined> => {
     const id = session?.sessionId
     const query = services?.sessionQuery
-    if (id === undefined || query === undefined) return
+    if (id === undefined || query === undefined) return undefined
     try {
-      const events = (await query.readSession(id)).events.slice(-12)
+      // The reply's end can come before DSH has written the turn's end (and its error): wait for it a little.
+      let events = (await query.readSession(id)).events.slice(-12)
+      for (let i = 0; i < 10 && !events.some(e => e.type === 'turn/end'); i++) {
+        await new Promise(resolve => setTimeout(resolve, 300))
+        events = (await query.readSession(id)).events.slice(-12)
+      }
+      const failed = events.findLast(e => e.type === 'turn/end' && (e.data as { reason?: { kind?: string } }).reason?.kind === 'error')
       log({
         event: 'quiet-turn',
         events: events.map(e => {
@@ -380,8 +427,10 @@ export function apply(ctx: Context, config: HerConfig): void {
           return e.type
         }),
       })
+      return failed === undefined ? undefined : (failed.data as { reason: { error?: { message?: string } } }).reason.error?.message ?? '模型出错了'
     } catch (error) {
       log({ event: 'quiet-turn', error: (error as Error).message })
+      return undefined
     }
   }
 
@@ -413,6 +462,8 @@ export function apply(ctx: Context, config: HerConfig): void {
     cut()
     sentAt = Date.now()
     lastTalkAt = sentAt
+    // A voice that has to start up (Ming after a quiet while) starts while she thinks.
+    voice?.warm()
     broadcast({ t: 'state', cid, state: 'think' })
     clearTimeout(stuckTimer)
     stuckTimer = setTimeout(() => {
@@ -555,7 +606,10 @@ export function apply(ctx: Context, config: HerConfig): void {
         platform: process.platform,
         character,
         model: target === undefined ? null : { provider: target.provider, model: target.model, ...(target.reasoningEffort === undefined ? {} : { effort: target.reasoningEffort }), chosen: character.model !== undefined },
-        voice: { status: voice?.status ?? 'off', speaking: voice?.speaking ?? { status: 'off', service: serviceOf(character.voice.id) }, id: character.voice.id, speed: character.voice.speed },
+        voice: {
+          status: voice?.status ?? 'off', speaking: voice?.speaking ?? { status: 'off', service: serviceOf(character.voice.id) }, id: character.voice.id, speed: character.voice.speed,
+          ming: { ...(ming?.status ?? { state: 'stopped' }), installed: ming?.installed ?? false, settings: ownVoices.settings(), own: ownVoices.list() },
+        },
         body: {
           connected: body !== undefined,
           running: body !== undefined || bodyRunning(paths.root),
@@ -571,6 +625,7 @@ export function apply(ctx: Context, config: HerConfig): void {
         },
         import: importStatus,
         ...(lastHeard === undefined ? {} : { heard: lastHeard }),
+        ...(problem === undefined ? {} : { problem }),
         memory: { facts, episodes, diary, lastDigestDay: memory.lastDigestDay() ?? null },
       }
     },
@@ -699,6 +754,45 @@ export function apply(ctx: Context, config: HerConfig): void {
       if (change.go !== undefined && !bodyLook.scenes.some(s => s.id === change.go)) throw new Error('没有这个场景')
       broadcast({ t: 'look.set', ...change })
     },
+    mingInstall: () => {
+      if (ming === undefined) throw new Error('声音还没准备好')
+      void ming.install().catch(error => ctx.logger.warn(`dsh-her: ${(error as Error).message}`))
+    },
+    mingUninstall: () => {
+      if (usesMing()) api.saveCharacter({ voice: { id: DEFAULT_VOICE, speed: character.voice.speed } })
+      ming?.uninstall()
+    },
+    mingRestart: async () => {
+      await ming?.restart()
+    },
+    mingSettings: patch => {
+      const next = ownVoices.saveSettings(patch)
+      ming?.setIdleMinutes(next.idleMinutes ?? defaultIdleMinutes())
+    },
+    mingDesign: async description => {
+      if (ming === undefined) throw new Error('声音还没准备好')
+      const text = `你好呀，我是${character.name}。今天过得怎么样？有什么想跟我说的吗？`
+      const drafts = []
+      // Three takes of one description: each comes out a little different; you keep the one you like.
+      for (const seed of [11, 22, 33]) {
+        const audio = await ming.synthesize({ text, design: description, steps: MING_STEPS.quality, seed })
+        const id = ownVoices.addDraft(audio.audio, { kind: 'design', text, description })
+        drafts.push({ id, audio: Buffer.from(audio.audio).toString('base64'), durationMs: audio.durationMs })
+      }
+      return drafts
+    },
+    mingClone: async (audio, name) => {
+      const recording = await prepareRecording(Buffer.from(audio, 'base64'), name)
+      // What it says, to start from (Ming needs the words); you correct it on the page.
+      const heard = await voice?.recognize(recording.pcm16k, 16_000).catch(() => undefined)
+      const id = ownVoices.addDraft(recording.wav, { kind: 'clone', text: heard?.text ?? '' })
+      return { id, audio: Buffer.from(recording.wav).toString('base64'), durationMs: Math.round(recording.seconds * 1000), text: heard?.text ?? '' }
+    },
+    mingKeep: (draft, name, change) => ownVoices.keep(draft, name, change),
+    mingRemove: id => {
+      if (character.voice.id === `${OWN_PREFIX}${id}`) api.saveCharacter({ voice: { id: 'ming:灵风信', speed: character.voice.speed } })
+      ownVoices.remove(id)
+    },
     memoryRemove: ids => memory.remove(ids),
     memoryConfirm: ids => memory.confirm(ids),
     digest: () => digest(dayOf(new Date())),
@@ -711,7 +805,7 @@ export function apply(ctx: Context, config: HerConfig): void {
     session = new HerSession({
       cid,
       character: () => character,
-      performance: () => performanceSection(bodyPack),
+      performance: () => [performanceSection(bodyPack), usesMing() ? SOUND_SECTION : ''].filter(Boolean).join('\n'),
       playAction,
       aboutYou,
       memory,
@@ -736,18 +830,28 @@ export function apply(ctx: Context, config: HerConfig): void {
           }
           onFirstSentence?.()
           onFirstSentence = undefined
+          problem = undefined
           log({ event: 'sentence', attemptId, text, sinceSendMs: sentAt === undefined ? null : now - sentAt })
-          const performed = extractCues(text, bodyPack)
-          if (performed.text !== '' || performed.cues.length > 0) speech?.say(attemptId, seq, performed.text, performed.cues)
+          // Ming can sigh and laugh: those tags become its sound markers, out of the subtitle.
+          const sounds = usesMing() ? extractSounds(text) : undefined
+          const performed = extractCues(sounds?.text ?? text, bodyPack)
+          const spoken = sounds !== undefined && sounds.before.length + sounds.after.length > 0 ? withSounds(performed.text, sounds) : undefined
+          if (performed.text !== '' || performed.cues.length > 0) speech?.say(attemptId, seq, performed.text, performed.cues, spoken)
         },
         end(attemptId, outcome) {
           log({ event: 'end', attemptId, outcome, sinceSendMs: sentAt === undefined ? null : Date.now() - sentAt })
           if (current?.attemptId === attemptId) {
             current.outcome = outcome
-            if (current.sentences.length === 0 && outcome !== 'committed') {
-              broadcast({ t: 'bubble', cid, text: '（我刚才没说出话来，模型可能出错了）', ttlMs: 6000 })
+            if (current.sentences.length === 0) {
+              // No words at all: say why, on her and on the page (a model without a key used to fail silently).
+              const model = route()
+              void logQuietTurn().then(error => {
+                if (error === undefined && outcome === 'committed') return
+                const text = error === undefined ? '我刚才没说出话来，模型可能出错了' : explainModelError(error, model === undefined ? '没有模型' : `${model.provider} / ${model.model}`)
+                problem = { text, at: Date.now() }
+                broadcast({ t: 'bubble', cid, text: `（${text}）`, ttlMs: 12_000 })
+              })
             }
-            if (current.sentences.length === 0) void logQuietTurn()
             finished.push(current)
             if (finished.length > 20) finished.shift()
           }
@@ -758,10 +862,11 @@ export function apply(ctx: Context, config: HerConfig): void {
     } as ConstructorParameters<typeof HerSession>[0])
     if (services !== undefined) open()
 
-    voice = new Voice(paths.models, join(paths.root, 'edge-tts'), { ...config.voice, voice: character.voice.id, speed: character.voice.speed }, ctx.logger)
+    ming = new MingVoice(join(paths.root, 'ming'), join(paths.root, 'uv'), ctx.logger, ownVoices.settings().idleMinutes ?? defaultIdleMinutes())
+    voice = new Voice(paths.models, join(paths.root, 'edge-tts'), { ...config.voice, voice: character.voice.id, speed: character.voice.speed }, ctx.logger, { voice: ming, own: ownVoices })
     const herVoice = voice
     void herVoice.start()
-    speech = new SpeechQueue(text => herVoice.synthesize(speakable(text)), {
+    speech = new SpeechQueue((text, cues) => herVoice.synthesize(speakable(text), cues), {
       sentence(uid, seq, text, audio, cues) {
         const withCues = cues.length === 0 ? {} : { cues }
         if (audio === undefined) {
@@ -840,6 +945,7 @@ export function apply(ctx: Context, config: HerConfig): void {
       clearTimeout(stuckTimer)
       herVoice.stop()
       voice = undefined
+      ming = undefined
       speech = undefined
       const closing = session
       session = undefined

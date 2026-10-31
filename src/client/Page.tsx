@@ -5,11 +5,13 @@
  * and every change shows the state the brain answers with.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { herApi, type StateView } from './api.ts'
-import { voiceName } from '../core/voices.ts'
+import { serviceOf } from '../core/voices.ts'
 import { Workshop } from './Workshop.tsx'
-import { BodyStatus, Dot, KeyHelp, MemoryView, MicCheck, ModelPicker, ModePicker, PackPicker, PersonaEditor, ScenePicker, VoicePicker, type Apply } from './parts.tsx'
+import { Fold, useFolds } from './fold.tsx'
+import { SERVICE_SHORT, voiceLabel } from './choice.tsx'
+import { BodyStatus, Dot, KeyHelp, MemoryView, MicCheck, ModelPicker, MODE_TEXT, ModePicker, PackPicker, PersonaEditor, ScenePicker, VoicePicker, type Apply } from './parts.tsx'
 
 const POLL_MS = 2000
 
@@ -154,6 +156,12 @@ const TABS: Array<[Tab, string]> = [['overview', '概况'], ['settings', '设置
 
 function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; onWizard: () => void }) {
   const [tab, setTab] = useState<Tab>('overview')
+  /** A part of the settings to scroll to once the tab is shown. */
+  const [jump, setJump] = useState<Section>()
+  const goSettings = (section: Section) => {
+    setTab('settings')
+    setJump(section)
+  }
   return (
     <>
       <div className="her-head">
@@ -165,14 +173,21 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
       </div>
       {tab === 'overview' && (
         <>
+          {state.problem !== undefined && (
+            <div className="her-card her-alert">
+              <h2>她刚才没能回答</h2>
+              <p>{state.problem.text}</p>
+              <div className="her-row"><button className="her-btn primary" onClick={() => goSettings('model')}>去换模型</button></div>
+            </div>
+          )}
           <div className="her-card">
             <h2>身体</h2>
             <BodyStatus state={state} apply={apply} />
           </div>
           <div className="her-card">
             <h2>大脑</h2>
-            <p>{state.model === null ? <><Dot tone="bad" />没有可用的模型</> : <><Dot tone="ok" />{state.model.provider} / {state.model.model}{state.model.chosen ? '' : '（dsh 默认）'}</>}</p>
-            <p><Dot tone={toneOf(state.voice.speaking.status)} />她的声音：{speakingText(state.voice.speaking.status, state.voice.speaking.service)}（{voiceName(state.character.voice.id)}）</p>
+            <p>{state.model === null ? <><Dot tone="bad" />没有可用的模型</> : <><Dot tone={state.problem === undefined ? 'ok' : 'bad'} />{state.model.provider} / {state.model.model}{state.model.chosen ? '' : '（dsh 默认）'}{state.problem === undefined ? '' : '：上一次回答失败了'}</>}</p>
+            <p><Dot tone={toneOf(state.voice.speaking.status)} />她的声音：{speakingText(state.voice.speaking.status, state.voice.speaking.service)}（{voiceLabel(state, state.character.voice.id)}）</p>
             {(state.voice.speaking.status === 'no-key' || state.voice.speaking.status === 'no-quota') && <KeyHelp state={state} />}
             <p><Dot tone={toneOf(state.voice.status)} />听你说话：{listeningText(state.voice.status)}</p>
             <p className="her-muted">记得 {state.memory.facts.length} 件关于你的事、{state.memory.episodes.length} 个事件，写了 {state.memory.diary.length} 天日记。</p>
@@ -181,28 +196,47 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
           <p className="her-muted">改人设、换声音、外形、模型，都在"设置"里；她记住了什么，在"她记得的事"里。</p>
         </>
       )}
-      {tab === 'settings' && <Settings state={state} apply={apply} />}
+      {tab === 'settings' && <Settings state={state} apply={apply} jump={jump} onJumped={() => setJump(undefined)} />}
       {tab === 'memory' && <MemoryView state={state} apply={apply} />}
       {tab === 'workshop' && <Workshop state={state} apply={apply} />}
     </>
   )
 }
 
-const SECTIONS = [['persona', '人设'], ['voice', '声音'], ['look', '外形'], ['model', '模型'], ['place', '放在哪里']] as const
+type Section = 'persona' | 'voice' | 'look' | 'model' | 'place'
 
-/** Everything she can be set to, on one page; the links on top jump to each part. */
-function Settings({ state, apply }: { state: StateView; apply: Apply }) {
-  const jump = (id: string) => document.getElementById(`her-set-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+const SETTINGS_FOLDS: Record<Section, boolean> = { persona: false, voice: false, look: false, model: false, place: false }
+
+/**
+ * Everything she can be set to, one folded card each. Folded, a card is one
+ * line: what she uses now and whether it works; open, it is the picker.
+ */
+function Settings({ state, apply, jump, onJumped }: { state: StateView; apply: Apply; jump?: Section; onJumped: () => void }) {
+  const [open, toggle] = useFolds<Section>('dsh-her.settings.open', SETTINGS_FOLDS)
+  useEffect(() => {
+    if (jump === undefined) return
+    toggle(jump, true)
+    // After the card has opened.
+    setTimeout(() => document.getElementById(`her-set-${jump}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+    onJumped()
+  }, [jump, onJumped, toggle])
+  const c = state.character
+  const body = state.body
+  const speaking = state.voice.speaking.status
+  const pack = body.packs.find(p => p.packId === body.activePack)
+  const card = (id: Section, title: string, summary: string, tone: 'ok' | 'warn' | 'bad' | 'off', children: ReactNode) => (
+    <Fold id={`her-set-${id}`} title={title} summary={summary} tone={tone} open={open[id]} onToggle={() => toggle(id)}>{children}</Fold>
+  )
   return (
     <>
-      <div className="her-steps">
-        {SECTIONS.map(([id, label]) => <button key={id} className="her-step" onClick={() => jump(id)}>{label}</button>)}
-      </div>
-      <div className="her-card" id="her-set-persona"><h2>人设</h2><PersonaEditor state={state} apply={apply} /></div>
-      <div className="her-card" id="her-set-voice"><h2>声音</h2><VoicePicker state={state} apply={apply} saveLabel="用这个声音" /></div>
-      <div className="her-card" id="her-set-look"><h2>外形</h2><PackPicker state={state} apply={apply} /><ScenePicker state={state} apply={apply} /></div>
-      <div className="her-card" id="her-set-model"><h2>模型</h2><ModelPicker state={state} apply={apply} /></div>
-      <div className="her-card" id="her-set-place"><h2>放在哪里</h2><ModePicker state={state} apply={apply} /></div>
+      {card('persona', '人设', `${c.name}，叫你「${c.callYou || '（没设）'}」`, 'ok', <PersonaEditor state={state} apply={apply} />)}
+      {card('voice', '声音', `${voiceLabel(state, c.voice.id)} · ${SERVICE_SHORT[serviceOf(c.voice.id)]} · ${speakingText(speaking, state.voice.speaking.service)}`, toneOf(speaking),
+        <VoicePicker state={state} apply={apply} saveLabel="用这个声音" />)}
+      {card('look', '外形', body.connected ? `${pack?.name ?? '还没有外形'}${body.look === undefined ? '' : ` · ${body.look.scenes.length} 个场景`}` : '身体没连上', body.connected ? (pack === undefined ? 'warn' : 'ok') : 'off',
+        <><PackPicker state={state} apply={apply} /><ScenePicker state={state} apply={apply} /></>)}
+      {card('model', '模型', state.model === null ? '没有可用的模型' : `${state.model.provider} / ${state.model.model}${state.model.chosen ? '' : '（dsh 默认）'}${state.problem === undefined ? '' : ' · 上一次回答失败了'}`,
+        state.model === null || state.problem !== undefined ? 'bad' : 'ok', <ModelPicker state={state} apply={apply} />)}
+      {card('place', '放在哪里', body.connected ? (body.mode === undefined ? '—' : MODE_TEXT[body.mode]?.title ?? body.mode) : '身体没连上', body.connected ? 'ok' : 'off', <ModePicker state={state} apply={apply} />)}
     </>
   )
 }
@@ -215,14 +249,14 @@ function toneOf(status: string): 'ok' | 'warn' | 'bad' | 'off' {
 }
 
 function speakingText(status: string, service: string): string {
-  const name = service === 'edge' ? '微软 Edge' : '阿里云百炼'
+  const name = service === 'edge' ? '微软 Edge' : service === 'ming' ? '本机 Ming' : '阿里云百炼'
   switch (status) {
     case 'ready': return `已就绪（${name}）`
-    case 'checking': return `正在连接${name}`
-    case 'installing': return '正在准备 Edge 语音组件（第一次用，一两分钟）'
+    case 'checking': return service === 'ming' ? '正在加载本机 Ming（约 8 秒）' : `正在连接${name}`
+    case 'installing': return service === 'ming' ? '正在安装本机 Ming（在 设置 → 声音 里看进度）' : '正在准备 Edge 语音组件（第一次用，一两分钟）'
     case 'no-key': return '还没有百炼的 API key，现在只用文字回答'
     case 'no-quota': return '百炼的额度用完了，现在只用文字回答'
-    case 'failed': return `${name}的语音出错了，暂时只用文字（会自动重试）`
+    case 'failed': return service === 'ming' ? '本机 Ming 用不了，暂时只用文字（在 设置 → 声音 里看原因、重启）' : `${name}的语音出错了，暂时只用文字（会自动重试）`
     case 'off': return '已关闭，只用文字'
     default: return status
   }

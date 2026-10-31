@@ -23,6 +23,7 @@
   "author": "AIcivilization",
   "files": [
     "lib",
+    "python",
     "cordis.patch.yml",
     "README.md",
     "examples"

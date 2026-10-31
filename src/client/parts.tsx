@@ -5,12 +5,14 @@
  */
 
 import { useEffect, useState } from 'react'
-import { SERVICE_NAMES, VOICES, type VoiceService } from '../core/voices.ts'
+import { serviceOf, SERVICE_NAMES, VOICES, type VoiceService } from '../core/voices.ts'
+import { choiceClass, choiceNote, SERVICE_SHORT, voiceLabel } from './choice.tsx'
 import { herApi, modelCatalog, playAudio, type ModelGroup, type Result, type StateView } from './api.ts'
+import { MingSection } from './MingVoice.tsx'
 
 export type Apply = (call: Promise<Result<{ state: StateView }>>) => Promise<boolean>
 
-const MODE_TEXT: Record<string, { title: string; desc: string }> = {
+export const MODE_TEXT: Record<string, { title: string; desc: string }> = {
   overlay: { title: '浮在最上层', desc: '像桌宠一样在所有窗口上面，可以拖动、点她' },
   wallpaper: { title: '住在壁纸里', desc: '在桌面图标和所有窗口下面，只看不点；按快捷键叫她出来' },
   window: { title: '普通窗口', desc: '一个可以关掉的窗口' },
@@ -87,7 +89,7 @@ export function PackPicker({ state, apply }: { state: StateView; apply: Apply })
         {body.packs.map(pack => (
           <button key={pack.packId} className={`her-choice ${pack.packId === body.activePack ? 'on' : ''}`} onClick={() => void apply(herApi.usePack(pack.packId))}>
             {pack.name}
-            <small>{pack.packId.startsWith('look:') ? '多场景形象' : pack.layer === 'scene' ? '壁纸场景' : '桌宠'} · {pack.actions.filter(a => !a.id.startsWith('scene_')).length} 个动作{pack.emotions.length > 0 ? ` · ${pack.emotions.length} 种情绪` : ''}</small>
+            <small>{choiceNote(pack.packId, body.activePack ?? '', `${pack.packId.startsWith('look:') ? '多场景形象' : pack.layer === 'scene' ? '壁纸场景' : '桌宠'} · ${pack.actions.filter(a => !a.id.startsWith('scene_')).length} 个动作${pack.emotions.length > 0 ? ` · ${pack.emotions.length} 种情绪` : ''}`)}</small>
           </button>
         ))}
         {body.packs.length === 0 && <p className="her-muted">还没有导入过外形包。</p>}
@@ -123,6 +125,7 @@ export function PersonaEditor({ state, apply, onSaved, saveLabel = '保存' }: {
   const [error, setError] = useState<string>()
   const [chat, setChat] = useState<Array<{ who: 'you' | 'her'; text: string }>>([])
   const [line, setLine] = useState('')
+  const dirty = name !== c.name || callYou !== c.callYou || pronoun !== c.pronoun || persona !== c.persona
 
   const expand = async () => {
     setBusy('expand')
@@ -178,7 +181,10 @@ export function PersonaEditor({ state, apply, onSaved, saveLabel = '保存' }: {
         <button className="her-btn" disabled={busy !== undefined || persona.trim() === ''} onClick={() => void tryOne()}>{busy === 'try' ? '…' : '发送'}</button>
       </div>
       {error !== undefined && <p className="her-error">{error}</p>}
-      <div className="her-row"><button className="her-btn primary" disabled={busy !== undefined} onClick={() => void save()}>{saveLabel}</button></div>
+      <div className="her-row">
+        <button className="her-btn primary" disabled={busy !== undefined || (!dirty && onSaved === undefined)} onClick={() => void save()}>{saveLabel}</button>
+        {dirty ? <span className="her-warn">有改动还没保存</span> : onSaved === undefined && <span className="her-muted">✓ 已保存，她正在用这份人设</span>}
+      </div>
     </div>
   )
 }
@@ -206,13 +212,17 @@ export function KeyHelp({ state }: { state: StateView }) {
 }
 
 export function VoicePicker({ state, apply, onSaved, saveLabel = '用这个声音' }: { state: StateView; apply: Apply; onSaved?: () => void; saveLabel?: string }) {
-  const [voice, setVoice] = useState(state.character.voice.id)
-  const [speed, setSpeed] = useState(state.character.voice.speed)
+  const inUse = state.character.voice
+  // Clicking a voice plays it and marks it to try; she only switches when you say so.
+  const [trying, setTrying] = useState(inUse.id)
+  const [speed, setSpeed] = useState(inUse.speed)
   const [error, setError] = useState<string>()
   const [playing, setPlaying] = useState<string>()
+  // One service at a time (tabs), starting on the one she uses.
+  const [service, setService] = useState<VoiceService>(serviceOf(inUse.id))
   const { status: speaking, error: speakingError } = state.voice.speaking
   const listen = async (which: string) => {
-    setVoice(which)
+    setTrying(which)
     setPlaying(which)
     setError(undefined)
     const result = await herApi.previewVoice(which, speed, `你好呀，我是${state.character.name}，我在你桌面上等你好久啦。今天过得怎么样？`)
@@ -221,36 +231,72 @@ export function VoicePicker({ state, apply, onSaved, saveLabel = '用这个声�
     else setError(result.message)
   }
   const save = async () => {
-    if (await apply(herApi.saveCharacter({ voice, speed }))) onSaved?.()
+    if (await apply(herApi.saveCharacter({ voice: trying, speed }))) onSaved?.()
   }
+  const changed = trying !== inUse.id || speed !== inUse.speed
   return (
     <div>
+      <p className="her-now">正在用：<b>{voiceLabel(state, inUse.id)}</b>（{SERVICE_SHORT[serviceOf(inUse.id)]}，语速 {inUse.speed.toFixed(1)}）<Dot tone={speakingTone(speaking)} />{speakingShort(speaking)}</p>
       {(speaking === 'no-key' || speaking === 'no-quota') && <KeyHelp state={state} />}
       {speaking === 'off' && <p className="her-warn">她的声音已关闭（插件设置里 voice.enabled 是 false），只用文字回答。</p>}
-      {speaking === 'installing' && <p className="her-muted">第一次用，正在准备 Edge 语音组件（一两分钟）…</p>}
-      {speaking === 'failed' && <p className="her-warn">她的声音刚才出错了：{speakingError ?? '未知原因'}。会自动重试。</p>}
-      {(['edge', 'cosyvoice'] as VoiceService[]).map(service => (
-        <div key={service}>
-          <label className="her-label">{SERVICE_NAMES[service]}</label>
-          <div className="her-grid">
-            {VOICES.filter(v => v.service === service).map(v => (
-              <button key={v.id} className={`her-choice ${v.id === voice ? 'on' : ''}`} disabled={speaking === 'off'} onClick={() => void listen(v.id)}>
-                {v.name}<small>{playing === v.id ? '正在合成…' : `${v.desc} · 点一下试听`}</small>
-              </button>
-            ))}
+      {speaking === 'installing' && state.voice.speaking.service === 'edge' && <p className="her-muted">第一次用，正在准备 Edge 语音组件（一两分钟）…</p>}
+      {speaking === 'failed' && <p className="her-warn">她的声音出错了：{speakingError ?? '未知原因'}。{state.voice.speaking.service === 'ming' ? '' : '会自动重试。'}</p>}
+      <div className="her-tabs her-subtabs">
+        {(['edge', 'cosyvoice', 'ming'] as VoiceService[]).map(id => (
+          <button key={id} className={`her-tab ${service === id ? 'on' : ''}`} onClick={() => setService(id)}>
+            {SERVICE_SHORT[id]}{serviceOf(inUse.id) === id && <span className="her-badge her-badge-inline">在用</span>}
+          </button>
+        ))}
+      </div>
+      {service === 'ming'
+        ? <MingSection state={state} apply={apply} inUse={inUse.id} trying={trying} {...(playing === undefined ? {} : { playing })} onListen={id => void listen(id)} />
+        : (
+          <div>
+            <label className="her-label">{SERVICE_NAMES[service]}</label>
+            <div className="her-grid">
+              {VOICES.filter(v => v.service === service).map(v => (
+                <button key={v.id} className={choiceClass(v.id, inUse.id, trying)} disabled={speaking === 'off'} onClick={() => void listen(v.id)}>
+                  {v.name}<small>{choiceNote(v.id, inUse.id, `${v.desc}${v.id === inUse.id ? '' : ' · 点一下试听'}`, playing)}</small>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        )}
       <div className="her-row">
         <span className="her-muted">语速 {speed.toFixed(1)}</span>
         <input type="range" min={0.7} max={1.4} step={0.1} value={speed} onChange={e => setSpeed(Number(e.target.value))} />
-        <button className="her-btn" disabled={speaking === 'off'} onClick={() => void listen(voice)}>用这个语速试听</button>
+        <button className="her-btn" disabled={speaking === 'off'} onClick={() => void listen(trying)}>用这个语速试听</button>
       </div>
-      <p className="her-faint">Edge 的声音免费，但不是微软公开的正式接口，可能哪天失效；百炼的声音更稳，要 key 和付费额度。用你自己录的声音克隆，之后会加在这里。</p>
+      {changed && (
+        <div className="her-pending">
+          <span>你在试「{voiceLabel(state, trying)}」{speed !== inUse.speed ? `，语速 ${speed.toFixed(1)}` : ''}，还没换上。</span>
+          <button className="her-btn primary" onClick={() => void save()}>{onSaved === undefined ? `换成「${voiceLabel(state, trying)}」` : saveLabel}</button>
+          <button className="her-btn" onClick={() => { setTrying(inUse.id); setSpeed(inUse.speed) }}>不换了</button>
+        </div>
+      )}
+      {!changed && onSaved !== undefined && <div className="her-row"><button className="her-btn primary" onClick={() => onSaved()}>{saveLabel}</button></div>}
+      <p className="her-faint">Edge 的声音免费，但不是微软公开的正式接口，可能哪天失效；百炼的声音更稳，要 key 和付费额度；本机 Ming 不联网、免费、能表达情绪，还能设计或克隆她自己的声音，但要先装（约 2 GB）。</p>
       {error !== undefined && <p className="her-error">{error}</p>}
-      <div className="her-row"><button className="her-btn primary" onClick={() => void save()}>{saveLabel}</button></div>
     </div>
   )
+}
+
+function speakingTone(status: string): 'ok' | 'warn' | 'bad' | 'off' {
+  if (status === 'ready') return 'ok'
+  if (status === 'off') return 'off'
+  return status === 'checking' || status === 'installing' ? 'warn' : 'bad'
+}
+
+function speakingShort(status: string): string {
+  switch (status) {
+    case 'ready': return '正常'
+    case 'checking': return '正在准备'
+    case 'installing': return '正在安装'
+    case 'no-key': return '缺 key'
+    case 'no-quota': return '额度用完'
+    case 'off': return '已关闭'
+    default: return '出错了'
+  }
 }
 
 const DEFAULT_CHOICE = ''
@@ -279,16 +325,23 @@ export function ModelPicker({ state, apply }: { state: StateView; apply: Apply }
     const value = provider === undefined ? null : { provider, model, ...(effort === '' ? {} : { effort }) }
     if (await apply(herApi.saveCharacter({ model: value }))) setSaved(true)
   }
+  const changed = choice !== (chosen === undefined ? DEFAULT_CHOICE : `${chosen.provider}/${chosen.model}`) || effort !== (chosen?.effort ?? '')
   return (
     <div>
-      <p className="her-muted">
-        现在用的：{state.model === null ? '没有可用的模型' : `${nameOf(state.model.provider, state.model.model)}${state.model.effort ? `（思考：${state.model.effort}）` : ''}`}
-        {state.model !== null && !state.model.chosen && '（dsh 的默认模型）'}
+      <p className="her-now">
+        正在用：{state.model === null ? <b>没有可用的模型</b> : <b>{nameOf(state.model.provider, state.model.model)}</b>}
+        {state.model?.effort ? `（思考：${state.model.effort}）` : ''}
+        {state.model !== null && !state.model.chosen && '（跟随 dsh 的默认模型）'}
+        <Dot tone={state.model === null || state.problem !== undefined ? 'bad' : 'ok'} />{state.model === null ? '她没法说话' : state.problem !== undefined ? '上一次回答失败了' : '正常'}
       </p>
+      {state.problem !== undefined && <p className="her-alert">{state.problem.text}</p>}
       {loadError !== undefined && <p className="her-error">拿不到 dsh 的模型列表：{loadError}</p>}
       <div className="her-row">
         <select className="her-select" style={{ flex: 1, minWidth: 220 }} value={choice} disabled={groups === undefined} onChange={e => { setChoice(e.target.value); setEffort('') }}>
           <option value={DEFAULT_CHOICE}>跟随 dsh 的默认模型</option>
+          {chosen !== undefined && groups !== undefined && !groups.some(g => g.id === chosen.provider && g.models.some(m => m.id === chosen.model)) && (
+            <option value={`${chosen.provider}/${chosen.model}`}>{chosen.provider} / {chosen.model}（不在 dsh 的模型列表里）</option>
+          )}
           {groups?.map(g => (
             <optgroup key={g.id} label={g.name}>
               {g.models.map(m => <option key={m.id} value={`${g.id}/${m.id}`}>{m.name}</option>)}
@@ -299,9 +352,10 @@ export function ModelPicker({ state, apply }: { state: StateView; apply: Apply }
           <option value="">思考：默认</option>
           {efforts.map(x => <option key={x.id} value={x.id}>思考：{x.name}</option>)}
         </select>
-        <button className="her-btn primary" disabled={groups === undefined} onClick={() => void save()}>用这个模型</button>
+        <button className="her-btn primary" disabled={groups === undefined || !changed} onClick={() => void save()}>{changed ? '换成这个模型' : '正在用这个'}</button>
       </div>
-      {saved && <p className="her-ok">已换好，从她的下一句话开始生效；之前聊过的都还在。</p>}
+      {changed && <p className="her-warn">选了新的模型，还没换上：点"换成这个模型"。</p>}
+      {saved && !changed && <p className="her-ok">已换好，从她的下一句话开始生效；之前聊过的都还在。</p>}
       <p className="her-faint">聊天要的是快：选 Flash 一类的快模型、思考选 Low（或 Off），她开口会快很多。模型的账号和价格在 dsh 的设置里管。</p>
     </div>
   )
@@ -350,7 +404,7 @@ export function ModePicker({ state, apply }: { state: StateView; apply: Apply })
     <div className="her-grid">
       {(['overlay', 'wallpaper', 'window'] as const).map(mode => (
         <button key={mode} className={`her-choice ${current === mode ? 'on' : ''}`} disabled={!state.body.connected} onClick={() => void apply(herApi.setMode(mode))}>
-          {MODE_TEXT[mode]!.title}<small>{MODE_TEXT[mode]!.desc}</small>
+          {MODE_TEXT[mode]!.title}<small>{choiceNote(mode, current ?? '', MODE_TEXT[mode]!.desc)}</small>
         </button>
       ))}
     </div>

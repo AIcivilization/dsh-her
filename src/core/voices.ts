@@ -5,18 +5,23 @@
  *   needs the internet; voice/edge.ts);
  * - cosyvoice: Alibaba Cloud Model Studio (百炼) CosyVoice, model
  *   cosyvoice-v3-flash (needs a key and paid quota; voice/cosyvoice.ts). Its
- *   ids are the API's `voice` parameter, exactly as listed.
+ *   ids are the API's `voice` parameter, exactly as listed;
+ * - ming: Ming-3.0-tts on this computer (Apple chips; voice/ming.ts). Built-in
+ *   voices are `ming:<name>`; voices made on the "她" page (designed from a
+ *   description, or cloned from a recording) are `ming-own:<id>`.
  */
 
 export const VOICE_MODEL = 'cosyvoice-v3-flash'
 
-export type VoiceService = 'edge' | 'cosyvoice'
+export type VoiceService = 'edge' | 'cosyvoice' | 'ming'
 
 export interface VoiceOption {
   id: string
   name: string
   desc: string
   service: VoiceService
+  /** Ming voices recorded in several moods: the moods it has (`灵风信_高兴` …). */
+  moods?: readonly string[]
 }
 
 export const VOICES: readonly VoiceOption[] = [
@@ -39,6 +44,13 @@ export const VOICES: readonly VoiceOption[] = [
   { id: 'longyingling_v3', name: '龙应聆', desc: '温和，会共情', service: 'cosyvoice' },
   { id: 'longanwen_v3', name: '龙安温', desc: '优雅，知性', service: 'cosyvoice' },
   { id: 'longxiaochun_v3', name: '龙小淳', desc: '知性，积极', service: 'cosyvoice' },
+  // Ming's built-in voices that suit her: grown-up women, warm or sweet (the catalog's "girlfriend" voices).
+  { id: 'ming:灵风信', name: '灵风信', desc: '体贴，温暖安心，带情绪', service: 'ming', moods: ['中性', '高兴', '悲伤', '生气', '厌恶'] },
+  { id: 'ming:灵雨汐', name: '灵雨汐', desc: '软糯，有气声，带情绪', service: 'ming', moods: ['中性', '高兴', '悲伤', '惊讶', '恐惧'] },
+  { id: 'ming:灵梦', name: '灵梦', desc: '很甜，爱撒娇', service: 'ming' },
+  { id: 'ming:灵恬', name: '灵恬', desc: '甜蜜，温柔', service: 'ming' },
+  { id: 'ming:灵小汐', name: '灵小汐', desc: '清甜，自然', service: 'ming' },
+  { id: 'ming:灵小芸', name: '灵小芸', desc: '温和，像知心朋友', service: 'ming' },
 ]
 
 export const DEFAULT_VOICE = 'zh-CN-XiaoxiaoNeural'
@@ -49,10 +61,30 @@ export function voiceName(id: string): string {
 
 /** Which service a voice belongs to; an id not in the list goes by its shape (Edge ids end in "Neural"). */
 export function serviceOf(id: string): VoiceService {
+  if (id.startsWith('ming:') || id.startsWith(OWN_PREFIX)) return 'ming'
   return VOICES.find(v => v.id === id)?.service ?? (/Neural$/.test(id) ? 'edge' : 'cosyvoice')
+}
+
+/** A Ming voice made on the "她" page. */
+export const OWN_PREFIX = 'ming-own:'
+
+/** Her emotions (core/cues.ts) as Ming moods; the others are said plainly. */
+export const MING_MOODS: Record<string, string> = { happy: '高兴', sad: '悲伤', angry: '生气', surprised: '惊讶' }
+
+/** How Ming says a sentence in a voice: a built-in voice (its mood version when it has one) or one of your own, plus mood and speed. */
+export function mingSpeech(id: string, emotion: string | undefined, speed: number): { voice?: string; own?: string; emotion?: string; speed?: string } {
+  const mood = emotion === undefined ? undefined : MING_MOODS[emotion]
+  const pace = speed < 0.9 ? '慢速' : speed > 1.1 ? '快速' : undefined
+  const extra = { ...(pace === undefined ? {} : { speed: pace }) }
+  if (id.startsWith(OWN_PREFIX)) return { own: id.slice(OWN_PREFIX.length), ...(mood === undefined ? {} : { emotion: mood }), ...extra }
+  const name = id.slice('ming:'.length)
+  const moods = VOICES.find(v => v.id === id)?.moods
+  if (moods !== undefined) return { voice: `${name}_${mood !== undefined && moods.includes(mood) ? mood : '中性'}`, ...extra }
+  return { voice: name, ...(mood === undefined ? {} : { emotion: mood }), ...extra }
 }
 
 export const SERVICE_NAMES: Record<VoiceService, string> = {
   edge: '微软 Edge（免费，要联网）',
   cosyvoice: '阿里云百炼 CosyVoice（要 key，按字数付费）',
+  ming: '本机 Ming（离线、免费、能表达情绪；Apple 芯片，下载约 2 GB）',
 }

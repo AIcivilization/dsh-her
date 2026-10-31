@@ -38,7 +38,7 @@ export interface SentSentence {
 const AHEAD = 3
 
 type Job =
-  | { uid: string; kind: 'sentence'; seq: number; text: string; cues: Cue[]; audio?: Promise<Synthesized | undefined> }
+  | { uid: string; kind: 'sentence'; seq: number; text: string; cues: Cue[]; spoken?: string; audio?: Promise<Synthesized | undefined> }
   | { uid: string; kind: 'end' }
 
 export class SpeechQueue {
@@ -46,17 +46,19 @@ export class SpeechQueue {
   private running = false
   private readonly cancelled = new Set<string>()
   private readonly sent = new Map<string, SentSentence[]>()
-  private readonly synth: (text: string) => Promise<Synthesized | undefined>
+  private readonly synth: (text: string, cues: Cue[]) => Promise<Synthesized | undefined>
   private readonly out: SpeechOut
 
-  constructor(synth: (text: string) => Promise<Synthesized | undefined>, out: SpeechOut) {
+  /** `synth` gets what to say and the sentence's cues (its emotion colours the voice). */
+  constructor(synth: (text: string, cues: Cue[]) => Promise<Synthesized | undefined>, out: SpeechOut) {
     this.synth = synth
     this.out = out
   }
 
-  say(uid: string, seq: number, text: string, cues: Cue[] = []): void {
+  /** `spoken`: what to say when it differs from the subtitle `text` (sound markers for Ming). */
+  say(uid: string, seq: number, text: string, cues: Cue[] = [], spoken?: string): void {
     if (this.cancelled.has(uid)) return
-    this.jobs.push({ uid, kind: 'sentence', seq, text, cues })
+    this.jobs.push({ uid, kind: 'sentence', seq, text, cues, ...(spoken === undefined ? {} : { spoken }) })
     this.startAhead()
     void this.pump()
   }
@@ -90,7 +92,7 @@ export class SpeechQueue {
     for (const job of this.jobs) {
       if (job.kind !== 'sentence') continue
       if (++sentences > AHEAD) break
-      job.audio ??= this.synth(job.text).catch(() => undefined)
+      job.audio ??= this.synth(job.spoken ?? job.text, job.cues).catch(() => undefined)
     }
   }
 

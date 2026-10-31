@@ -17,7 +17,7 @@ export interface Character {
   callYou: string
   /** How she refers to you in her notes and memories. */
   pronoun: Pronoun
-  /** A CosyVoice voice id (voices.ts), and how fast she talks. */
+  /** A voice id (voices.ts: Edge, CosyVoice or Ming), and how fast she talks. */
   voice: { id: string; speed: number }
   /** Her model; undefined = the plugin config's, else DSH's default. `effort` empty = the route's default. */
   model?: { provider: string; model: string; effort?: string }
@@ -56,7 +56,7 @@ export function invalidCharacter(c: Character): string | undefined {
   if (c.persona.trim() === '') return '人设不能是空的'
   if ([...c.persona].length > 3000) return '人设太长了（最多 3000 字）'
   if ([...c.callYou].length > 20) return '称呼最多 20 个字'
-  if (!/^[A-Za-z0-9_-]{1,100}$/.test(c.voice.id)) return '音色不对'
+  if (!/^(?:[A-Za-z0-9_-]{1,100}|ming:[\u4e00-\u9fff_]{1,20}|ming-own:v[0-9a-z]{1,20})$/.test(c.voice.id)) return '音色不对'
   if (!(c.voice.speed >= 0.5 && c.voice.speed <= 2)) return '语速要在 0.5 到 2 之间'
   if (c.model !== undefined && (c.model.provider.trim() === '' || c.model.model.trim() === '')) return '模型不对'
   return undefined

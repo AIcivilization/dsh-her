@@ -5,8 +5,9 @@
  *   process, engine.ts). Its model is downloaded in the background on first
  *   use; until then she only reads what you type.
  * - Speaking: the service of the voice she uses (core/voices.ts): Microsoft
- *   Edge voices through the edge-tts tool (edge.ts, the default), or Alibaba
- *   Cloud Model Studio CosyVoice (cosyvoice.ts). When the service cannot
+ *   Edge voices through the edge-tts tool (edge.ts, the default), Alibaba
+ *   Cloud Model Studio CosyVoice (cosyvoice.ts), or Ming on this computer
+ *   (ming.ts; built-in voices or her own, with her moods). When the service cannot
  *   speak (tool not installed yet, no key, no quota, offline), a sentence goes
  *   out without audio and shows as text; a key added later is picked up
  *   without restarting.
@@ -14,12 +15,15 @@
  *   answers start at once.
  */
 
-import { serviceOf, VOICE_MODEL, type VoiceService } from '../core/index.ts'
+import { mingSpeech, serviceOf, spokenNumbers, VOICE_MODEL, type VoiceService } from '../core/index.ts'
+import type { Cue } from '../protocol/index.ts'
 import { LocalVoice } from './engine.ts'
 import { CloudAccountError, CosyVoice } from './cosyvoice.ts'
 import { EdgeVoice } from './edge.ts'
 import { readCloudKey } from './cloud-key.ts'
 import { fetchModel, missingModels, modelPath, MODELS } from './models.ts'
+import type { MingVoice } from './ming.ts'
+import { MING_STEPS, type OwnVoices } from './ming-voices.ts'
 import type { Synthesized } from './speech-queue.ts'
 
 export interface VoiceConfig {
@@ -52,19 +56,21 @@ export class Voice {
   private keyCheckedAt = 0
   private readonly cloud: CosyVoice
   private readonly edge: EdgeVoice
+  private readonly ming: { voice: MingVoice; own: OwnVoices } | undefined
   private readonly cache = new Map<string, Synthesized>()
   private readonly modelsDir: string
   private config: VoiceConfig
   private readonly logger: Logger
 
-  /** `edgeDir`: where dsh-her installs its own edge-tts if none is found. */
-  constructor(modelsDir: string, edgeDir: string, config: VoiceConfig, logger: Logger) {
+  /** `edgeDir`: where dsh-her installs its own edge-tts if none is found. `ming`: the local Ming voice and her own voices. */
+  constructor(modelsDir: string, edgeDir: string, config: VoiceConfig, logger: Logger, ming?: { voice: MingVoice; own: OwnVoices }) {
     this.modelsDir = modelsDir
     this.config = config
     this.logger = logger
     this.speakingState = config.enabled ? 'checking' : 'off'
     this.cloud = new CosyVoice(VOICE_MODEL, readCloudKey)
     this.edge = new EdgeVoice(edgeDir)
+    this.ming = ming
   }
 
   /** Listening. */
@@ -74,6 +80,14 @@ export class Voice {
 
   get speaking(): { status: SpeakingStatus; service: VoiceService; error?: string } {
     const service = serviceOf(this.config.voice)
+    if (service === 'ming' && this.config.enabled && this.ming !== undefined) {
+      // Ming tells its own state: installing, loading, stopped to save memory …
+      const ming = this.ming.voice.status
+      if (ming.state === 'installing') return { status: 'installing', service }
+      if (ming.state === 'loading') return { status: 'checking', service }
+      if (ming.state === 'absent' || ming.state === 'unsupported') return { status: 'failed', service, error: ming.error ?? '本机 Ming 还没安装' }
+      if (ming.state === 'failed') return { status: 'failed', service, error: ming.error ?? '本机 Ming 出错了' }
+    }
     return this.speakingError === undefined ? { status: this.speakingState, service } : { status: this.speakingState, service, error: this.speakingError }
   }
 
@@ -101,6 +115,7 @@ export class Voice {
   /** You started talking: open the cloud connection now, while your words are recognized. */
   warm(): void {
     if (serviceOf(this.config.voice) === 'cosyvoice' && (this.speakingState === 'ready' || this.speakingState === 'failed')) this.cloud.warm()
+    if (serviceOf(this.config.voice) === 'ming') this.ming?.voice.warm()
   }
 
   /** Change her voice and speed (from the "她" page); takes effect with the next sentence. */
@@ -120,15 +135,16 @@ export class Voice {
     return this.speak(text, voice, speed)
   }
 
-  /** Her sentence as audio, or undefined when she cannot speak right now (it shows as text). */
-  async synthesize(text: string): Promise<Synthesized | undefined> {
+  /** Her sentence as audio, or undefined when she cannot speak right now (it shows as text). Its emotion colours a Ming voice. */
+  async synthesize(text: string, cues: Cue[] = []): Promise<Synthesized | undefined> {
     if (!this.config.enabled || text === '') return undefined
     if ((this.speakingState === 'no-key' || this.speakingState === 'no-quota') && Date.now() - this.keyCheckedAt < KEY_RECHECK_MS) return undefined
-    const key = `${this.config.voice}|${this.config.speed}|${text}`
+    const emotion = serviceOf(this.config.voice) === 'ming' ? cues.find(c => c.kind === 'emotion')?.name : undefined
+    const key = `${this.config.voice}|${this.config.speed}|${emotion ?? ''}|${text}`
     const cached = this.cache.get(key)
     if (cached !== undefined) return cached
     try {
-      const result = await this.speak(text)
+      const result = await this.speak(text, this.config.voice, this.config.speed, emotion)
       if ([...text].length <= CACHE_MAX_CHARS) {
         this.cache.set(key, result)
         if (this.cache.size > CACHE_ENTRIES) this.cache.delete(this.cache.keys().next().value!)
@@ -153,11 +169,26 @@ export class Voice {
     this.asr?.stop()
     this.asr = undefined
     this.cloud.close()
+    this.ming?.voice.close()
     if (this.listening !== 'off') this.listening = 'failed'
   }
 
-  private async speak(text: string, voice = this.config.voice, speed = this.config.speed): Promise<Synthesized> {
+  private async speak(text: string, voice = this.config.voice, speed = this.config.speed, emotion?: string): Promise<Synthesized> {
     try {
+      if (serviceOf(voice) === 'ming') {
+        if (this.ming === undefined) throw new Error('本机 Ming 不可用')
+        const settings = this.ming.own.settings()
+        const how = mingSpeech(voice, settings.moods ? emotion : undefined, speed)
+        const ref = how.own === undefined ? undefined : this.ming.own.ref(how.own)
+        if (how.own !== undefined && ref === undefined) throw new Error('这个声音已经删掉了，换一个吧')
+        const audio = await this.ming.voice.synthesize({
+          text: spokenNumbers(text), steps: MING_STEPS[settings.quality],
+          ...(how.voice === undefined ? {} : { voice: how.voice }), ...(ref === undefined ? {} : { ref }),
+          ...(how.emotion === undefined ? {} : { emotion: how.emotion }), ...(how.speed === undefined ? {} : { speed: how.speed }),
+        })
+        this.mark('ready')
+        return { audio: audio.audio, durationMs: audio.durationMs, format: 'wav' }
+      }
       if (serviceOf(voice) === 'edge') {
         if (this.edge.status.status !== 'ready') this.mark('installing')
         const audio = await this.edge.synthesize(text, voice, speed)

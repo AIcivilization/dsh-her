@@ -15,6 +15,8 @@ import type { ReportLine } from './import-status.ts'
 import type { LookProject, WorkshopCard } from '../core/workshop.ts'
 import type { ProjectStatus } from './workshop.ts'
 import type { InstallState } from './body-install.ts'
+import type { MingStatus } from '../voice/ming.ts'
+import type { MingSettings, OwnVoice } from '../voice/ming-voices.ts'
 
 export const API_BASE = '/api/dsh-her'
 
@@ -23,8 +25,14 @@ export interface StateView {
   character: Character
   /** The model she uses now; `chosen` = picked on the "她" page (else the config's or DSH's default). */
   model: { provider: string; model: string; effort?: string; chosen: boolean } | null
-  /** status: listening (local recognition); speaking: her cloud voice. */
-  voice: { status: string; speaking: { status: string; service: string; error?: string }; id: string; speed: number }
+  /** status: listening (local recognition); speaking: the service of her voice; ming: the local Ming voice and her own voices. */
+  voice: {
+    status: string
+    speaking: { status: string; service: string; error?: string }
+    id: string
+    speed: number
+    ming: MingStatus & { installed: boolean; settings: MingSettings; own: OwnVoice[] }
+  }
   body: {
     connected: boolean
     /** A body process is running (it may still be connecting). */
@@ -45,6 +53,8 @@ export interface StateView {
   }
   import: { state: 'idle' | 'picking' | 'running' | 'done' | 'failed'; done: number; total: number; step: string; lines: ReportLine[] }
   heard?: { text: string; at: number }
+  /** Her last reply failed with no words (the model had no key, no quota …): why, and what to do. */
+  problem?: { text: string; at: number }
   memory: { facts: Fact[]; episodes: Episode[]; diary: string[]; lastDigestDay: string | null }
 }
 
@@ -54,6 +64,18 @@ export interface ApiRuntime {
   expandPersona(input: { name: string; idea: string; callYou: string; pronoun: string }): Promise<string>
   tryPersona(input: { name: string; persona: string; callYou: string; pronoun: string; history: Array<{ who: 'you' | 'her'; text: string }>; message: string }): Promise<string>
   previewVoice(id: string, speed: number, text: string): Promise<{ audio: string; format: 'wav' | 'mp3'; durationMs: number }>
+  /** The local Ming voice: install (progress shows in the state), uninstall, start again after errors, settings. */
+  mingInstall(): void
+  mingUninstall(): void
+  mingRestart(): Promise<void>
+  mingSettings(patch: Partial<MingSettings>): void
+  /** Three takes of a voice from its description, each kept as a draft to listen to. */
+  mingDesign(description: string): Promise<Array<{ id: string; audio: string; durationMs: number }>>
+  /** A recording to clone (base64, its file name for the format): a draft, with what it says as recognized. */
+  mingClone(audio: string, name: string): Promise<{ id: string; audio: string; durationMs: number; text: string }>
+  /** Keep a draft as one of her voices (a clone needs consent and the recording's words). */
+  mingKeep(draft: string, name: string, change: { text?: string; consent?: boolean }): OwnVoice
+  mingRemove(id: string): void
   startBody(): string
   /** Download and install the body app (or a newer one); progress shows in the state. */
   installBody(): void
@@ -139,6 +161,52 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
       }),
     }),
     '/voice/preview': async body => rt.previewVoice(str(body.voice, '音色'), num(body.speed ?? 1, '语速'), str(body.text ?? '你好呀，我在你桌面上等你好久啦。', '试听的话')),
+    '/voice/ming/install': async () => {
+      rt.mingInstall()
+      return withState()
+    },
+    '/voice/ming/uninstall': async () => {
+      rt.mingUninstall()
+      return withState()
+    },
+    '/voice/ming/restart': async () => {
+      await rt.mingRestart()
+      return withState()
+    },
+    '/voice/ming/settings': async body => {
+      const patch: Partial<MingSettings> = {}
+      if (body.quality === 'quality' || body.quality === 'speed') patch.quality = body.quality
+      if (typeof body.moods === 'boolean') patch.moods = body.moods
+      if (body.idleMinutes !== undefined) {
+        // -1: back to the default for this Mac's memory.
+        const minutes = num(body.idleMinutes, '停止前的分钟数')
+        if (minutes !== -1 && (minutes < 0 || minutes > 24 * 60)) throw new ApiError('停止前的分钟数不对')
+        Object.assign(patch, { idleMinutes: minutes === -1 ? undefined : minutes })
+      }
+      rt.mingSettings(patch)
+      return withState()
+    },
+    '/voice/ming/design': async body => {
+      const description = str(body.description, '声音描述').trim()
+      if (description.length < 4 || description.length > 300) throw new ApiError('声音描述写 4 到 300 个字')
+      return { drafts: await rt.mingDesign(description) }
+    },
+    '/voice/ming/clone': async body => {
+      const audio = str(body.audio, '录音')
+      // About 20 MB of recording: far more than the 15 seconds that are used.
+      if (audio.length > 28_000_000) throw new ApiError('录音文件太大了，剪一段 15 秒以内的')
+      return { draft: await rt.mingClone(audio, str(body.name ?? 'recording.wav', '文件名')) }
+    },
+    '/voice/ming/keep': async body => {
+      const change: { text?: string; consent?: boolean } = {}
+      if (body.text !== undefined) change.text = str(body.text, '录音里说的话')
+      if (body.consent !== undefined) change.consent = body.consent === true
+      return withState({ voice: rt.mingKeep(str(body.draft, '试听'), str(body.name, '名字'), change) })
+    },
+    '/voice/ming/remove': async body => {
+      rt.mingRemove(str(body.id, '声音'))
+      return withState()
+    },
     '/body/start': async () => withState({ message: rt.startBody() }),
     '/body/mode': async body => {
       const mode = str(body.mode, '模式') as WindowMode

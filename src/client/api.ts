@@ -6,6 +6,13 @@ import type { ProjectStatus } from '../dsh/workshop.ts'
 
 export type { StateView }
 
+/** A take of a Ming voice to listen to before keeping it (WAV, base64). */
+export interface MingDraft {
+  id: string
+  audio: string
+  durationMs: number
+}
+
 export type Result<T> = ({ ok: true } & T) | { ok: false; message: string }
 
 async function post<T>(path: string, body: Record<string, unknown> = {}): Promise<Result<T>> {
@@ -33,6 +40,14 @@ export const herApi = {
   tryPersona: (input: { name: string; persona: string; callYou: string; pronoun: string; history: Array<{ who: 'you' | 'her'; text: string }>; message: string }) =>
     post<{ reply: string }>('/persona/try', input),
   previewVoice: (voice: string, speed: number, text?: string) => post<{ audio: string; format: 'wav' | 'mp3'; durationMs: number }>('/voice/preview', { voice, speed, ...(text === undefined ? {} : { text }) }),
+  mingInstall: () => post<WithState>('/voice/ming/install'),
+  mingUninstall: () => post<WithState>('/voice/ming/uninstall'),
+  mingRestart: () => post<WithState>('/voice/ming/restart'),
+  mingSettings: (patch: { quality?: 'quality' | 'speed'; moods?: boolean; idleMinutes?: number }) => post<WithState>('/voice/ming/settings', patch),
+  mingDesign: (description: string) => post<{ drafts: MingDraft[] }>('/voice/ming/design', { description }),
+  mingClone: (audio: string, name: string) => post<{ draft: MingDraft & { text: string } }>('/voice/ming/clone', { audio, name }),
+  mingKeep: (draft: string, name: string, change: { text?: string; consent?: boolean } = {}) => post<WithState & { voice: { id: string } }>('/voice/ming/keep', { draft, name, ...change }),
+  mingRemove: (id: string) => post<WithState>('/voice/ming/remove', { id }),
   startBody: () => post<WithState & { message: string }>('/body/start'),
   installBody: () => post<WithState>('/body/install'),
   restartBody: () => post<WithState>('/body/restart'),

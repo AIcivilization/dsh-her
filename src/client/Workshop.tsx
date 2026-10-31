@@ -14,6 +14,7 @@ import {
 import type { ProjectStatus } from '../dsh/workshop.ts'
 import { herApi, type StateView } from './api.ts'
 import type { Apply } from './parts.tsx'
+import { Fold, useFolds } from './fold.tsx'
 
 type Item = { project: LookProject; status: ProjectStatus }
 
@@ -87,20 +88,12 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
   }
 
   // Cards fold; "保存这一步" saves, folds the card and opens the next.
-  const [unfolded, setUnfolded] = useState<Record<WorkshopCard, boolean>>(() => loadFolds())
-  const toggle = (card: WorkshopCard, on = !unfolded[card]) => setUnfolded(current => {
-    const next = { ...current, [card]: on }
-    storeFolds(next)
-    return next
-  })
+  const [unfolded, toggle] = useFolds<WorkshopCard>(FOLDS_KEY, Object.fromEntries(CARDS.map(c => [c, true])) as Record<WorkshopCard, boolean>)
   const saveStep = async (card: WorkshopCard) => {
     if (dirty && !(await save())) return
     const at = CARDS.indexOf(card)
-    setUnfolded(current => {
-      const next = { ...current, [card]: false, ...(at + 1 < CARDS.length ? { [CARDS[at + 1]!]: true } : {}) }
-      storeFolds(next)
-      return next
-    })
+    toggle(card, false)
+    if (at + 1 < CARDS.length) toggle(CARDS[at + 1]!, true)
     if (!dirty) setNote({ kind: 'ok', text: '这一步已经保存过了' })
   }
 
@@ -132,7 +125,7 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
   const screenPx = screen === undefined ? undefined : { width: Math.round(screen.w * screen.scale), height: Math.round(screen.h * screen.scale) }
   const desk = status?.parts.find(p => p.folder === DESK_DIR)
   const fold = (card: WorkshopCard, title: string, summary: string, done: boolean, body: ReactNode, saveLabel = '保存这一步') => (
-    <Fold card={card} title={title} summary={summary} done={done} open={unfolded[card]} onToggle={() => toggle(card)}>
+    <Fold title={title} summary={summary} summaryClass={done ? 'her-ok' : 'her-muted'} open={unfolded[card]} onToggle={() => toggle(card)}>
       {body}
       <ExampleStrip examples={examples.filter(e => e.card === card)} />
       <div className="her-row">
@@ -266,40 +259,6 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
 
 const CARDS: readonly WorkshopCard[] = ['look', 'reference', 'desk', 'scene', 'import']
 const FOLDS_KEY = 'dsh-her.workshop.open'
-
-/** Which cards are open, remembered in this browser (all open the first time). */
-function loadFolds(): Record<WorkshopCard, boolean> {
-  const all = Object.fromEntries(CARDS.map(c => [c, true])) as Record<WorkshopCard, boolean>
-  try {
-    return { ...all, ...JSON.parse(localStorage.getItem(FOLDS_KEY) ?? '{}') as Partial<Record<WorkshopCard, boolean>> }
-  } catch {
-    return all
-  }
-}
-
-function storeFolds(folds: Record<WorkshopCard, boolean>): void {
-  try {
-    localStorage.setItem(FOLDS_KEY, JSON.stringify(folds))
-  } catch {
-    // private window: the folds are just not remembered
-  }
-}
-
-/** A card that folds to its title and a one-line summary. */
-function Fold({ title, summary, done, open, onToggle, children }: { card: WorkshopCard; title: string; summary: string; done: boolean; open: boolean; onToggle: () => void; children: ReactNode }) {
-  return (
-    <div className="her-card">
-      <button className="her-fold" onClick={onToggle} aria-expanded={open}>
-        <span className={`her-fold-arrow${open ? ' open' : ''}`} aria-hidden="true">
-          <svg viewBox="0 0 16 16" width="14" height="14"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-        </span>
-        <h2>{title}</h2>
-        {!open && <span className={`her-fold-sum ${done ? 'her-ok' : 'her-muted'}`}>{summary}</span>}
-      </button>
-      {open && <div>{children}</div>}
-    </div>
-  )
-}
 
 type Example = { card: WorkshopCard; file: string; label: string; ready: boolean }
 
