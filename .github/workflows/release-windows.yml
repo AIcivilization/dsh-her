@@ -1,0 +1,65 @@
+# Add the Windows body to a release: package it on Windows (as ci.yml does),
+# start it once, upload the zip and merge its entry into the release's
+# body-latest.json. Run it by hand on a release made with the macOS body
+# (left as a draft until this has run), then publish the release.
+
+name: release-windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (for example v0.3.0)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: body
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: ffmpeg
+        shell: bash
+        run: |
+          base=https://github.com/BtbN/FFmpeg-Builds/releases/download/latest
+          name=ffmpeg-n8.1-latest-win64-lgpl-8.1
+          curl -fsSL -o "$name.zip" "$base/$name.zip"
+          curl -fsSL -o checksums.sha256 "$base/checksums.sha256"
+          grep " $name.zip\$" checksums.sha256 | sha256sum -c -
+          unzip -q -j "$name.zip" "$name/bin/ffmpeg.exe" -d ffmpeg
+      - name: package
+        shell: bash
+        run: node scripts/package.mjs --ffmpeg "$(cygpath -w "$PWD/ffmpeg/ffmpeg.exe")" --out ../release
+      - name: start the packaged body once
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'body'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $zip = Get-ChildItem ../release/*.zip | Select-Object -First 1
+          & "$env:SystemRoot\System32\tar.exe" -xf $zip.FullName -C $dir
+          $env:DSH_HER_HOME = Join-Path $env:RUNNER_TEMP 'home'
+          $p = Start-Process -FilePath (Join-Path $dir 'dsh-her\dsh-her.exe') -ArgumentList '--smoke' -Wait -PassThru
+          exit $p.ExitCode
+      - name: upload to the release
+        shell: bash
+        working-directory: .
+        run: |
+          mkdir -p from-release
+          gh release download "$TAG" --pattern body-latest.json --dir from-release
+          node scripts/merge-body-manifest.mjs release/merged.json from-release/body-latest.json release/body-latest.json
+          mv release/merged.json release/body-latest.json
+          gh release upload "$TAG" release/*.zip release/body-latest.json --clobber
