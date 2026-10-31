@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { systemTar } from '../platform.ts'
 
 export function run(cmd: string, args: string[], timeout: number, env?: NodeJS.ProcessEnv): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -50,7 +51,7 @@ export async function installUv(uvHome: string): Promise<string> {
   const archive = join(dir, asset.file)
   await writeFile(archive, bytes)
   // tar reads both the .tar.gz and (Windows 10+) the .zip.
-  await run('tar', ['-xf', archive, '-C', dir], 120_000)
+  await run(systemTar(), ['-xf', archive, '-C', dir], 120_000)
   await rm(archive, { force: true })
   const uv = [join(dir, 'uv'), join(dir, 'uv.exe'), join(dir, asset.file.replace(/\.(tar\.gz|zip)$/, ''), 'uv')].find(p => existsSync(p))
   if (uv === undefined) throw new Error('uv 解压后找不到')

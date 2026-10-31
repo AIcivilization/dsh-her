@@ -7,6 +7,11 @@
 //   gets her name, a menu-bar-only flag and the microphone reason; then an
 //   ad-hoc signature (Apple Silicon runs nothing unsigned; a Developer ID
 //   signature and notarization replace it for a public release).
+// - Windows (run on Windows; CI does it, .github/workflows/ci.yml): Electron's
+//   folder copied as "dsh-her" with electron.exe renamed dsh-her.exe, the body
+//   in resources/app (with koffi for the wallpaper layer), ffmpeg.exe in
+//   resources; rcedit gives the exe her name and icon (drawn in code,
+//   shared/icon.ts). --ffmpeg is required: name the ffmpeg.exe to ship.
 // - The zip is `dsh-her-body-<version>-<platform>-<arch>.zip`, and
 //   `body-latest.json` lists it with its size and SHA-256: the plugin reads
 //   that file from the release to know what to download and to check it.
@@ -18,9 +23,10 @@
 
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ico } from './ico.mjs'
 
 const bodyDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
@@ -32,60 +38,99 @@ const platform = process.platform
 const arch = process.arch
 const run = (cmd, argv, opts = {}) => execFileSync(cmd, argv, { stdio: 'inherit', ...opts })
 
-if (platform !== 'darwin') {
-  console.error('现在只会打 mac 的包；Windows 的等有测试机再加')
+if (platform !== 'darwin' && platform !== 'win32') {
+  console.error('现在只会打 macOS 和 Windows 的包')
   process.exit(1)
 }
 
-const ffmpeg = option('--ffmpeg') ?? execFileSync('which', ['ffmpeg'], { encoding: 'utf8' }).trim()
+const ffmpeg = option('--ffmpeg') ?? (platform === 'win32' ? undefined : execFileSync('which', ['ffmpeg'], { encoding: 'utf8' }).trim())
+if (ffmpeg === undefined) throw new Error('Windows 要用 --ffmpeg 指定要放进包里的 ffmpeg.exe')
 if (!existsSync(ffmpeg)) throw new Error(`找不到 ffmpeg：${ffmpeg}`)
-const linked = execFileSync('otool', ['-L', ffmpeg], { encoding: 'utf8' }).split('\n').slice(1).map(l => l.trim()).filter(Boolean)
-const foreign = linked.filter(l => !l.startsWith('/usr/lib/') && !l.startsWith('/System/'))
-if (foreign.length > 0) throw new Error(`这个 ffmpeg 依赖本机的库，放进 app 别人用不了：\n${foreign.join('\n')}\n换一个静态编译的（--ffmpeg）`)
+if (platform === 'darwin') {
+  const linked = execFileSync('otool', ['-L', ffmpeg], { encoding: 'utf8' }).split('\n').slice(1).map(l => l.trim()).filter(Boolean)
+  const foreign = linked.filter(l => !l.startsWith('/usr/lib/') && !l.startsWith('/System/'))
+  if (foreign.length > 0) throw new Error(`这个 ffmpeg 依赖本机的库，放进 app 别人用不了：\n${foreign.join('\n')}\n换一个静态编译的（--ffmpeg）`)
+}
 
 console.log(`dsh-her body ${version} → ${platform}-${arch}`)
-run('npm', ['run', 'build'], { cwd: bodyDir })
+run('npm', ['run', 'build'], { cwd: bodyDir, shell: platform === 'win32' })
 
 const stage = join(out, `stage-${platform}-${arch}`)
-const app = join(stage, 'dsh-her.app')
 rmSync(stage, { recursive: true, force: true })
 mkdirSync(stage, { recursive: true })
-// ditto keeps the framework symlinks and permissions intact.
-run('ditto', [join(bodyDir, 'node_modules', 'electron', 'dist', 'Electron.app'), app])
-
-const resources = join(app, 'Contents', 'Resources')
-rmSync(join(resources, 'default_app.asar'), { force: true })
-const appDir = join(resources, 'app')
-mkdirSync(appDir, { recursive: true })
-cpSync(join(bodyDir, 'dist'), join(appDir, 'dist'), { recursive: true })
-writeFileSync(join(appDir, 'package.json'), `${JSON.stringify({ name: pkg.name, productName: 'dsh-her', version, main: pkg.main, license: pkg.license }, null, 2)}\n`)
-copyFileSync(ffmpeg, join(resources, 'ffmpeg'))
-writeFileSync(join(resources, 'ffmpeg-NOTICE.txt'), [
+const notice = [
   'ffmpeg (https://ffmpeg.org) is included as a separate program, used to import appearance packs.',
   `Build: ${execFileSync(ffmpeg, ['-hide_banner', '-version'], { encoding: 'utf8' }).split('\n').slice(0, 3).join('\n')}`,
   'Its licence follows its build configuration (LGPL, or GPL when built with --enable-gpl); its source is at https://ffmpeg.org/download.html.',
   '',
-].join('\n'))
-
-const plist = join(app, 'Contents', 'Info.plist')
-const set = (key, type, value) => {
-  try { run('/usr/libexec/PlistBuddy', ['-c', `Delete :${key}`, plist], { stdio: 'ignore' }) } catch { /* not there */ }
-  run('/usr/libexec/PlistBuddy', ['-c', `Add :${key} ${type} ${value}`, plist])
+].join('\n')
+/** The body itself, as Electron loads it from resources/app. */
+const putApp = (resources) => {
+  rmSync(join(resources, 'default_app.asar'), { force: true })
+  const appDir = join(resources, 'app')
+  mkdirSync(appDir, { recursive: true })
+  cpSync(join(bodyDir, 'dist'), join(appDir, 'dist'), { recursive: true })
+  writeFileSync(join(appDir, 'package.json'), `${JSON.stringify({ name: pkg.name, productName: 'dsh-her', version, main: pkg.main, license: pkg.license }, null, 2)}\n`)
+  return appDir
 }
-set('CFBundleName', 'string', 'dsh-her')
-set('CFBundleDisplayName', 'string', '她')
-set('CFBundleIdentifier', 'string', 'ai.aicivilization.dsh-her.body')
-set('CFBundleShortVersionString', 'string', version)
-set('CFBundleVersion', 'string', version)
-set('LSUIElement', 'bool', 'true')
-set('NSMicrophoneUsageDescription', 'string', '她要听你说话（按快捷键说话、或一直在听时）')
-
-run('codesign', ['--force', '--deep', '--sign', '-', app])
 
 const zipName = `dsh-her-body-${version}-${platform}-${arch}.zip`
 const zip = join(out, zipName)
 rmSync(zip, { force: true })
-run('ditto', ['-c', '-k', '--keepParent', app, zip])
+
+if (platform === 'darwin') {
+  const app = join(stage, 'dsh-her.app')
+  // ditto keeps the framework symlinks and permissions intact.
+  run('ditto', [join(bodyDir, 'node_modules', 'electron', 'dist', 'Electron.app'), app])
+  const resources = join(app, 'Contents', 'Resources')
+  putApp(resources)
+  copyFileSync(ffmpeg, join(resources, 'ffmpeg'))
+  writeFileSync(join(resources, 'ffmpeg-NOTICE.txt'), notice)
+
+  const plist = join(app, 'Contents', 'Info.plist')
+  const set = (key, type, value) => {
+    try { run('/usr/libexec/PlistBuddy', ['-c', `Delete :${key}`, plist], { stdio: 'ignore' }) } catch { /* not there */ }
+    run('/usr/libexec/PlistBuddy', ['-c', `Add :${key} ${type} ${value}`, plist])
+  }
+  set('CFBundleName', 'string', 'dsh-her')
+  set('CFBundleDisplayName', 'string', '她')
+  set('CFBundleIdentifier', 'string', 'ai.aicivilization.dsh-her.body')
+  set('CFBundleShortVersionString', 'string', version)
+  set('CFBundleVersion', 'string', version)
+  set('LSUIElement', 'bool', 'true')
+  set('NSMicrophoneUsageDescription', 'string', '她要听你说话（按快捷键说话、或一直在听时）')
+
+  run('codesign', ['--force', '--deep', '--sign', '-', app])
+  run('ditto', ['-c', '-k', '--keepParent', app, zip])
+} else {
+  const app = join(stage, 'dsh-her')
+  cpSync(join(bodyDir, 'node_modules', 'electron', 'dist'), app, { recursive: true })
+  renameSync(join(app, 'electron.exe'), join(app, 'dsh-her.exe'))
+  const resources = join(app, 'resources')
+  const appDir = putApp(resources)
+  // koffi (and its Windows build) for the wallpaper layer: main.cjs keeps it external.
+  for (const dep of ['koffi', join('@koromix', `koffi-win32-${arch}`)]) {
+    const from = join(bodyDir, 'node_modules', dep)
+    if (!existsSync(from)) throw new Error(`缺少 ${dep}（在 Windows 上运行 npm ci）`)
+    cpSync(from, join(appDir, 'node_modules', dep), { recursive: true })
+  }
+  copyFileSync(ffmpeg, join(resources, 'ffmpeg.exe'))
+  writeFileSync(join(resources, 'ffmpeg-NOTICE.txt'), notice)
+
+  const icon = join(stage, 'her.ico')
+  writeFileSync(icon, ico([16, 24, 32, 48, 64, 128, 256]))
+  const { rcedit } = await import('rcedit')
+  const numeric = version.replace(/-.*$/, '')
+  await rcedit(join(app, 'dsh-her.exe'), {
+    icon,
+    'file-version': numeric,
+    'product-version': numeric,
+    'version-string': { ProductName: 'dsh-her', FileDescription: '她', CompanyName: 'AIcivilization', OriginalFilename: 'dsh-her.exe', InternalName: 'dsh-her' },
+  })
+  // The system's bsdtar writes zip with -a; named by path, not a Git tar from PATH.
+  const tar = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
+  run(tar, ['-a', '-c', '-f', zip, '-C', stage, 'dsh-her'])
+}
 rmSync(stage, { recursive: true, force: true })
 
 const sha256 = createHash('sha256').update(readFileSync(zip)).digest('hex')
@@ -98,3 +143,4 @@ const next = {
 }
 writeFileSync(manifestFile, `${JSON.stringify(next, null, 2)}\n`)
 console.log(`→ ${zip}（${(statSync(zip).size / 1e6).toFixed(1)} MB）\n→ ${manifestFile}`)
+

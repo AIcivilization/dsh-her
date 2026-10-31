@@ -6,6 +6,8 @@
  *   { "format": "dsh-her-body@1", "version": "0.1.0",
  *     "assets": { "darwin-arm64": { "file": "dsh-her-body-0.1.0-darwin-arm64.zip", "size": …, "sha256": "…" } } }
  *
+ * The app is `dsh-her.app` on macOS and a `dsh-her` folder with
+ * `dsh-her.exe` on Windows (body/scripts/package.mjs makes both).
  * `<home>/body/current.json` says which version is installed. A download
  * that does not match its SHA-256 is thrown away; the previous version stays
  * until the new one is in place, and one older version is kept to go back to.
@@ -18,12 +20,16 @@ import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { promisify } from 'node:util'
+import { systemTar } from '../platform.ts'
 import type { LaunchPlan } from './body-launcher.ts'
 
 const run = promisify(execFile)
 
 export const MANIFEST = 'body-latest.json'
-const APP = 'dsh-her.app'
+/** The app inside a release zip (and in `<home>/body/<version>/`). */
+export const appName = (platform: string = process.platform) => (platform === 'win32' ? 'dsh-her' : 'dsh-her.app')
+/** Platforms with a body in the release. */
+const PACKAGED = new Set(['darwin', 'win32'])
 
 export interface BodyAsset {
   file: string
@@ -39,7 +45,7 @@ export interface BodyManifest {
 
 export interface Installed {
   version: string
-  /** The app (macOS: dsh-her.app) inside `<home>/body/<version>/`. */
+  /** The app (macOS: dsh-her.app; Windows: the dsh-her folder) inside `<home>/body/<version>/`. */
   app: string
   installedAt: string
 }
@@ -109,6 +115,7 @@ export function installedPlan(home: string): LaunchPlan | undefined {
   const installed = installedBody(home)
   if (installed === undefined) return undefined
   if (process.platform === 'darwin') return { binary: join(installed.app, 'Contents', 'MacOS', 'Electron'), args: [], cwd: join(installed.app, '..') }
+  if (process.platform === 'win32') return { binary: join(installed.app, 'dsh-her.exe'), args: [], cwd: installed.app }
   return undefined
 }
 
@@ -126,7 +133,7 @@ export async function fetchManifest(base: string): Promise<BodyManifest> {
  * the installed version and make it current. Progress in bytes.
  */
 export async function install(home: string, base: string, manifest: BodyManifest, onProgress: (done: number, total: number) => void): Promise<Installed> {
-  if (process.platform !== 'darwin') throw new Error('这个系统的身体程序还没有发布（现在只有 macOS 版）')
+  if (!PACKAGED.has(process.platform)) throw new Error('这个系统的身体程序还没有发布（现在有 macOS 和 Windows 版）')
   const asset = manifest.assets[platformKey()]
   if (asset === undefined) throw new Error(`发布里没有这台电脑（${platformKey()}）的身体程序`)
   const root = bodyRoot(home)
@@ -153,21 +160,27 @@ export async function install(home: string, base: string, manifest: BodyManifest
   const unpacking = `${target}.unpacking`
   rmSync(unpacking, { recursive: true, force: true })
   mkdirSync(unpacking, { recursive: true })
-  // ditto keeps the app's symlinks, permissions and signature.
-  await run('ditto', ['-x', '-k', zip, unpacking], { timeout: 300_000 })
-  if (!existsSync(join(unpacking, APP))) throw new Error('下载的包里没有身体程序')
+  // macOS: ditto keeps the app's symlinks, permissions and signature. Windows: the system tar reads zip.
+  if (process.platform === 'darwin') await run('ditto', ['-x', '-k', zip, unpacking], { timeout: 300_000 })
+  else await run(systemTar(), ['-xf', zip, '-C', unpacking], { timeout: 300_000 })
+  if (!existsSync(join(unpacking, appName()))) throw new Error('下载的包里没有身体程序')
   rmSync(target, { recursive: true, force: true })
   renameSync(unpacking, target)
   rmSync(zip, { force: true })
 
   const previous = installedBody(home)
-  const installed: Installed = { version: manifest.version, app: join(target, APP), installedAt: new Date().toISOString() }
+  const installed: Installed = { version: manifest.version, app: join(target, appName()), installedAt: new Date().toISOString() }
   writeFileSync(join(root, 'current.json.tmp'), `${JSON.stringify(installed, null, 2)}\n`)
   renameSync(join(root, 'current.json.tmp'), join(root, 'current.json'))
   // Keep this version and the one before it; older ones go.
   for (const entry of readdirSync(root)) {
     const keep = entry === manifest.version || entry === previous?.version || entry === 'download' || entry.endsWith('.json')
-    if (!keep) rmSync(join(root, entry), { recursive: true, force: true })
+    if (keep) continue
+    try {
+      rmSync(join(root, entry), { recursive: true, force: true })
+    } catch {
+      // Windows keeps a running program's files locked: that old version goes next time.
+    }
   }
   return installed
 }

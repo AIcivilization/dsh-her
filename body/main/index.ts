@@ -33,6 +33,7 @@ import { importPack } from './pack/import.ts'
 import { clipsView, loadPack, saveClipUses, summarize } from './pack/load.ts'
 import { pickScenePhoto, saveScene, scenePhotoIn } from './scene-maker.ts'
 import { listPacks, loadSettings, saveSettings, type BodySettings } from './settings.ts'
+import { iconPixels } from '../shared/icon.ts'
 import { attachToWallpaper } from './wallpaper-win.ts'
 
 /** ⌃⌥Space / Ctrl+Alt+Space: talk to her. Alt+Space alone is taken by Windows' window menu. */
@@ -593,6 +594,17 @@ ipcMain.on('menu', (event) => {
 // One body per home: a test home (~/.dsh-her-dev) gets its own Electron profile, so it can run beside the real one.
 if (expand(home) !== expand('~/.dsh-her')) app.setPath('userData', `${app.getPath('userData')}-${basename(expand(home)).replace(/^\./, '')}`)
 
+/** Her icon at 32 px, drawn for a 16 px tray slot (sharper on high-density screens). */
+function trayIcon(): Electron.NativeImage {
+  return nativeImage.createFromBitmap(Buffer.from(iconPixels(32, true)), { width: 32, height: 32, scaleFactor: 2 })
+}
+
+/**
+ * `--smoke` (CI): start as usual, and once her window has loaded print
+ * "dsh-her smoke ok" and quit; exit code 1 if that has not happened in 60 s.
+ */
+const SMOKE = process.argv.includes('--smoke')
+
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
@@ -603,7 +615,8 @@ if (!app.requestSingleInstanceLock()) {
     if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('microphone') !== 'granted') {
       await systemPreferences.askForMediaAccess('microphone').catch(() => false)
     }
-    tray = new Tray(nativeImage.createEmpty())
+    // macOS shows "她" as the tray title; Windows and Linux need a picture.
+    tray = new Tray(process.platform === 'darwin' ? nativeImage.createEmpty() : trayIcon())
     refreshTray()
     if (look !== undefined) {
       // Started again later: in the scene the rules want now, unless she was told to stay.
@@ -614,6 +627,14 @@ if (!app.requestSingleInstanceLock()) {
       pack = loadOrNothing(packPath, screenAspect())
     }
     win = createWindow()
+    if (SMOKE) {
+      const timer = setTimeout(() => app.exit(1), 60_000)
+      win.webContents.once('did-finish-load', () => {
+        clearTimeout(timer)
+        console.log(`dsh-her smoke ok (${process.platform}-${process.arch}, electron ${process.versions.electron})`)
+        setTimeout(() => app.exit(0), 1500)
+      })
+    }
     globalShortcut.register(TALK_SHORTCUT, talk)
     setInterval(lookTick, 60_000)
     link = new BrainLink({

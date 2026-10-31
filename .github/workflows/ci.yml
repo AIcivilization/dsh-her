@@ -1,0 +1,84 @@
+# Checks on every push: the plugin's tests on Linux, Windows and macOS, and
+# the Windows body: packaged the way a release ships it, then started once
+# (--smoke). The Windows package is kept as a build artifact; a release
+# attaches it with the macOS one (docs/M6记录.md).
+
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      # The voice models are .tar.bz2: Windows' own tar.exe must read bzip2 (src/voice/models.ts).
+      - name: Windows tar reads .tar.bz2
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p t/src t/out && echo hi > t/src/a.txt
+          tar -cjf t/a.tar.bz2 -C t src
+          "$SYSTEMROOT/System32/tar.exe" -xjf "$(cygpath -w t/a.tar.bz2)" -C "$(cygpath -w t/out)"
+          test "$(cat t/out/src/a.txt)" = hi
+
+  body-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: body
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run typecheck
+      # An LGPL static ffmpeg (BtbN/FFmpeg-Builds), checked against that release's checksums.
+      - name: ffmpeg
+        shell: bash
+        run: |
+          base=https://github.com/BtbN/FFmpeg-Builds/releases/download/latest
+          name=ffmpeg-n8.1-latest-win64-lgpl-8.1
+          curl -fsSL -o "$name.zip" "$base/$name.zip"
+          curl -fsSL -o checksums.sha256 "$base/checksums.sha256"
+          grep " $name.zip\$" checksums.sha256 | sha256sum -c -
+          unzip -q -j "$name.zip" "$name/bin/ffmpeg.exe" -d ffmpeg
+          ./ffmpeg/ffmpeg.exe -hide_banner -version | head -1
+      - name: package
+        shell: bash
+        run: node scripts/package.mjs --ffmpeg "$(cygpath -w "$PWD/ffmpeg/ffmpeg.exe")" --out ../release
+      - name: start the packaged body once
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'body'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $zip = Get-ChildItem ../release/*.zip | Select-Object -First 1
+          & "$env:SystemRoot\System32\tar.exe" -xf $zip.FullName -C $dir
+          $env:DSH_HER_HOME = Join-Path $env:RUNNER_TEMP 'home'
+          $p = Start-Process -FilePath (Join-Path $dir 'dsh-her\dsh-her.exe') -ArgumentList '--smoke' -Wait -PassThru
+          Write-Host "exit code $($p.ExitCode)"
+          exit $p.ExitCode
+      - uses: actions/upload-artifact@v4
+        with:
+          name: body-windows
+          path: |
+            release/*.zip
+            release/body-latest.json

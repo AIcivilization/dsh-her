@@ -48,7 +48,7 @@ export function launchBody(plan: LaunchPlan, env: { url: string; token: string; 
   const childEnv: NodeJS.ProcessEnv = { ...process.env, DSH_HER_URL: env.url, DSH_HER_TOKEN: env.token, DSH_HER_HOME: env.home }
   delete childEnv.ELECTRON_RUN_AS_NODE
   const args = env.pack === '' ? plan.args : [...plan.args, '--pack', env.pack]
-  const child = spawn(plan.binary, args, { cwd: plan.cwd, env: childEnv, detached: true, stdio: 'ignore' })
+  const child = spawn(plan.binary, args, { cwd: plan.cwd, env: childEnv, detached: true, stdio: 'ignore', windowsHide: true })
   child.unref()
   return child.pid
 }

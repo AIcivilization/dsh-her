@@ -6,7 +6,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { compareVersions, fetchManifest, install, installedBody, installedPlan, platformKey, validateManifest } from '../src/dsh/body-install.ts'
+import { appName, compareVersions, fetchManifest, install, installedBody, installedPlan, platformKey, validateManifest } from '../src/dsh/body-install.ts'
+import { systemTar } from '../src/platform.ts'
 
 test('versions order like releases', () => {
   assert.equal(compareVersions('0.1.0', '0.1.0'), 0)
@@ -24,7 +25,7 @@ test('a manifest is checked before use', () => {
   assert.throws(() => validateManifest({ ...ok, assets: { x: { file: 'a.zip', size: 1, sha256: 'short' } } }))
 })
 
-test('install downloads, checks, unpacks and keeps the previous version', { skip: process.platform !== 'darwin' }, async () => {
+test('install downloads, checks, unpacks and keeps the previous version', { skip: process.platform !== 'darwin' && process.platform !== 'win32' }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'her-release-'))
   const home = mkdtempSync(join(tmpdir(), 'her-home-'))
   const files = new Map<string, Buffer>()
@@ -37,11 +38,13 @@ test('install downloads, checks, unpacks and keeps the previous version', { skip
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/rel`
   // A tiny stand-in for the app, zipped the way package.mjs does.
   const release = (version: string, tamper = false) => {
-    const app = join(dir, version, 'dsh-her.app', 'Contents', 'MacOS')
-    mkdirSync(app, { recursive: true })
-    writeFileSync(join(app, 'Electron'), `#!/bin/sh\necho ${version}\n`)
+    const win = process.platform === 'win32'
+    const bin = win ? join(dir, version, appName()) : join(dir, version, appName(), 'Contents', 'MacOS')
+    mkdirSync(bin, { recursive: true })
+    writeFileSync(join(bin, win ? 'dsh-her.exe' : 'Electron'), `#!/bin/sh\necho ${version}\n`)
     const zip = join(dir, `body-${version}.zip`)
-    execFileSync('ditto', ['-c', '-k', '--keepParent', join(dir, version, 'dsh-her.app'), zip])
+    if (win) execFileSync(systemTar(), ['-a', '-c', '-f', zip, '-C', join(dir, version), appName()])
+    else execFileSync('ditto', ['-c', '-k', '--keepParent', join(dir, version, appName()), zip])
     const bytes = readFileSync(zip)
     files.set(`body-${version}.zip`, tamper ? Buffer.concat([bytes, Buffer.from('x')]) : bytes)
     files.set('body-latest.json', Buffer.from(JSON.stringify({
@@ -56,7 +59,7 @@ test('install downloads, checks, unpacks and keeps the previous version', { skip
     assert.equal(first.version, '0.1.0')
     assert.ok(progress.length > 0)
     assert.equal(installedBody(home)?.version, '0.1.0')
-    assert.ok(installedPlan(home)?.binary.endsWith('dsh-her.app/Contents/MacOS/Electron'))
+    assert.ok(installedPlan(home)?.binary.endsWith(process.platform === 'win32' ? join('dsh-her', 'dsh-her.exe') : join('dsh-her.app', 'Contents', 'MacOS', 'Electron')))
     assert.ok(existsSync(installedPlan(home)!.binary))
 
     // A download that does not match its checksum is refused; 0.1.0 stays.

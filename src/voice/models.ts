@@ -5,6 +5,7 @@
  */
 
 import { execFile } from 'node:child_process'
+import { systemTar } from '../platform.ts'
 import { createWriteStream, existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
@@ -77,7 +78,7 @@ export async function fetchModel(
   mkdirSync(staging, { recursive: true })
   try {
     // bsdtar ships with macOS and Windows 10+, and reads bzip2 itself.
-    await promisify(execFile)('tar', ['-xjf', partial, '-C', staging])
+    await promisify(execFile)(systemTar(), ['-xjf', partial, '-C', staging])
     renameSync(join(staging, spec.name), modelPath(modelsDir, spec))
   } finally {
     rmSync(staging, { recursive: true, force: true })
