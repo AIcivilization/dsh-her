@@ -53,6 +53,8 @@ if (platform === 'darwin') {
 }
 
 console.log(`dsh-her body ${version} → ${platform}-${arch}`)
+// Electron 44 no longer downloads its program on install: fetch it (checked against its checksums) when missing.
+if (!existsSync(join(bodyDir, 'node_modules', 'electron', 'dist'))) run(process.execPath, [join(bodyDir, 'node_modules', 'electron', 'install.js')], { cwd: bodyDir })
 run('npm', ['run', 'build'], { cwd: bodyDir, shell: platform === 'win32' })
 
 const stage = join(out, `stage-${platform}-${arch}`)
