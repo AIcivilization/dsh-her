@@ -50,7 +50,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
-      - run: npm i -g @deepseek-ai/dsh
+      - run: npm i -g pnpm @deepseek-ai/dsh
       - run: npm i --no-save playwright-core && npx playwright-core install --with-deps chromium
       - run: node scripts/headless-check.mjs
       # What a server needs that a Mac test never touches: uv's Linux build, and sherpa's native library.

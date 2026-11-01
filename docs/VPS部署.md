@@ -5,14 +5,14 @@
 ## 1. 装
 
 ```bash
-npm i -g @deepseek-ai/dsh
+npm i -g pnpm @deepseek-ai/dsh
 ```
 
 ```bash
 dsh plugin --profile web add dsh-her
 ```
 
-需要 Node.js 22.18 或更新。这个 profile 要带 dsh 的网页界面（`@deepseek-ai/dsh-web-app`，`web` profile 默认带）。
+需要 Node.js 22.18 或更新；dsh 用 pnpm 安装插件，所以要一起装上。这个 profile 要带 dsh 的网页界面（`@deepseek-ai/dsh-web-app`，`web` profile 默认带）。
 
 ## 2. 打开网页：三种办法
 
