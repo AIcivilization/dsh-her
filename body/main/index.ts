@@ -34,6 +34,7 @@ import { clipsView, loadPack, saveClipUses, summarize } from '../../src/pack/loa
 import { pickScenePhoto, saveScene, scenePhotoIn } from './scene-maker.ts'
 import { listPacks, loadSettings, saveSettings, type BodySettings } from '../../src/pack/settings.ts'
 import { iconPixels } from '../shared/icon.ts'
+import { importLook } from '../../src/pack/import-look.ts'
 import { attachToWallpaper } from './wallpaper-win.ts'
 
 /** ⌃⌥Space / Ctrl+Alt+Space: talk to her. Alt+Space alone is taken by Windows' window menu. */
@@ -377,49 +378,16 @@ async function pickAndImport(): Promise<void> {
  * becomes a pack `<id>-desk` / `<id>-<scene>`, then look.json ties them
  * together and she shows it. One report for all of it.
  */
-async function importLook(request: Extract<BrainMessage, { t: 'look.import' }>): Promise<void> {
-  const send = (message: BodyMessage) => link?.send(message)
+async function importLookHere(request: Extract<BrainMessage, { t: 'look.import' }>): Promise<void> {
   const { size, scaleFactor } = screen.getPrimaryDisplay()
-  const parts = [
-    ...(request.desk === undefined ? [] : [{ key: 'desk', name: '桌宠', folder: request.desk }]),
-    ...request.scenes.map(s => ({ key: s.id, name: s.name, folder: s.folder })),
-  ]
-  const lines: Array<{ level: 'ok' | 'warn' | 'error'; text: string }> = []
-  const imported = new Set<string>()
-  mkdirSync(packsDir, { recursive: true })
-  for (const [i, part] of parts.entries()) {
-    const result = await importPack(join(request.dir, part.folder), packsDir, {
-      id: `${request.id}-${part.key}`,
-      name: `${request.name}·${part.name}`,
-      screen: { width: size.width, height: size.height, scale: scaleFactor },
-      onProgress: (done, total, step) => send({ t: 'pack.progress', id: '', done: i * 100 + Math.round((done / total) * 100), total: parts.length * 100, step: `${part.name}：${step}` }),
-    })
-    lines.push({ level: result.pack === undefined ? 'error' : 'ok', text: `—— ${part.name} ——` }, ...result.report)
-    if (result.pack !== undefined) imported.add(part.key)
-  }
-  const scenes = request.scenes.filter(s => imported.has(s.id))
-  if (scenes.length === 0 && !imported.has('desk')) {
-    send({ t: 'pack.report', id: '', ok: false, lines: [...lines, { level: 'error', text: '一个部分都没导入成功，看上面的原因' }] })
-    reportPacks()
-    return
-  }
-  // A look with only a desk pet still needs a "scene": the desk pet itself.
-  const look: Look = {
-    format: 'dsh-her-look@1',
-    id: request.id,
-    name: request.name,
-    ...(imported.has('desk') ? { desk: `${request.id}-desk` } : {}),
-    scenes: scenes.length > 0
-      ? scenes.map(s => ({ id: s.id, name: s.name, pack: `${request.id}-${s.id}`, ...(s.when === undefined ? {} : { when: s.when }) }))
-      : [{ id: 'desk', name: '桌宠', pack: `${request.id}-desk` }],
-    default: scenes.some(s => s.id === request.default) ? request.default! : scenes[0]?.id ?? 'desk',
-  }
-  const lookDir = join(expand(home), 'looks', request.id)
-  mkdirSync(lookDir, { recursive: true })
-  writeFileSync(join(lookDir, 'look.json'), `${JSON.stringify(look, null, 2)}\n`)
-  lines.push({ level: 'ok', text: `形象「${request.name}」：${imported.has('desk') ? '桌宠 + ' : ''}${scenes.length} 个场景` })
-  send({ t: 'pack.report', id: '', ok: true, lines })
-  useLook(request.id)
+  const result = await importLook(request, {
+    home: expand(home), packsDir,
+    screen: { width: size.width, height: size.height, scale: scaleFactor },
+    onProgress: (done, total, step) => link?.send({ t: 'pack.progress', id: '', done, total, step }),
+  })
+  link?.send({ t: 'pack.report', id: '', ok: result.look !== undefined, lines: result.lines })
+  if (result.look === undefined) reportPacks()
+  else useLook(request.id)
 }
 
 function statusLabel(): string {
@@ -679,7 +647,7 @@ if (!app.requestSingleInstanceLock()) {
           openPanel('scene', { dir: message.dir, name: message.name })
           return
         } else if (message.t === 'look.import') {
-          importLook(message).catch(error => link?.send({ t: 'pack.report', id: '', ok: false, lines: [{ level: 'error', text: (error as Error).message }] }))
+          importLookHere(message).catch(error => link?.send({ t: 'pack.report', id: '', ok: false, lines: [{ level: 'error', text: (error as Error).message }] }))
           return
         } else if (message.t === 'look.set') {
           setLook(message)

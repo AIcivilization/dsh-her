@@ -31,9 +31,10 @@
  */
 
 import { spawn } from 'node:child_process'
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { buildSystemPrompt, DEFAULT_VOICE, extractCues, extractSounds, herPaths, invalidCharacter, judgeBargeIn, loadCharacter, memoryContext, OWN_PREFIX, performanceSection, readingMs, saveCharacter, serviceOf, SOUND_SECTION, speakable, withSounds, type Character } from '../core/index.ts'
 import { digestPrompt, notePrompt, parseDigest, transcriptOf } from '../memory/digest.ts'
@@ -43,13 +44,18 @@ import { BrainServer } from '../server/brain-server.ts'
 import { API_BASE, apiHandlers, handle, type ApiRuntime } from './api.ts'
 import { bodyRunning, findDevBody, launchBody, type LaunchPlan } from './body-launcher.ts'
 import { compareVersions, downloadFolder, install, installDownloaded, installedBody, installedPlan, latestRelease, manualInstall, type InstallState, type ManualInstall } from './body-install.ts'
-import { IDLE_IMPORT, type ImportStatus } from './import-status.ts'
+import { IDLE_IMPORT, type ImportStatus, type ReportLine } from './import-status.ts'
 import { DESK_DIR, newProject, sceneDir } from '../core/workshop.ts'
 import { exampleFile, examples, exportProject, findProject, importProject, listProjects, prepareImport, projectStatus, saveProject } from './workshop.ts'
 import type { HerConfig } from './config.ts'
 import { HerSession, type DshServices, type ModelRoute } from './her-session.ts'
 import { heardText, SpeechQueue } from '../voice/speech-queue.ts'
-import { WEB_BASE, WebBody, type WebMode } from './web-body.ts'
+import { fileResponse, packFile, WEB_BASE, WebBody, type WebMode } from './web-body.ts'
+import { saveUpload, uploadAllowed, uploadTarget } from './uploads.ts'
+import { importLook, type LookRequest } from '../pack/import-look.ts'
+import { importPack } from '../pack/import.ts'
+import { plateIn, saveFrame } from '../pack/frame.ts'
+import { hasFfmpeg, stillSize } from '../pack/media.ts'
 import { Voice } from '../voice/voice.ts'
 import { httpFetch, NetError, setMirrors } from '../net.ts'
 import { defaultIdleMinutes, MingVoice } from '../voice/ming.ts'
@@ -635,7 +641,7 @@ export function apply(ctx: Context, config: HerConfig): void {
 
   /** The body's main screen in device pixels, for photo sizes in the prompts. */
   const mainScreen = (): { width: number; height: number } | undefined => {
-    const first = server?.bodies.at(-1)?.hello.caps.screens[0]
+    const first = server?.bodies.at(-1)?.hello.caps.screens[0] ?? webScreen
     return first === undefined ? undefined : { width: Math.round(first.w * first.scale), height: Math.round(first.h * first.scale) }
   }
 
@@ -645,6 +651,34 @@ export function apply(ctx: Context, config: HerConfig): void {
     const { name, persona, callYou, pronoun } = character
     return { t: 'panel', cid, character: { name, persona, callYou, pronoun }, memory: { facts, episodes, diary }, ...(error === undefined ? {} : { error }) }
   }
+
+  /** The screen of the browser she lives in, as the page reports it (the desktop body knows its own). */
+  let webScreen: { w: number; h: number; scale: number } | undefined
+
+  /**
+   * With no desktop body the brain imports by itself (it has the files and
+   * ffmpeg). Progress and the report show the same way as from a body.
+   */
+  const importHere = async (work: (onProgress: (done: number, total: number, step: string) => void) => Promise<{ ok: boolean; lines: ReportLine[]; show?: string }>, cleanup?: () => void): Promise<void> => {
+    if (importStatus.state === 'running') throw new Error('已经有一个在导入了，等它做完')
+    if (!await hasFfmpeg()) throw new Error('这台电脑上找不到 ffmpeg，导入要用它。Ubuntu / Debian：sudo apt install ffmpeg；mac：brew install ffmpeg；Windows：winget install ffmpeg')
+    importStatus = { ...IDLE_IMPORT, state: 'running' }
+    void work((done, total, step) => {
+      importStatus = { ...importStatus, state: 'running', done, total, step }
+    }).then(result => {
+      importStatus = { ...importStatus, state: result.ok ? 'done' : 'failed', lines: result.lines }
+      if (result.show !== undefined) {
+        webBody.use(result.show)
+        refreshBodyPack()
+      }
+    }, (error: Error) => {
+      importStatus = { ...importStatus, state: 'failed', lines: [{ level: 'error', text: error.message }] }
+    }).finally(() => {
+      cleanup?.()
+    })
+  }
+  const uploadsDir = join(paths.root, 'uploads')
+  const browserScreen = () => (webScreen === undefined ? {} : { screen: { width: webScreen.w, height: webScreen.h, scale: webScreen.scale } })
 
   /** Whether the page should show her: asked for, or (the default) while no desktop body is here. */
   const webShown = (): boolean => {
@@ -766,7 +800,48 @@ export function apply(ctx: Context, config: HerConfig): void {
       if (!bodyPacks.some(p => p.packId === packId)) throw new Error('没有这个外形包')
       broadcast({ t: 'pack.use', packId })
     },
-    webStatus: () => ({ show: webShown(), mode: webBody.mode }),
+    webNewBatch: () => {
+      const batch = `b${Date.now().toString(36)}`
+      mkdirSync(join(uploadsDir, batch), { recursive: true })
+      return batch
+    },
+    webStatus: screen => {
+      if (screen !== undefined) webScreen = screen
+      return { show: webShown(), mode: webBody.mode }
+    },
+    importBatch: async (batch, name) => {
+      const dir = uploadTarget(uploadsDir, batch)
+      if (dir === undefined || !existsSync(dir)) throw new Error('找不到上传的文件')
+      await importHere(async onProgress => {
+        // A folder of the same name sent again replaces its pack instead of adding another.
+        const id = name === undefined ? {} : { id: `up-${createHash('sha1').update(name).digest('hex').slice(0, 8)}` }
+        const result = await importPack(dir, paths.packs, { ...id, ...(name === undefined ? {} : { name }), ...browserScreen(), onProgress })
+        return { ok: result.pack !== undefined, lines: result.report, ...(result.pack === undefined ? {} : { show: result.pack.id }) }
+      }, () => rmSync(dir, { recursive: true, force: true }))
+    },
+    workshopFrameInfo: async (id, sceneId) => {
+      const found = findProject(id)
+      const scene = found?.project.scenes.find(s => s.id === sceneId)
+      if (found === undefined || scene === undefined) throw new Error('找不到这个场景')
+      const dir = join(found.dir, sceneDir(scene))
+      const plate = plateIn(dir)
+      if (plate === undefined) throw new Error('这个场景还没有照片：先按提示词生成，存成 plate.png 传上来')
+      const size = await stillSize(join(dir, plate))
+      let region: { x: number; y: number; width: number; height: number } | undefined
+      try {
+        region = (JSON.parse(readFileSync(join(dir, 'scene.json'), 'utf8')) as { region?: typeof region }).region
+      } catch {
+        // not framed yet
+      }
+      return { ...size, file: `${sceneDir(scene)}/${plate}`, ...(region === undefined ? {} : { region }) }
+    },
+    workshopFrameSave: async (id, sceneId, region) => {
+      const found = findProject(id)
+      const scene = found?.project.scenes.find(s => s.id === sceneId)
+      if (found === undefined || scene === undefined) throw new Error('找不到这个场景')
+      await saveFrame(join(found.dir, sceneDir(scene)), region)
+      return projectStatus(found.project, found.dir)
+    },
     webConfig: () => webBody.config(desktopConnected()),
     webSend: message => onBodyMessage(withCid(message), undefined),
     webSetMode: (mode: WebMode) => {
@@ -805,22 +880,28 @@ export function apply(ctx: Context, config: HerConfig): void {
       const found = findProject(id)
       if (found === undefined) throw new Error('找不到这个项目')
       const body = server?.bodies.at(-1)
-      if (body === undefined) throw new Error('身体还没连上，导入要在身体所在的电脑上做')
       const status = projectStatus(found.project, found.dir)
       if (!status.importable) throw new Error('还没有可以导入的部分：至少要有参考图和桌宠的 3 段，或者一个框好人物区的场景和它的 3 段')
       prepareImport(found.project, found.dir)
       const ready = (folder: string) => status.parts.find(p => p.folder === folder)?.enough === true
       const { project } = found
-      importStatus = { ...IDLE_IMPORT, state: 'running' }
-      body.send({
-        t: 'look.import', id: project.id, name: project.name, dir: found.dir,
+      const request: LookRequest = {
+        id: project.id, name: project.name, dir: found.dir,
         ...(project.desk.on && ready(DESK_DIR) ? { desk: DESK_DIR } : {}),
         ...(project.default === undefined ? {} : { default: project.default }),
         scenes: project.scenes.filter(s => ready(sceneDir(s)) && status.parts.find(p => p.folder === sceneDir(s))?.framed === true).map(s => ({
           id: s.id, name: s.name, folder: sceneDir(s),
           ...(s.hours !== undefined || s.user !== undefined ? { when: { ...(s.hours === undefined ? {} : { hours: s.hours }), ...(s.user === undefined ? {} : { user: s.user }) } } : {}),
         })),
-      })
+      }
+      if (body === undefined) {
+        return importHere(async onProgress => {
+          const result = await importLook(request, { home: paths.root, packsDir: paths.packs, ...browserScreen(), onProgress })
+          return { ok: result.look !== undefined, lines: result.lines, ...(result.look === undefined ? {} : { show: `look:${result.look.id}` }) }
+        })
+      }
+      importStatus = { ...IDLE_IMPORT, state: 'running' }
+      body.send({ t: 'look.import', ...request })
     },
     setLook: change => {
       if (bodyLook === undefined) throw new Error('现在用的不是多场景的形象')
@@ -1079,7 +1160,7 @@ export function apply(ctx: Context, config: HerConfig): void {
   })
 
   ctx.inject(['connection'], (webCtx) => {
-    const connection = (webCtx as unknown as { connection: { fetch: { register(route: { path: string; methods: string[]; requestBody: 'buffered'; fetch: (request: Request) => Response | Promise<Response> }): () => void } } }).connection
+    const connection = (webCtx as unknown as { connection: { fetch: { register(route: { path: string; methods: string[]; requestBody: 'buffered' | 'streaming'; fetch: (request: Request) => Response | Promise<Response> }): () => void } } }).connection
     const get = (path: string, fetch: (request: Request) => Response | Promise<Response>) =>
       webCtx.effect(() => connection.fetch.register({ path: `${WEB_BASE}/${path}`, methods: ['GET', 'HEAD'], requestBody: 'buffered', fetch }))
     get('page', () => webBody.asset('index.html'))
@@ -1098,6 +1179,37 @@ export function apply(ctx: Context, config: HerConfig): void {
         pendingActs.delete(id)
         pending.settle({ ok: false, reason: 'no body' })
       }
+    }))
+    // A file of a 形象工坊 project (its photo, crop.png …), to frame or to download.
+    get('project-file', request => {
+      const query = new URL(request.url).searchParams
+      const found = findProject(query.get('id') ?? '')
+      const path = found === undefined ? undefined : packFile(dirname(found.dir), basename(found.dir), query.get('f') ?? '')
+      return path === undefined ? new Response('not found', { status: 404 }) : fileResponse(path, request)
+    })
+    // Files from the browser, streamed to disk: a materials folder (`batch`) or into a project (`project`).
+    webCtx.effect(() => connection.fetch.register({
+      path: `${WEB_BASE}/upload`, methods: ['POST'], requestBody: 'streaming',
+      fetch: async request => {
+        const answer = (status: number, value: Record<string, unknown>) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
+        // Refused: read the body first, or the browser sees a dropped connection instead of the reason.
+        const refuse = async (message: string) => {
+          for await (const _chunk of request.body as unknown as AsyncIterable<Uint8Array>) { /* discard */ }
+          return answer(400, { ok: false, message })
+        }
+        const query = new URL(request.url).searchParams
+        const file = query.get('path') ?? ''
+        const project = query.get('project')
+        const root = project === null ? uploadTarget(uploadsDir, query.get('batch') ?? '') : findProject(project)?.dir
+        const target = root === undefined ? undefined : uploadTarget(root, file)
+        if (target === undefined) return refuse(`不能放到这里：${file}`)
+        if (!uploadAllowed(file)) return refuse(`不支持这种文件：${file}`)
+        try {
+          return answer(200, { ok: true, size: await saveUpload(request, target) })
+        } catch (error) {
+          return answer(500, { ok: false, message: (error as Error).message })
+        }
+      },
     }))
     // What you said in the page: 16-bit mono PCM at 16 kHz, as a desktop body sends it.
     webCtx.effect(() => connection.fetch.register({

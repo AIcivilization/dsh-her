@@ -235,7 +235,7 @@ export function mountWebFloat(): () => void {
   const sync = async () => {
     if (document.hidden) return
     try {
-      const res = await fetch('/api/dsh-her/web/status', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: '{}' })
+      const res = await fetch('/api/dsh-her/web/status', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ screen: { w: screen.width, h: screen.height, scale: devicePixelRatio } }) })
       const value = await res.json() as { ok: boolean; show?: boolean }
       if (value.ok) shown = value.show === true
     } catch {

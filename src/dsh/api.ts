@@ -76,7 +76,13 @@ export interface ApiRuntime {
   bodyCancelDownload(): void
   bodyOpenFolder(): void
   /** The web body: whether to show, her config, a message from the page, the setting. */
-  webStatus(): { show: boolean; mode: WebMode }
+  webStatus(screen?: { w: number; h: number; scale: number }): { show: boolean; mode: WebMode }
+  /** A new folder for files coming from the browser, and importing it as a pack (with no desktop body). */
+  webNewBatch(): string
+  importBatch(batch: string, name?: string): Promise<void>
+  /** Framing a 形象工坊 scene in the page: its photo and region, and saving the region. */
+  workshopFrameInfo(id: string, sceneId: string): Promise<{ width: number; height: number; file: string; region?: { x: number; y: number; width: number; height: number } }>
+  workshopFrameSave(id: string, sceneId: string, region: { x: number; y: number; width: number; height: number }): Promise<ProjectStatus>
   webConfig(): WebConfig
   webSend(message: BodyMessage): void
   webSetMode(mode: WebMode): void
@@ -114,7 +120,7 @@ export interface ApiRuntime {
   workshopExamples(): Array<{ card: WorkshopCard; file: string; label: string; ready: boolean }>
   workshopOpen(id: string): void
   workshopFrame(id: string, sceneId: string): void
-  workshopImport(id: string): void
+  workshopImport(id: string): void | Promise<void>
   memoryRemove(ids: string[]): number
   memoryConfirm(ids: string[]): number
   digest(): Promise<string>
@@ -180,7 +186,21 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
     }),
     '/voice/preview': async body => rt.previewVoice(str(body.voice, '音色'), num(body.speed ?? 1, '语速'), str(body.text ?? '你好呀，我在你桌面上等你好久啦。', '试听的话')),
     '/update/plugin-latest': async () => rt.pluginLatest(),
-    '/web/status': async () => rt.webStatus(),
+    '/web/status': async body => {
+      const s = body.screen as { w?: unknown; h?: unknown; scale?: unknown } | undefined
+      const screen = typeof s?.w === 'number' && typeof s.h === 'number' && typeof s.scale === 'number' ? { w: s.w, h: s.h, scale: s.scale } : undefined
+      return rt.webStatus(screen)
+    },
+    '/web/new-batch': async () => ({ batch: rt.webNewBatch() }),
+    '/web/import-batch': async body => {
+      await rt.importBatch(str(body.batch, '上传'), typeof body.name === 'string' && body.name.trim() !== '' ? body.name.trim() : undefined)
+      return withState()
+    },
+    '/workshop/frame-info': async body => rt.workshopFrameInfo(str(body.id, '项目'), str(body.scene, '场景')),
+    '/workshop/frame-save': async body => {
+      const r = body.region as Record<string, unknown> | undefined
+      return { status: await rt.workshopFrameSave(str(body.id, '项目'), str(body.scene, '场景'), { x: num(r?.x, '人物区'), y: num(r?.y, '人物区'), width: num(r?.width, '人物区'), height: num(r?.height, '人物区') }) }
+    },
     '/web/config': async () => ({ config: rt.webConfig() }),
     '/web/send': async body => {
       const message = body.message as BodyMessage | undefined
@@ -302,7 +322,7 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
       return {}
     },
     '/workshop/import': async body => {
-      rt.workshopImport(str(body.id, '项目'))
+      await rt.workshopImport(str(body.id, '项目'))
       return withState()
     },
     '/memory/remove': async body => withState({ removed: rt.memoryRemove(ids(body.ids)) }),

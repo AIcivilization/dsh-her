@@ -1,9 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileResponse, frameFor, packFile, parseRange, WEB_BASE, WebBody } from '../src/dsh/web-body.ts'
+import { saveUpload, uploadAllowed, uploadTarget } from '../src/dsh/uploads.ts'
+import { clampRegion } from '../src/pack/frame.ts'
 import type { PackInfo } from '../src/pack/types.ts'
 
 test('range requests are read the way a video element sends them', () => {
@@ -118,4 +120,30 @@ test('one live connection: the newest wins and the older is told', async () => {
   second.abort()
   assert.equal(web.connected, false)
   assert.deepEqual(opened, ['a', 'a closed', 'b', 'b closed'])
+})
+
+test('uploads stay inside their folder and only materials get through', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'her-up-'))
+  try {
+    assert.equal(uploadTarget(root, 'clips/a.mp4'), join(root, 'clips', 'a.mp4'))
+    for (const bad of ['../x.mp4', 'a/../../x.mp4', '..\\x.mp4', '.hidden/a.mp4', '', '/']) assert.equal(uploadTarget(root, bad), undefined, bad)
+    assert.equal(uploadTarget(root, '/etc/passwd'), join(root, 'etc', 'passwd'), 'a leading slash stays inside')
+    assert.ok(uploadAllowed('a.MP4'))
+    assert.ok(uploadAllowed('参考图.png'))
+    assert.ok(!uploadAllowed('a.sh'))
+    assert.ok(!uploadAllowed('a.exe'))
+    const target = uploadTarget(root, 'clips/a.mp4')!
+    const size = await saveUpload(new Request('http://x/', { method: 'POST', body: 'hello', duplex: 'half' } as RequestInit), target)
+    assert.equal(size, 5)
+    assert.equal(readFileSync(target, 'utf8'), 'hello')
+    assert.ok(!existsSync(`${target}.part`))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a frame stays inside the photo, on even sizes', () => {
+  const photo = { width: 1000, height: 800 }
+  assert.deepEqual(clampRegion({ x: 10.4, y: 20.6, width: 301.2, height: 533 }, photo), { x: 10, y: 21, width: 300, height: 532 })
+  assert.deepEqual(clampRegion({ x: -5, y: 790, width: 2000, height: 50 }, photo), { x: 0, y: 790, width: 1000, height: 10 })
 })

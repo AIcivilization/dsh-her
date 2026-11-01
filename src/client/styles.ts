@@ -26,6 +26,11 @@ export const STYLES = `
 .her-manual-row .her-muted{flex:none;min-width:9em;font-size:12px}
 .her-manual-row code{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;user-select:all}
 .her-manual .her-faint code{word-break:break-all;font-size:11px;user-select:all}
+.her-frame{position:relative;margin:8px 0;cursor:crosshair;user-select:none;line-height:0}
+.her-frame img{width:100%;display:block;border-radius:6px}
+.her-frame-box{position:absolute;border:2px solid ${ACCENT};box-shadow:0 0 0 9999px rgba(0,0,0,.45);pointer-events:none}
+.her-frame{overflow:hidden}
+.her-disabled{opacity:.5;pointer-events:none}
 .her-versions{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;margin:-6px 0 12px;padding-bottom:8px;border-bottom:1px solid ${LINE};font-size:12px;color:${MUTED};max-width:760px}
 .her-versions b{font-weight:600;color:${TEXT}}
 .her-versions code{font-size:11px}

@@ -10,6 +10,7 @@ import { choiceClass, choiceNote, SERVICE_SHORT, voiceLabel } from './choice.tsx
 import { herApi, modelCatalog, playAudio, type ModelGroup, type Result, type StateView } from './api.ts'
 import { BodyManual } from './BodyManual.tsx'
 import { MingSection } from './MingVoice.tsx'
+import { insideFolder, uploadFiles, worthSending, type UploadProgress } from './upload.ts'
 
 export type Apply = (call: Promise<Result<{ state: StateView }>>) => Promise<boolean>
 
@@ -105,8 +106,10 @@ export function PackPicker({ state, apply }: { state: StateView; apply: Apply })
         {body.packs.length === 0 && <p className="her-muted">还没有导入过外形包。</p>}
       </div>
       <div className="her-row">
-        <button className="her-btn" disabled={!body.connected || imp.state === 'picking' || imp.state === 'running'} onClick={() => void apply(herApi.pickPack())}>导入我的素材…</button>
-        <span className="her-muted">{body.connected ? '会在身体那台电脑上弹出选择文件夹的窗口。素材怎么做、怎么命名，见 docs/素材生成提示词.md。' : '现在只有桌面身体能导入素材；从网页上传很快就会有。'}</span>
+        {body.connected
+          ? <button className="her-btn" disabled={imp.state === 'picking' || imp.state === 'running'} onClick={() => void apply(herApi.pickPack())}>导入我的素材…</button>
+          : <UploadPack apply={apply} busy={imp.state === 'running'} />}
+        <span className="her-muted">{body.connected ? '会在身体那台电脑上弹出选择文件夹的窗口。' : '选一个素材文件夹，传上去就导入。'}素材怎么做、怎么命名，见 docs/素材生成提示词.md。</span>
       </div>
       {imp.state === 'picking' && <p className="her-muted">请在桌面上弹出的窗口里选择素材文件夹…</p>}
       {imp.state === 'running' && (
@@ -121,6 +124,39 @@ export function PackPicker({ state, apply }: { state: StateView; apply: Apply })
         </ul>
       )}
     </div>
+  )
+}
+
+/** A materials folder from the browser to the brain, imported there (no desktop body to pick it on). */
+function UploadPack({ apply, busy }: { apply: Apply; busy: boolean }) {
+  const [progress, setProgress] = useState<UploadProgress>()
+  const [error, setError] = useState<string>()
+  const send = async (chosen: File[]) => {
+    const files = chosen.filter(worthSending)
+    if (files.length === 0) return setError('这个文件夹里没有素材（视频、图片）')
+    setError(undefined)
+    const created = await herApi.webNewBatch()
+    if (!created.ok) return setError(created.message)
+    try {
+      await uploadFiles(files, file => `/api/dsh-her/web/upload?batch=${encodeURIComponent(created.batch)}&path=${encodeURIComponent(insideFolder(file))}`, setProgress)
+    } catch (failure) {
+      setProgress(undefined)
+      return setError((failure as Error).message)
+    }
+    setProgress(undefined)
+    const top = (chosen[0] as File & { webkitRelativePath?: string }).webkitRelativePath?.split('/')[0]
+    const result = await herApi.webImportBatch(created.batch, top)
+    if (!result.ok) setError(result.message)
+    else await apply(Promise.resolve(result))
+  }
+  return (
+    <>
+      <label className={`her-btn ${busy || progress !== undefined ? 'her-disabled' : ''}`}>
+        {progress === undefined ? '上传素材文件夹…' : `正在上传 ${progress.file}（${progress.total === 0 ? 0 : Math.round((progress.done / progress.total) * 100)}%）`}
+        <input type="file" hidden disabled={busy || progress !== undefined} {...{ webkitdirectory: '', directory: '' }} onChange={e => { void send([...(e.target.files ?? [])]); e.target.value = '' }} />
+      </label>
+      {error !== undefined && <p className="her-danger">{error}</p>}
+    </>
   )
 }
 

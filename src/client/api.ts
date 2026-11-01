@@ -7,6 +7,13 @@ import type { ProjectStatus } from '../dsh/workshop.ts'
 
 export type { StateView }
 
+export interface FrameRegion {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 /** A take of a Ming voice to listen to before keeping it (WAV, base64). */
 export interface MingDraft {
   id: string
@@ -45,6 +52,10 @@ export const herApi = {
   bodyInstallDownloaded: () => post<WithState>('/body/install-downloaded'),
   bodyCancel: () => post<WithState>('/body/cancel'),
   bodyOpenFolder: () => post<Record<string, never>>('/body/open-folder'),
+  webNewBatch: () => post<{ batch: string }>('/web/new-batch'),
+  webImportBatch: (batch: string, name?: string) => post<WithState>('/web/import-batch', { batch, ...(name === undefined ? {} : { name }) }),
+  workshopFrameInfo: (id: string, scene: string) => post<{ width: number; height: number; file: string; region?: FrameRegion }>('/workshop/frame-info', { id, scene }),
+  workshopFrameSave: (id: string, scene: string, region: FrameRegion) => post<{ status: ProjectStatus }>('/workshop/frame-save', { id, scene, region }),
   webSet: (mode: 'auto' | 'on' | 'off') => post<WithState>('/web/set', { mode }),
   pluginLatest: () => post<{ latest: string; updateAvailable: boolean }>('/update/plugin-latest'),
   mingInstall: () => post<WithState>('/voice/ming/install'),

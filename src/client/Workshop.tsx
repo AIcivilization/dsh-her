@@ -15,10 +15,13 @@ import type { ProjectStatus } from '../dsh/workshop.ts'
 import { herApi, type StateView } from './api.ts'
 import type { Apply } from './parts.tsx'
 import { Fold, useFolds } from './fold.tsx'
+import { FrameScene } from './FrameScene.tsx'
+import { projectFileUrl, ProjectUpload } from './ProjectUpload.tsx'
 
 type Item = { project: LookProject; status: ProjectStatus }
 
 const OWN = '__own__'
+const NEEDS_DESKTOP = '要选文件夹的窗口，现在只有桌面身体能弹出来'
 
 const copy = (text: string) => void navigator.clipboard?.writeText(text)
 
@@ -29,6 +32,8 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
   const [dirty, setDirty] = useState(false)
   const [newName, setNewName] = useState('')
   const [note, setNote] = useState<{ kind: 'ok' | 'error'; text: string }>()
+  /** The scene being framed in the page. */
+  const [framing, setFraming] = useState<string>()
 
   const reload = useCallback(async () => {
     const result = await herApi.workshopList()
@@ -80,6 +85,11 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
   }
   const frame = async (scene: ProjectScene) => {
     if (dirty && !(await save())) return
+    // No desktop body to open a window on: frame it right here.
+    if (!state.body.connected) {
+      setFraming(scene.id)
+      return
+    }
     report(await herApi.workshopFrame(draft!.id, scene.id), '已在桌面上打开"做场景"窗口：框好她的活动范围，点保存')
   }
   const importLook = async () => {
@@ -151,11 +161,11 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
         <div className="her-row">
           <input className="her-input" style={{ flex: 1, minWidth: 160 }} value={newName} placeholder="新形象的名字，比如：居家眼镜" onChange={e => setNewName(e.target.value)} />
           <button className="her-btn" disabled={newName.trim() === ''} onClick={() => void create()}>新建</button>
-          <button className="her-btn" onClick={() => void importProject()}>导入已有项目…</button>
+          <button className="her-btn" disabled={!state.body.connected} title={state.body.connected ? undefined : NEEDS_DESKTOP} onClick={() => void importProject()}>导入已有项目…</button>
         </div>
         {draft !== undefined && (
           <div className="her-row">
-            <button className="her-btn" onClick={() => void exportProject()}>把「{draft.name}」导出到文件夹…</button>
+            <button className="her-btn" disabled={!state.body.connected} title={state.body.connected ? undefined : NEEDS_DESKTOP} onClick={() => void exportProject()}>把「{draft.name}」导出到文件夹…</button>
             <label><input type="checkbox" checked={withMedia} onChange={e => setWithMedia(e.target.checked)} /> 连同图片和视频</label>
             <span className="her-muted">不勾只导出设置（形象.json 和所有提示词），很小；导出的文件夹在别的电脑上用"导入已有项目"打开。</span>
           </div>
@@ -207,6 +217,10 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
           {fold('reference', '2. 参考图（她的"身份证"）', status.reference ? '✓ 已有 参考图.png' : '还没有 参考图.png', status.reference, <>
             <p>{status.reference ? <span className="her-ok">✓ 已有 参考图.png</span> : <span className="her-warn">还没有 参考图.png</span>}：纯色背景、全身、正面站立。用文生图工具按下面的提示词生成，存成「参考图.png」放进项目文件夹。之后每个场景的照片都要用它当参考图。</p>
             <PromptBox text={referencePrompt(draft)} />
+            <div className="her-row">
+              <ProjectUpload projectId={draft.id} named="参考图" accept="image/png,image/jpeg" label="上传参考图…" onDone={() => void reload()} />
+              {status.reference && <a className="her-btn link" href={projectFileUrl(draft.id, '参考图.png')} download>下载参考图（生成片段要用）</a>}
+            </div>
           </>)}
 
           {fold('desk', '3. 桌宠（浮在最上层时的她）', !draft.desk.on ? '不要桌宠' : desk === undefined ? '还没保存' : `${desk.made}/${desk.planned} 段${desk.enough ? '，够用了' : ''}`, !draft.desk.on || desk?.enough === true, <>
@@ -215,6 +229,10 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
               <>
                 <PartStatusLine status={desk} />
                 <p className="her-muted">首帧用「参考图.png」，生成竖版 9:16、1080P、5–6 秒。</p>
+                <div className="her-row">
+                  <ProjectUpload projectId={draft.id} folder={DESK_DIR} accept="video/*,.mp4,.webm,.mov" label="上传片段…" onDone={() => void reload()} />
+                  <span className="her-muted">文件名按下面的清单（比如 stand_idle_01.mp4），可以一次选多个。</span>
+                </div>
                 <ClipList project={draft} kind="desk" clips={draft.desk.clips} pose="stand" onChange={clips => edit(p => { p.desk.clips = clips })} />
               </>
             )}
@@ -233,6 +251,7 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
                 onDefault={() => edit(p => { p.default = scene.id })}
                 onRemove={() => edit(p => { p.scenes.splice(i, 1) })}
                 onFrame={() => void frame(scene)}
+                framing={framing === scene.id} desktop={state.body.connected} onFramed={() => { setFraming(undefined); void reload() }} onUploaded={() => void reload()}
               />
             ))}
             <button className="her-btn" onClick={() => edit(p => { p.scenes.push(newScene(`s${Date.now().toString(36)}`, `场景${p.scenes.length + 1}`)) })}>加一个场景</button>
@@ -245,7 +264,9 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
               <li>场景的照片放好后点"框人物区"；片段齐了就"导入这个形象"。每部分至少要 3 段（待机、说话 ×2），其他的以后补，再导入一次就会更新。</li>
             </ol>
             <div className="her-row">
-              <button className="her-btn" onClick={() => void herApi.workshopOpen(draft.id).then(r => report(r, '已打开文件夹'))}>打开文件夹</button>
+              {state.body.connected
+                ? <button className="her-btn" onClick={() => void herApi.workshopOpen(draft.id).then(r => report(r, '已打开文件夹'))}>打开文件夹</button>
+                : <span className="her-muted">项目在 dsh 所在电脑的 {status.dir}</span>}
               <button className="her-btn" disabled={!status.importable || state.import.state === 'running'} onClick={() => void importLook()}>导入这个形象</button>
             </div>
             <ImportProgress state={state} />
@@ -338,10 +359,12 @@ function CardEditor({ card, onChange }: { card: CharacterCard; onChange: (card: 
   )
 }
 
-function SceneEditor({ project, scene, isDefault, status, screen, onChange, onDefault, onRemove, onFrame }: {
+function SceneEditor({ project, scene, isDefault, status, screen, onChange, onDefault, onRemove, onFrame, framing, desktop, onFramed, onUploaded }: {
   project: LookProject; scene: ProjectScene; isDefault: boolean; status: ProjectStatus['parts'][number] | undefined
   screen: { width: number; height: number } | undefined
   onChange: (change: (s: ProjectScene) => void) => void; onDefault: () => void; onRemove: () => void; onFrame: () => void
+  /** A desktop body is connected (framing opens its window). */
+  framing: boolean; desktop: boolean; onFramed: () => void; onUploaded: () => void
 }) {
   return (
     <div className="her-scenes">
@@ -373,7 +396,13 @@ function SceneEditor({ project, scene, isDefault, status, screen, onChange, onDe
       <p className="her-muted">照片：用参考图生成（{screen === undefined ? '横版，和屏幕一样的比例' : `${screen.width}×${screen.height}`}），存成 plate.png 放进「{sceneDir(scene)}」文件夹。</p>
       <PromptBox text={scenePhotoPrompt(project, scene, screen)} />
       <PartStatusLine status={status} />
-      <div className="her-row"><button className="her-btn" disabled={status?.photo !== true} onClick={onFrame}>框人物区</button><span className="her-muted">在桌面上打开"做场景"，框出她活动的那一块；之后用 crop.png 当首帧生成视频。</span></div>
+      <div className="her-row">
+        <ProjectUpload projectId={project.id} folder={sceneDir(scene)} named="plate" accept="image/png,image/jpeg" label="上传照片…" onDone={onUploaded} />
+        <ProjectUpload projectId={project.id} folder={sceneDir(scene)} accept="video/*,.mp4,.webm,.mov" label="上传片段…" onDone={onUploaded} />
+        {status?.framed === true && <a className="her-btn link" href={projectFileUrl(project.id, `${sceneDir(scene)}/crop.png`)} download>下载 crop.png（生成片段的首帧）</a>}
+      </div>
+      {framing && <FrameScene projectId={project.id} sceneId={scene.id} sceneName={scene.name} onDone={onFramed} />}
+      <div className="her-row"><button className="her-btn" disabled={status?.photo !== true} onClick={onFrame}>框人物区</button><span className="her-muted">{desktop ? '在桌面上打开"做场景"' : '就在这里'}，框出她活动的那一块；之后用 crop.png 当首帧生成视频。</span></div>
       <ClipList project={project} kind="scene" scene={scene} clips={scene.clips} pose={scene.pose} onChange={clips => onChange(s => { s.clips = clips })} />
     </div>
   )

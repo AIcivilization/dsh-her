@@ -50,6 +50,21 @@ export async function probe(file: string): Promise<Probe> {
   }
 }
 
+/** Whether ffmpeg can be run here (the body brings its own; a server may not have one). */
+export async function hasFfmpeg(): Promise<boolean> {
+  try {
+    await run(FFMPEG, ['-hide_banner', '-version'])
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** A rectangle of a still image, as a PNG. */
+export async function cropStill(file: string, region: { x: number; y: number; width: number; height: number }, out: string): Promise<void> {
+  await ffmpeg(['-y', '-i', file, '-vf', `crop=${region.width}:${region.height}:${region.x}:${region.y}`, '-frames:v', '1', out])
+}
+
 /** Width and height of a still image. */
 export async function stillSize(file: string): Promise<{ width: number; height: number }> {
   const info = await ffmpeg(['-i', file])
