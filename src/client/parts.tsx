@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 import { serviceOf, SERVICE_NAMES, VOICES, type VoiceService } from '../core/voices.ts'
 import { choiceClass, choiceNote, SERVICE_SHORT, voiceLabel } from './choice.tsx'
 import { herApi, modelCatalog, playAudio, type ModelGroup, type Result, type StateView } from './api.ts'
+import { BodyManual } from './BodyManual.tsx'
 import { MingSection } from './MingVoice.tsx'
 
 export type Apply = (call: Promise<Result<{ state: StateView }>>) => Promise<boolean>
@@ -24,6 +25,7 @@ export function Dot({ tone }: { tone: 'ok' | 'warn' | 'bad' | 'off' }) {
 
 export function BodyStatus({ state, apply }: { state: StateView; apply: Apply }) {
   const [message, setMessage] = useState<string>()
+  const [manual, setManual] = useState(false)
   const body = state.body
   const install = body.install
   const start = async () => {
@@ -36,16 +38,19 @@ export function BodyStatus({ state, apply }: { state: StateView; apply: Apply })
     <div>
       <div className="her-progress"><div style={{ width: `${install.total ? Math.round(((install.done ?? 0) / install.total) * 100) : 0}%` }} /></div>
       <p className="her-muted">{install.state === 'checking' ? '正在看有没有新版本…' : install.state === 'installing' ? '正在安装…' : `正在下载身体程序 ${install.latest ?? ''}（${mb(install.done)} / ${mb(install.total)} MB）`}</p>
+      {install.state === 'downloading' && (
+        <div className="her-row">
+          <button className="her-btn small" onClick={() => void apply(herApi.bodyCancel())}>取消</button>
+          <button className="her-btn link" onClick={() => { setManual(true); void apply(herApi.bodyCancel()) }}>太慢？换成用下载软件下载</button>
+        </div>
+      )}
     </div>
   )
   const failed = install.state === 'failed' && <p className="her-danger">下载安装没成功：{install.error}</p>
   if (body.connected) {
     return (
       <div>
-        <p><Dot tone="ok" />身体已连上（{body.info?.os}，版本 {body.info?.version}）{body.pack === undefined ? '' : `，外形：${body.pack.name}`}
-          {!install.dev && !busy && <button className="her-btn link" onClick={() => void apply(herApi.installBody())}>检查更新</button>}
-          {!install.dev && !busy && install.latest !== undefined && install.restart !== true && install.state === 'idle' && <span className="her-muted">（已是最新：{install.latest}）</span>}
-        </p>
+        <p><Dot tone="ok" />身体已连上（{body.info?.os}，版本 {body.info?.version}）{body.pack === undefined ? '' : `，外形：${body.pack.name}`}</p>
         {install.restart === true && (
           <div className="her-row">
             <span>新版本 {install.installed} 已经装好，重启一下身体就用上了。</span>
@@ -54,6 +59,7 @@ export function BodyStatus({ state, apply }: { state: StateView; apply: Apply })
         )}
         {progress}
         {failed}
+        {manual && <BodyManual apply={apply} onInstalled={() => setManual(false)} />}
       </div>
     )
   }
@@ -65,13 +71,15 @@ export function BodyStatus({ state, apply }: { state: StateView; apply: Apply })
           {body.canStart
             ? <button className="her-btn primary" onClick={() => void start()}>启动身体</button>
             : <>
-                <button className="her-btn primary" disabled={busy} onClick={() => void apply(herApi.installBody())}>下载安装身体</button>
-                <span className="her-muted">她在桌面上的样子是一个单独的小程序（约 150 MB），装在 dsh-her 自己的文件夹里，装好就自动启动。</span>
+                <button className="her-btn primary" disabled={busy} onClick={() => { setManual(false); void apply(herApi.installBody()) }}>直接下载安装</button>
+                <button className={`her-btn ${manual ? 'primary' : ''}`} onClick={() => setManual(!manual)}>用下载软件下载</button>
+                <span className="her-muted">她在桌面上的样子是一个单独的小程序（150–220 MB），装在 dsh-her 自己的文件夹里，装好就自动启动。直接下载慢的话，可以复制链接用下载软件下。</span>
               </>}
         </div>
       )}
       {progress}
       {failed}
+      {manual && !body.canStart && <BodyManual apply={apply} onInstalled={() => setManual(false)} />}
       {message !== undefined && <p className="her-muted">{message}</p>}
     </div>
   )

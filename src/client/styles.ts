@@ -20,6 +20,15 @@ const ON_ACCENT = v('label-primary-foreground', '#fff')
 export const STYLES = `
 .her-page{box-sizing:border-box;height:100%;overflow:auto;padding:20px 24px 40px;color:${TEXT};font-size:13px;line-height:1.55}
 .her-page *{box-sizing:border-box}
+.her-manual{margin-top:10px;padding:10px 12px;border:1px solid ${LINE};border-radius:10px;background:${LAYER2}}
+.her-manual p{margin:8px 0 4px}
+.her-manual-row{display:flex;align-items:center;gap:8px;margin:4px 0}
+.her-manual-row .her-muted{flex:none;min-width:9em;font-size:12px}
+.her-manual-row code{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;user-select:all}
+.her-manual .her-faint code{word-break:break-all;font-size:11px;user-select:all}
+.her-versions{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;margin:-6px 0 12px;padding-bottom:8px;border-bottom:1px solid ${LINE};font-size:12px;color:${MUTED};max-width:760px}
+.her-versions b{font-weight:600;color:${TEXT}}
+.her-versions code{font-size:11px}
 .her-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
 .her-head h1{font-size:18px;font-weight:600;margin:0}
 .her-muted{color:${MUTED}}.her-faint{color:${FAINT}}

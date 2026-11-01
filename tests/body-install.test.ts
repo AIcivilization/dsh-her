@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { appName, compareVersions, fetchManifest, install, installedBody, installedPlan, platformKey, validateManifest } from '../src/dsh/body-install.ts'
+import { appName, compareVersions, downloadFolder, fetchManifest, install, installDownloaded, installedBody, installedPlan, manualInstall, platformKey, validateManifest } from '../src/dsh/body-install.ts'
 import { systemTar } from '../src/platform.ts'
 
 test('versions order like releases', () => {
@@ -78,6 +78,80 @@ test('install downloads, checks, unpacks and keeps the previous version', { skip
   } finally {
     server.close()
     rmSync(dir, { recursive: true, force: true })
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('a body downloaded by hand: found by name or size, checked, installed', { skip: process.platform !== 'darwin' && process.platform !== 'win32' }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'her-manual-'))
+  const home = mkdtempSync(join(tmpdir(), 'her-home-'))
+  try {
+    const win = process.platform === 'win32'
+    const bin = win ? join(dir, appName()) : join(dir, appName(), 'Contents', 'MacOS')
+    mkdirSync(bin, { recursive: true })
+    writeFileSync(join(bin, win ? 'dsh-her.exe' : 'Electron'), 'body')
+    const built = join(dir, 'built.zip')
+    if (win) execFileSync(systemTar(), ['-a', '-c', '-f', built, '-C', dir, appName()])
+    else execFileSync('ditto', ['-c', '-k', '--keepParent', join(dir, appName()), built])
+    const bytes = readFileSync(built)
+    const file = 'dsh-her-body-1.0.0.zip'
+    const manifest = validateManifest({
+      format: 'dsh-her-body@1', version: '1.0.0',
+      assets: { [platformKey()]: { file, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') } },
+    })
+    const base = 'https://github.com/AIcivilization/dsh-her/releases/latest/download/'
+    const folder = downloadFolder(home)
+
+    // Nothing there yet.
+    const before = manualInstall(home, base, manifest)
+    assert.equal(before.downloaded, 'none')
+    assert.equal(before.urls[0], `${base}${file}`)
+    await assert.rejects(installDownloaded(home, manifest), /没找到/)
+
+    // Still downloading.
+    mkdirSync(folder, { recursive: true })
+    writeFileSync(join(folder, file), bytes.subarray(0, 10))
+    assert.equal(manualInstall(home, base, manifest).downloaded, 'partial')
+    await assert.rejects(installDownloaded(home, manifest), /不完整/)
+
+    // Right size, wrong bytes: refused, and the file stays for you to see.
+    writeFileSync(join(folder, file), Buffer.alloc(bytes.length))
+    assert.equal(manualInstall(home, base, manifest).downloaded, 'ready')
+    await assert.rejects(installDownloaded(home, manifest), /校验不对/)
+    assert.ok(existsSync(join(folder, file)))
+    assert.equal(installedBody(home), undefined)
+
+    // Saved under another name by a download manager: found by its size, installed.
+    rmSync(join(folder, file))
+    writeFileSync(join(folder, 'dsh-her-body-1.0.0 (1).zip'), bytes)
+    assert.equal(manualInstall(home, base, manifest).downloaded, 'ready')
+    assert.equal((await installDownloaded(home, manifest)).version, '1.0.0')
+    assert.equal(installedBody(home)?.version, '1.0.0')
+    assert.ok(existsSync(installedPlan(home)!.binary))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('a download can be cancelled, and leaves nothing behind', { skip: process.platform !== 'darwin' && process.platform !== 'win32' }, async () => {
+  const home = mkdtempSync(join(tmpdir(), 'her-home-'))
+  // A server that sends a little and then keeps the connection open.
+  const server = createServer((_req, res) => {
+    res.write(Buffer.alloc(1024))
+  })
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r))
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/rel`
+  try {
+    const manifest = validateManifest({ format: 'dsh-her-body@1', version: '1.0.0', assets: { [platformKey()]: { file: 'a.zip', size: 4096, sha256: 'a'.repeat(64) } } })
+    const cancel = new AbortController()
+    const running = install(home, base, manifest, () => cancel.abort(), cancel.signal)
+    await assert.rejects(running)
+    assert.ok(!existsSync(join(downloadFolder(home), 'a.zip.part')))
+    assert.ok(!existsSync(join(downloadFolder(home), 'a.zip')))
+  } finally {
+    server.closeAllConnections()
+    server.close()
     rmSync(home, { recursive: true, force: true })
   }
 })

@@ -15,13 +15,13 @@
 
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
-import { fetchChecked, httpFetch, NetError } from '../net.ts'
+import { candidates, fetchChecked, httpFetch, NetError } from '../net.ts'
 import { systemTar } from '../platform.ts'
 import type { LaunchPlan } from './body-launcher.ts'
 
@@ -166,20 +166,29 @@ export async function latestRelease(base: string): Promise<{ manifest: BodyManif
   }
 }
 
-/**
- * Download this computer's asset of `manifest`, check it, unpack it next to
- * the installed version and make it current. Progress in bytes.
- */
-export async function install(home: string, base: string, manifest: BodyManifest, onProgress: (done: number, total: number) => void): Promise<Installed> {
+/** This computer's asset of a release. */
+function assetFor(manifest: BodyManifest): BodyAsset {
   if (!PACKAGED.has(process.platform)) throw new Error('这个系统的身体程序还没有发布（现在有 macOS 和 Windows 版）')
   const asset = manifest.assets[platformKey()]
   if (asset === undefined) throw new Error(`发布里没有这台电脑（${platformKey()}）的身体程序`)
-  const root = bodyRoot(home)
-  const downloads = join(root, 'download')
+  return asset
+}
+
+/** Where a zip waits to be installed; a download manager's file goes here too. */
+export const downloadFolder = (home: string) => join(bodyRoot(home), 'download')
+
+/**
+ * Download this computer's asset of `manifest`, check it, unpack it next to
+ * the installed version and make it current. Progress in bytes. `signal`
+ * cancels it; what was downloaded so far is thrown away.
+ */
+export async function install(home: string, base: string, manifest: BodyManifest, onProgress: (done: number, total: number) => void, signal?: AbortSignal): Promise<Installed> {
+  const asset = assetFor(manifest)
+  const downloads = downloadFolder(home)
   mkdirSync(downloads, { recursive: true })
   const zip = join(downloads, asset.file)
   // From GitHub, or a mirror when GitHub cannot be reached: the size and SHA-256 below decide either way.
-  const res = await fetchChecked(at(base, asset.file))
+  const res = await fetchChecked(at(base, asset.file), signal === undefined ? {} : { signal })
   if (!res.ok || res.body === null) throw new Error(`下载失败（${res.status}）`)
   const hash = createHash('sha256')
   let done = 0
@@ -188,13 +197,79 @@ export async function install(home: string, base: string, manifest: BodyManifest
     done += chunk.length
     onProgress(done, asset.size)
   })
-  await pipeline(counted, createWriteStream(`${zip}.part`))
+  try {
+    await pipeline(counted, createWriteStream(`${zip}.part`), signal === undefined ? {} : { signal })
+  } catch (error) {
+    rmSync(`${zip}.part`, { force: true })
+    throw error
+  }
   if (done !== asset.size || hash.digest('hex') !== asset.sha256) {
     rmSync(`${zip}.part`, { force: true })
     throw new Error('下载的文件校验不对（可能没下完或被改过），已经删掉，再试一次')
   }
   renameSync(`${zip}.part`, zip)
+  return unpack(home, manifest, zip)
+}
 
+/** What the page shows for downloading by hand: the links, where the file goes, whether it is there yet. */
+export interface ManualInstall {
+  version: string
+  file: string
+  size: number
+  sha256: string
+  /** GitHub first, then each mirror. */
+  urls: string[]
+  folder: string
+  /** none: no file yet; partial: the file is there but not its full size (still downloading?); ready: size is right. */
+  downloaded: 'none' | 'partial' | 'ready'
+  downloadedSize?: number
+  /** The program once installed (the plugin starts it; shown for anyone who wants to start it by hand). */
+  program: string
+}
+
+/** The file a download manager saved: under its own name, or (renamed) any zip of exactly the right size. */
+function findDownloaded(home: string, asset: BodyAsset): { path: string; size: number } | undefined {
+  const folder = downloadFolder(home)
+  const named = join(folder, asset.file)
+  if (existsSync(named)) return { path: named, size: statSync(named).size }
+  if (!existsSync(folder)) return undefined
+  for (const entry of readdirSync(folder)) {
+    if (!entry.toLowerCase().endsWith('.zip')) continue
+    const size = statSync(join(folder, entry)).size
+    if (size === asset.size) return { path: join(folder, entry), size }
+  }
+  return undefined
+}
+
+export function manualInstall(home: string, base: string, manifest: BodyManifest): ManualInstall {
+  const asset = assetFor(manifest)
+  const found = findDownloaded(home, asset)
+  const app = join(bodyRoot(home), manifest.version, appName())
+  return {
+    version: manifest.version, file: asset.file, size: asset.size, sha256: asset.sha256,
+    urls: candidates(at(base, asset.file)),
+    folder: downloadFolder(home),
+    downloaded: found === undefined ? 'none' : found.size === asset.size ? 'ready' : 'partial',
+    ...(found === undefined ? {} : { downloadedSize: found.size }),
+    program: process.platform === 'win32' ? join(app, 'dsh-her.exe') : app,
+  }
+}
+
+/** Install the zip downloaded by hand, after the same check a download gets. A file that fails it is left alone, for you to see. */
+export async function installDownloaded(home: string, manifest: BodyManifest): Promise<Installed> {
+  const asset = assetFor(manifest)
+  const found = findDownloaded(home, asset)
+  if (found === undefined) throw new Error(`在 ${downloadFolder(home)} 里没找到 ${asset.file}`)
+  if (found.size !== asset.size) throw new Error(`文件还不完整：${(found.size / 1e6).toFixed(0)} / ${(asset.size / 1e6).toFixed(0)} MB。等下载完再安装`)
+  const hash = createHash('sha256')
+  await pipeline(createReadStream(found.path), hash)
+  if (hash.digest('hex') !== asset.sha256) throw new Error('文件校验不对（可能下载出错或被改过）：删掉它，重新下载一次')
+  return unpack(home, manifest, found.path)
+}
+
+/** Unpack a checked zip next to the installed version and make it current. */
+async function unpack(home: string, manifest: BodyManifest, zip: string): Promise<Installed> {
+  const root = bodyRoot(home)
   const target = join(root, manifest.version)
   const unpacking = `${target}.unpacking`
   rmSync(unpacking, { recursive: true, force: true })

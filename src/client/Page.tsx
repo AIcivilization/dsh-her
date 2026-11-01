@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { herApi, type StateView } from './api.ts'
 import { serviceOf } from '../core/voices.ts'
+import { UpdateBar } from './UpdateBar.tsx'
 import { Workshop } from './Workshop.tsx'
 import { Fold, useFolds } from './fold.tsx'
 import { SERVICE_SHORT, voiceLabel } from './choice.tsx'
@@ -50,6 +51,7 @@ export function HerPage() {
   const showWizard = wizard ?? !state.character.onboarded
   return (
     <div className="her-page">
+      <UpdateBar state={state} apply={apply} />
       {showWizard
         ? <Wizard state={state} apply={apply} onDone={() => setWizard(false)} />
         : <Manage state={state} apply={apply} onWizard={() => setWizard(true)} />}

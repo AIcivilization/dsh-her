@@ -32,6 +32,7 @@
 
 import { spawn } from 'node:child_process'
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { buildSystemPrompt, DEFAULT_VOICE, extractCues, extractSounds, herPaths, invalidCharacter, judgeBargeIn, loadCharacter, memoryContext, OWN_PREFIX, performanceSection, readingMs, saveCharacter, serviceOf, SOUND_SECTION, speakable, withSounds, type Character } from '../core/index.ts'
@@ -41,7 +42,7 @@ import { PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type LookView, t
 import { BrainServer } from '../server/brain-server.ts'
 import { API_BASE, apiHandlers, handle, type ApiRuntime } from './api.ts'
 import { bodyRunning, findDevBody, launchBody, type LaunchPlan } from './body-launcher.ts'
-import { compareVersions, install, installedBody, installedPlan, latestRelease, type InstallState } from './body-install.ts'
+import { compareVersions, downloadFolder, install, installDownloaded, installedBody, installedPlan, latestRelease, manualInstall, type InstallState, type ManualInstall } from './body-install.ts'
 import { IDLE_IMPORT, type ImportStatus } from './import-status.ts'
 import { DESK_DIR, newProject, sceneDir } from '../core/workshop.ts'
 import { exampleFile, examples, exportProject, findProject, importProject, listProjects, prepareImport, projectStatus, saveProject } from './workshop.ts'
@@ -49,7 +50,7 @@ import type { HerConfig } from './config.ts'
 import { HerSession, type DshServices, type ModelRoute } from './her-session.ts'
 import { heardText, SpeechQueue } from '../voice/speech-queue.ts'
 import { Voice } from '../voice/voice.ts'
-import { setMirrors } from '../net.ts'
+import { httpFetch, NetError, setMirrors } from '../net.ts'
 import { defaultIdleMinutes, MingVoice } from '../voice/ming.ts'
 import { MING_STEPS, OwnVoices, prepareRecording } from '../voice/ming-voices.ts'
 
@@ -89,6 +90,24 @@ export function explainModelError(message: string, model: string): string {
   if (/quota|insufficient|balance|余额|429/i.test(message)) return `她用的模型（${model}）额度不够或请求太多，暂时没法回答。可以等一会儿，或在「她 → 设置 → 模型」换一个。`
   if (/timeout|timed out|ECONN|network|fetch failed/i.test(message)) return `连不上她用的模型（${model}），检查一下网络，或者换一个模型。`
   return `她用的模型（${model}）出错了：${message.slice(0, 160)}`
+}
+
+/** This plugin's version, from its package.json (two folders up from src/dsh and lib/dsh alike). */
+const PLUGIN_VERSION = (JSON.parse(readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8')) as { version: string }).version
+
+/** The newest published plugin: npm itself, or its China mirror where that cannot be reached. */
+async function npmLatest(): Promise<string> {
+  let failure: unknown
+  for (const registry of ['https://registry.npmjs.org/', 'https://registry.npmmirror.com/']) {
+    try {
+      const res = await httpFetch(`${registry}dsh-her/latest`, { signal: AbortSignal.timeout(15_000) })
+      if (res.ok) return (await res.json() as { version: string }).version
+      failure = new Error(`HTTP ${res.status}`)
+    } catch (error) {
+      failure = error
+    }
+  }
+  throw new NetError('https://registry.npmjs.org/', failure)
 }
 
 /** After a failed digest, wait this long before trying again (the model is probably not usable yet). */
@@ -321,20 +340,35 @@ export function apply(ctx: Context, config: HerConfig): void {
         return
       }
       installState = { ...installState, state: 'downloading', done: 0, total: 0 }
+      downloading = new AbortController()
       const installed = await install(paths.root, base, manifest, (done, total) => {
         installState = { ...installState, state: done < total ? 'downloading' : 'installing', done, total }
-      })
-      installState = { ...installState, state: 'idle', installed: installed.version, restart: before !== undefined && (server?.bodies.length ?? 0) > 0 }
-      log({ event: 'body-installed', version: installed.version })
-      if (before === undefined && discovery !== undefined && (server?.bodies.length ?? 0) === 0 && !bodyRunning(paths.root)) {
-        const plan = bodyPlan()
-        if (!('missing' in plan)) launchBody(plan, { url: discovery.url, token: discovery.token, home: paths.root, pack: config.body.pack })
-      }
+      }, downloading.signal)
+      afterInstall(installed.version, before !== undefined)
     } catch (error) {
+      if (downloading?.signal.aborted === true) {
+        installState = { ...installState, state: 'idle' }
+        return
+      }
       installState = { ...installState, state: 'failed', error: (error as Error).message }
       ctx.logger.warn(`dsh-her: body install/update failed (${(error as Error).message})`)
+    } finally {
+      downloading = undefined
     }
   }
+  /** A body was installed: an update waits for "重启身体", a first install starts at once. */
+  const afterInstall = (version: string, updated: boolean) => {
+    installState = { ...installState, state: 'idle', installed: version, restart: updated && (server?.bodies.length ?? 0) > 0 }
+    log({ event: 'body-installed', version })
+    if (!updated && discovery !== undefined && (server?.bodies.length ?? 0) === 0 && !bodyRunning(paths.root)) {
+      const plan = bodyPlan()
+      if (!('missing' in plan)) launchBody(plan, { url: discovery.url, token: discovery.token, home: paths.root, pack: config.body.pack })
+    }
+  }
+  /** The release the manual download page is about, so a file is checked against what its links said. */
+  let manualRelease: Awaited<ReturnType<typeof latestRelease>> | undefined
+  /** Cancels a running download. */
+  let downloading: AbortController | undefined
   /** Stop the running body (it writes its pid to body.json) and wait for it to go. */
   const stopBody = async (): Promise<void> => {
     let pid: number | undefined
@@ -606,6 +640,7 @@ export function apply(ctx: Context, config: HerConfig): void {
       const { facts, episodes, diary } = memory.list()
       return {
         platform: process.platform,
+        version: PLUGIN_VERSION,
         character,
         model: target === undefined ? null : { provider: target.provider, model: target.model, ...(target.reasoningEffort === undefined ? {} : { effort: target.reasoningEffort }), chosen: character.model !== undefined },
         voice: {
@@ -755,6 +790,36 @@ export function apply(ctx: Context, config: HerConfig): void {
       if (bodyLook === undefined) throw new Error('现在用的不是多场景的形象')
       if (change.go !== undefined && !bodyLook.scenes.some(s => s.id === change.go)) throw new Error('没有这个场景')
       broadcast({ t: 'look.set', ...change })
+    },
+    bodyManual: async (): Promise<ManualInstall> => {
+      manualRelease ??= await latestRelease(config.body.releases)
+      return manualInstall(paths.root, manualRelease.base, manualRelease.manifest)
+    },
+    bodyInstallDownloaded: async () => {
+      manualRelease ??= await latestRelease(config.body.releases)
+      const updated = installedBody(paths.root) !== undefined
+      downloading?.abort()
+      installState = { ...installState, state: 'installing', done: 0, total: 0 }
+      try {
+        const installed = await installDownloaded(paths.root, manualRelease.manifest)
+        afterInstall(installed.version, updated)
+      } catch (error) {
+        installState = { ...installState, state: 'idle' }
+        throw error
+      }
+    },
+    bodyCancelDownload: () => {
+      downloading?.abort()
+    },
+    bodyOpenFolder: () => {
+      const folder = downloadFolder(paths.root)
+      mkdirSync(folder, { recursive: true })
+      const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open'
+      spawn(opener, [folder], { detached: true, stdio: 'ignore' }).unref()
+    },
+    pluginLatest: async () => {
+      const latest = await npmLatest()
+      return { latest, updateAvailable: compareVersions(latest, PLUGIN_VERSION) > 0 }
     },
     mingInstall: () => {
       if (ming === undefined) throw new Error('声音还没准备好')

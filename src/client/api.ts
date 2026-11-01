@@ -1,6 +1,7 @@
 // Calls to the plugin's endpoints on DSH's own authenticated `/api` channel.
 
 import type { StateView } from '../dsh/api.ts'
+import type { ManualInstall } from '../dsh/body-install.ts'
 import type { LookProject, WorkshopCard } from '../core/workshop.ts'
 import type { ProjectStatus } from '../dsh/workshop.ts'
 
@@ -40,6 +41,11 @@ export const herApi = {
   tryPersona: (input: { name: string; persona: string; callYou: string; pronoun: string; history: Array<{ who: 'you' | 'her'; text: string }>; message: string }) =>
     post<{ reply: string }>('/persona/try', input),
   previewVoice: (voice: string, speed: number, text?: string) => post<{ audio: string; format: 'wav' | 'mp3'; durationMs: number }>('/voice/preview', { voice, speed, ...(text === undefined ? {} : { text }) }),
+  bodyManual: () => post<{ manual: ManualInstall }>('/body/manual'),
+  bodyInstallDownloaded: () => post<WithState>('/body/install-downloaded'),
+  bodyCancel: () => post<WithState>('/body/cancel'),
+  bodyOpenFolder: () => post<Record<string, never>>('/body/open-folder'),
+  pluginLatest: () => post<{ latest: string; updateAvailable: boolean }>('/update/plugin-latest'),
   mingInstall: () => post<WithState>('/voice/ming/install'),
   mingUninstall: () => post<WithState>('/voice/ming/uninstall'),
   mingRestart: () => post<WithState>('/voice/ming/restart'),

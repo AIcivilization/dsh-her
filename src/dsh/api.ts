@@ -14,7 +14,7 @@ import type { Fact, Episode } from '../memory/store.ts'
 import type { ReportLine } from './import-status.ts'
 import type { LookProject, WorkshopCard } from '../core/workshop.ts'
 import type { ProjectStatus } from './workshop.ts'
-import type { InstallState } from './body-install.ts'
+import type { InstallState, ManualInstall } from './body-install.ts'
 import type { MingStatus } from '../voice/ming.ts'
 import type { MingSettings, OwnVoice } from '../voice/ming-voices.ts'
 
@@ -22,6 +22,8 @@ export const API_BASE = '/api/dsh-her'
 
 export interface StateView {
   platform: string
+  /** This plugin's version. */
+  version: string
   character: Character
   /** The model she uses now; `chosen` = picked on the "她" page (else the config's or DSH's default). */
   model: { provider: string; model: string; effort?: string; chosen: boolean } | null
@@ -64,6 +66,14 @@ export interface ApiRuntime {
   expandPersona(input: { name: string; idea: string; callYou: string; pronoun: string }): Promise<string>
   tryPersona(input: { name: string; persona: string; callYou: string; pronoun: string; history: Array<{ who: 'you' | 'her'; text: string }>; message: string }): Promise<string>
   previewVoice(id: string, speed: number, text: string): Promise<{ audio: string; format: 'wav' | 'mp3'; durationMs: number }>
+  /** Downloading the body by hand: the links, where the file goes, whether it is there yet. */
+  bodyManual(): Promise<ManualInstall>
+  /** Check and install the zip downloaded by hand. */
+  bodyInstallDownloaded(): Promise<void>
+  bodyCancelDownload(): void
+  bodyOpenFolder(): void
+  /** The newest plugin on npm, for hosts without dshmarket (which otherwise answers this). */
+  pluginLatest(): Promise<{ latest: string; updateAvailable: boolean }>
   /** The local Ming voice: install (progress shows in the state), uninstall, start again after errors, settings. */
   mingInstall(): void
   mingUninstall(): void
@@ -161,6 +171,20 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
       }),
     }),
     '/voice/preview': async body => rt.previewVoice(str(body.voice, '音色'), num(body.speed ?? 1, '语速'), str(body.text ?? '你好呀，我在你桌面上等你好久啦。', '试听的话')),
+    '/update/plugin-latest': async () => rt.pluginLatest(),
+    '/body/manual': async () => ({ manual: await rt.bodyManual() }),
+    '/body/install-downloaded': async () => {
+      await rt.bodyInstallDownloaded()
+      return withState()
+    },
+    '/body/cancel': async () => {
+      rt.bodyCancelDownload()
+      return withState()
+    },
+    '/body/open-folder': async () => {
+      rt.bodyOpenFolder()
+      return {}
+    },
     '/voice/ming/install': async () => {
       rt.mingInstall()
       return withState()
