@@ -11,7 +11,9 @@ import { promisify } from 'node:util'
 
 const run = promisify(execFile)
 /** The installed app carries its own ffmpeg next to the app's resources; development uses the one on PATH. */
-const bundled = typeof process.resourcesPath === 'string' ? join(process.resourcesPath, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg') : undefined
+/** Electron's resources folder (the installed body); not there in plain Node. */
+const resources = (process as { resourcesPath?: unknown }).resourcesPath
+const bundled = typeof resources === 'string' ? join(resources, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg') : undefined
 const FFMPEG = process.env.DSH_HER_FFMPEG ?? (bundled !== undefined && existsSync(bundled) ? bundled : 'ffmpeg')
 
 async function ffmpeg(args: string[]): Promise<string> {

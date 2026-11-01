@@ -23,8 +23,8 @@
 import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
-import { fitScene, shapeName } from '../../shared/fit.ts'
-import type { SceneLayout } from '../../shared/types.ts'
+import { fitScene, shapeName } from './fit.ts'
+import type { SceneLayout } from './types.ts'
 import { inferPack, actionDesc, type ClipSpec, type MacroSpec } from './manifest.ts'
 import { borderColor, frame, isGreenScreen, keyToStacked, loopBack, MASK_FPS, MASK_WIDTH, probe, ssim, stackedMask, stillSize, transcodeOpaque, type Probe } from './media.ts'
 

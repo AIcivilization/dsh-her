@@ -65,7 +65,9 @@ export function BodyStatus({ state, apply }: { state: StateView; apply: Apply })
   }
   return (
     <div>
-      <p><Dot tone={body.running ? 'warn' : 'bad'} />{body.running ? '身体在运行，正在连接…' : '身体还没运行'}</p>
+      {body.web.connected
+        ? <p><Dot tone="ok" />她现在住在这个网页里（右下角，能拖动）。想让她到真正的桌面上，可以装桌面身体：</p>
+        : <p><Dot tone={body.running ? 'warn' : 'bad'} />{body.running ? '身体在运行，正在连接…' : '身体还没运行'}</p>}
       {!body.running && (
         <div className="her-row">
           {body.canStart
@@ -90,7 +92,7 @@ const mb = (bytes: number | undefined) => ((bytes ?? 0) / 1e6).toFixed(0)
 export function PackPicker({ state, apply }: { state: StateView; apply: Apply }) {
   const body = state.body
   const imp = state.import
-  if (!body.connected) return <p className="her-muted">身体连上之后才能选外形。</p>
+  if (!body.connected && !body.web.connected) return <p className="her-muted">身体连上之后才能选外形。</p>
   return (
     <div>
       <div className="her-grid">
@@ -103,8 +105,8 @@ export function PackPicker({ state, apply }: { state: StateView; apply: Apply })
         {body.packs.length === 0 && <p className="her-muted">还没有导入过外形包。</p>}
       </div>
       <div className="her-row">
-        <button className="her-btn" disabled={imp.state === 'picking' || imp.state === 'running'} onClick={() => void apply(herApi.pickPack())}>导入我的素材…</button>
-        <span className="her-muted">会在身体那台电脑上弹出选择文件夹的窗口。素材怎么做、怎么命名，见 docs/素材生成提示词.md。</span>
+        <button className="her-btn" disabled={!body.connected || imp.state === 'picking' || imp.state === 'running'} onClick={() => void apply(herApi.pickPack())}>导入我的素材…</button>
+        <span className="her-muted">{body.connected ? '会在身体那台电脑上弹出选择文件夹的窗口。素材怎么做、怎么命名，见 docs/素材生成提示词.md。' : '现在只有桌面身体能导入素材；从网页上传很快就会有。'}</span>
       </div>
       {imp.state === 'picking' && <p className="her-muted">请在桌面上弹出的窗口里选择素材文件夹…</p>}
       {imp.state === 'running' && (
@@ -415,6 +417,29 @@ export function ModePicker({ state, apply }: { state: StateView; apply: Apply })
           {MODE_TEXT[mode]!.title}<small>{choiceNote(mode, current ?? '', MODE_TEXT[mode]!.desc)}</small>
         </button>
       ))}
+    </div>
+  )
+}
+
+const WEB_MODES: Array<['auto' | 'on' | 'off', string, string]> = [
+  ['auto', '自动', '没有桌面身体时，住在 dsh 网页里'],
+  ['on', '一直在网页里', '也显示在 dsh 网页里（有桌面身体时不出声）'],
+  ['off', '不在网页里', '只用桌面身体'],
+]
+
+/** Whether she also lives in DSH's own page (for a computer with no desktop, or no desktop body). */
+export function WebModePicker({ state, apply }: { state: StateView; apply: Apply }) {
+  const current = state.body.web.mode
+  return (
+    <div>
+      <label className="her-label">dsh 网页里的她（VPS 这种没有桌面的电脑，也能这样用）</label>
+      <div className="her-grid">
+        {WEB_MODES.map(([mode, title, desc]) => (
+          <button key={mode} className={choiceClass(mode, current)} onClick={() => void apply(herApi.webSet(mode))}>
+            {title}<small>{choiceNote(mode, current, desc)}</small>
+          </button>
+        ))}
+      </div>
     </div>
   )
 }

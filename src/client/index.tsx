@@ -5,6 +5,7 @@
  */
 
 import { HerPage } from './Page.tsx'
+import { mountWebFloat } from './web-float.ts'
 import { STYLES } from './styles.ts'
 
 export const PACKAGE_NAME = 'dsh-her'
@@ -36,6 +37,8 @@ function HerIcon({ size }: { size: number }) {
 }
 
 export function apply(ctx: ClientContext): void {
+  // She can live on every page of DSH, not only in her own (no desktop needed).
+  ctx.effect(() => mountWebFloat(), 'dsh-her: web body')
   ctx.effect(() => ctx.locale.register(NS, { zh: { panel: '她' }, en: { panel: 'Her' } }), 'dsh-her: dictionaries')
   ctx.effect(() => {
     const style = document.createElement('style')

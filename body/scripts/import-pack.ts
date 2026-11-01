@@ -8,7 +8,7 @@
 
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { importPack } from '../main/pack/import.ts'
+import { importPack } from '../../src/pack/import.ts'
 
 const args = process.argv.slice(2)
 const option = (flag: string) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined)

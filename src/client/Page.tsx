@@ -12,7 +12,7 @@ import { UpdateBar } from './UpdateBar.tsx'
 import { Workshop } from './Workshop.tsx'
 import { Fold, useFolds } from './fold.tsx'
 import { SERVICE_SHORT, voiceLabel } from './choice.tsx'
-import { BodyStatus, Dot, KeyHelp, MemoryView, MicCheck, ModelPicker, MODE_TEXT, ModePicker, PackPicker, PersonaEditor, ScenePicker, VoicePicker, type Apply } from './parts.tsx'
+import { BodyStatus, Dot, KeyHelp, MemoryView, MicCheck, ModelPicker, MODE_TEXT, ModePicker, PackPicker, PersonaEditor, ScenePicker, VoicePicker, WebModePicker, type Apply } from './parts.tsx'
 
 const POLL_MS = 2000
 
@@ -234,11 +234,11 @@ function Settings({ state, apply, jump, onJumped }: { state: StateView; apply: A
       {card('persona', '人设', `${c.name}，叫你「${c.callYou || '（没设）'}」`, 'ok', <PersonaEditor state={state} apply={apply} />)}
       {card('voice', '声音', `${voiceLabel(state, c.voice.id)} · ${SERVICE_SHORT[serviceOf(c.voice.id)]} · ${speakingText(speaking, state.voice.speaking.service)}`, toneOf(speaking),
         <VoicePicker state={state} apply={apply} saveLabel="用这个声音" />)}
-      {card('look', '外形', body.connected ? `${pack?.name ?? '还没有外形'}${body.look === undefined ? '' : ` · ${body.look.scenes.length} 个场景`}` : '身体没连上', body.connected ? (pack === undefined ? 'warn' : 'ok') : 'off',
+      {card('look', '外形', body.connected || body.web.connected ? `${pack?.name ?? '还没有外形'}${body.look === undefined ? '' : ` · ${body.look.scenes.length} 个场景`}` : '身体没连上', body.connected || body.web.connected ? (pack === undefined ? 'warn' : 'ok') : 'off',
         <><PackPicker state={state} apply={apply} /><ScenePicker state={state} apply={apply} /></>)}
       {card('model', '模型', state.model === null ? '没有可用的模型' : `${state.model.provider} / ${state.model.model}${state.model.chosen ? '' : '（dsh 默认）'}${state.problem === undefined ? '' : ' · 上一次回答失败了'}`,
         state.model === null || state.problem !== undefined ? 'bad' : 'ok', <ModelPicker state={state} apply={apply} />)}
-      {card('place', '放在哪里', body.connected ? (body.mode === undefined ? '—' : MODE_TEXT[body.mode]?.title ?? body.mode) : '身体没连上', body.connected ? 'ok' : 'off', <ModePicker state={state} apply={apply} />)}
+      {card('place', '放在哪里', body.connected ? (body.mode === undefined ? '—' : MODE_TEXT[body.mode]?.title ?? body.mode) : body.web.connected ? 'dsh 网页里' : '身体没连上', body.connected || body.web.connected ? 'ok' : 'off', <><ModePicker state={state} apply={apply} /><WebModePicker state={state} apply={apply} /></>)}
     </>
   )
 }

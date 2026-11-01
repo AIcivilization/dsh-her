@@ -1,14 +1,14 @@
 /**
  * Looks on disk (`<home>/looks/<id>/look.json`) and what the brain hears of
- * them. The rules themselves are in shared/look.ts.
+ * them. The rules themselves are in look.ts.
  */
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { LookView, PackSummary } from '../../src/protocol/index.ts'
-import { describeWhen, validateLook, type Look, type LookPrefs } from '../shared/look.ts'
-import type { PackInfo } from '../shared/types.ts'
-import { loadPack, summarize } from './pack/load.ts'
+import type { LookView, PackSummary } from '../protocol/index.ts'
+import { describeWhen, validateLook, type Look, type LookPrefs } from './look.ts'
+import type { PackInfo } from './types.ts'
+import { loadPack, summarize } from './load.ts'
 
 const hasPack = (packsDir: string, id: string) => existsSync(join(packsDir, id, 'pack.json')) || existsSync(join(packsDir, id, 'clips.json'))
 

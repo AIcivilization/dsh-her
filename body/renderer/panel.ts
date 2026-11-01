@@ -7,7 +7,7 @@
  */
 
 import type { PanelCharacter, PanelMemory } from '../../src/protocol/index.ts'
-import { fitScene, SCREEN_SHAPES, shapeName } from '../shared/fit.ts'
+import { fitScene, SCREEN_SHAPES, shapeName } from '../../src/pack/fit.ts'
 import type { ClipUse, ClipsView, ScreenInfo } from '../shared/types.ts'
 
 type Tab = 'persona' | 'memory' | 'clips' | 'scene'

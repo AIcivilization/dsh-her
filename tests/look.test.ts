@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { describeWhen, inHours, LOOK_FORMAT, pickScene, shouldSwitch, validateLook, type Look } from '../body/shared/look.ts'
+import { describeWhen, inHours, LOOK_FORMAT, pickScene, shouldSwitch, validateLook, type Look } from '../src/pack/look.ts'
 
 const look: Look = {
   format: LOOK_FORMAT,

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { closestShape, fitScene, shapeName, shrinkOn } from '../body/shared/fit.ts'
+import { closestShape, fitScene, shapeName, shrinkOn } from '../src/pack/fit.ts'
 
 // The 卧室 scene: a 16:10 photo, her region the photo's full height.
 const bedroom = { width: 1586, height: 992, region: { x: 788, y: 0, width: 558, height: 992 } }

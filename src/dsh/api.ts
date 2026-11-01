@@ -9,7 +9,8 @@
  */
 
 import type { Character } from '../core/index.ts'
-import type { LookView, PackSummary, WindowMode } from '../protocol/index.ts'
+import type { BodyMessage, LookView, PackSummary, WindowMode } from '../protocol/index.ts'
+import type { WebConfig, WebMode } from './web-body.ts'
 import type { Fact, Episode } from '../memory/store.ts'
 import type { ReportLine } from './import-status.ts'
 import type { LookProject, WorkshopCard } from '../core/workshop.ts'
@@ -50,6 +51,8 @@ export interface StateView {
     mode?: WindowMode
     /** The look on screen, with its scenes (when a look rather than a single pack is chosen). */
     look?: LookView
+    /** The web body: she in DSH's own page (no desktop needed). */
+    web: { mode: WebMode; connected: boolean; show: boolean }
     /** The body's screens (logical size, scale), for advice on sizes. */
     screens?: Array<{ w: number; h: number; scale: number }>
   }
@@ -72,6 +75,11 @@ export interface ApiRuntime {
   bodyInstallDownloaded(): Promise<void>
   bodyCancelDownload(): void
   bodyOpenFolder(): void
+  /** The web body: whether to show, her config, a message from the page, the setting. */
+  webStatus(): { show: boolean; mode: WebMode }
+  webConfig(): WebConfig
+  webSend(message: BodyMessage): void
+  webSetMode(mode: WebMode): void
   /** The newest plugin on npm, for hosts without dshmarket (which otherwise answers this). */
   pluginLatest(): Promise<{ latest: string; updateAvailable: boolean }>
   /** The local Ming voice: install (progress shows in the state), uninstall, start again after errors, settings. */
@@ -172,6 +180,20 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
     }),
     '/voice/preview': async body => rt.previewVoice(str(body.voice, '音色'), num(body.speed ?? 1, '语速'), str(body.text ?? '你好呀，我在你桌面上等你好久啦。', '试听的话')),
     '/update/plugin-latest': async () => rt.pluginLatest(),
+    '/web/status': async () => rt.webStatus(),
+    '/web/config': async () => ({ config: rt.webConfig() }),
+    '/web/send': async body => {
+      const message = body.message as BodyMessage | undefined
+      if (typeof message?.t !== 'string') throw new ApiError('消息不对')
+      rt.webSend(message)
+      return {}
+    },
+    '/web/set': async body => {
+      const mode = str(body.mode, '显示方式')
+      if (mode !== 'auto' && mode !== 'on' && mode !== 'off') throw new ApiError('显示方式不对')
+      rt.webSetMode(mode)
+      return withState()
+    },
     '/body/manual': async () => ({ manual: await rt.bodyManual() }),
     '/body/install-downloaded': async () => {
       await rt.bodyInstallDownloaded()

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { inferPack } from '../body/main/pack/manifest.ts'
+import { inferPack } from '../src/pack/manifest.ts'
 
 const files = [
   'anchor_stand.png', 'anchor_sit.png', 'anchor_stand@jk.png',

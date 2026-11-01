@@ -6,20 +6,22 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { AvatarState, PackSummary } from '../../../src/protocol/index.ts'
-import { closestShape } from '../../shared/fit.ts'
-import type { ClipUse, ClipsView, PackInfo, PackLayout, SceneLayout } from '../../shared/types.ts'
+import type { AvatarState, PackSummary } from '../protocol/index.ts'
+import { closestShape } from './fit.ts'
+import type { ClipUse, ClipsView, PackInfo, PackLayout, SceneLayout } from './types.ts'
 import type { Pack } from './import.ts'
 import { actionDesc } from './manifest.ts'
 
-const url = (dir: string, file: string) => pathToFileURL(join(dir, file)).href
+/** How a file of a pack is reached: `file:` in the desktop body, an address on DSH's server in the web body. */
+export type PackUrl = (dir: string, file: string) => string
+const fileUrl: PackUrl = (dir, file) => pathToFileURL(join(dir, file)).href
 
 /**
  * The photo to show behind her and her region on it. A scene with photos of
  * several shapes shows the one closest to the screen's (`screenAspect`,
  * width / height); without one, the first.
  */
-function placed(dir: string, plate: string | undefined, scene: SceneLayout | undefined, screenAspect: number | undefined): Pick<PackInfo, 'plateUrl' | 'scene'> {
+function placed(url: PackUrl, dir: string, plate: string | undefined, scene: SceneLayout | undefined, screenAspect: number | undefined): Pick<PackInfo, 'plateUrl' | 'scene'> {
   if (plate === undefined) return scene === undefined ? {} : { scene }
   if (scene === undefined) return { plateUrl: url(dir, plate) }
   const options = [{ file: plate, width: scene.width, height: scene.height, region: scene.region }, ...(scene.plates ?? [])]
@@ -27,10 +29,10 @@ function placed(dir: string, plate: string | undefined, scene: SceneLayout | und
   return { plateUrl: url(dir, pick.file), scene: { width: pick.width, height: pick.height, region: pick.region } }
 }
 
-export function loadPack(dir: string, screenAspect?: number): PackInfo {
+export function loadPack(dir: string, screenAspect?: number, url: PackUrl = fileUrl): PackInfo {
   if (existsSync(join(dir, 'pack.json'))) {
     const pack = JSON.parse(readFileSync(join(dir, 'pack.json'), 'utf8')) as Pack
-    const shown = placed(dir, pack.plate, pack.scene, screenAspect)
+    const shown = placed(url, dir, pack.plate, pack.scene, screenAspect)
     return {
       id: pack.id,
       name: pack.name,
@@ -54,7 +56,7 @@ export function loadPack(dir: string, screenAspect?: number): PackInfo {
   const manifest = readDevManifest(dir)
   const anchorOf = (clip: DevClip) => clip.at ?? (clip.name === undefined ? MAIN : `look:${clip.name}`)
   const used = manifest.clips.filter(c => c.use !== 'none')
-  const shown = placed(dir, manifest.plate, manifest.scene, screenAspect)
+  const shown = placed(url, dir, manifest.plate, manifest.scene, screenAspect)
   return {
     // Its id is its folder, so the brain can pick it like an imported pack.
     id: basename(dir),
@@ -153,7 +155,7 @@ export function clipsView(dir: string, pack: PackInfo): ClipsView {
   const manifest = readDevManifest(dir)
   return {
     packId: pack.id, name: pack.name, editable: true,
-    clips: manifest.clips.map(c => ({ id: c.id, url: url(dir, c.file), desc: c.desc ?? '', use: useOf(c), durationMs: c.durationMs ?? 5000 })),
+    clips: manifest.clips.map(c => ({ id: c.id, url: fileUrl(dir, c.file), desc: c.desc ?? '', use: useOf(c), durationMs: c.durationMs ?? 5000 })),
   }
 }
 

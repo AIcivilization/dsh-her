@@ -49,6 +49,7 @@ import { exampleFile, examples, exportProject, findProject, importProject, listP
 import type { HerConfig } from './config.ts'
 import { HerSession, type DshServices, type ModelRoute } from './her-session.ts'
 import { heardText, SpeechQueue } from '../voice/speech-queue.ts'
+import { WEB_BASE, WebBody, type WebMode } from './web-body.ts'
 import { Voice } from '../voice/voice.ts'
 import { httpFetch, NetError, setMirrors } from '../net.ts'
 import { defaultIdleMinutes, MingVoice } from '../voice/ming.ts'
@@ -304,6 +305,15 @@ export function apply(ctx: Context, config: HerConfig): void {
   let lastCut: { uid: string; at: number } | undefined
   /** The pack of the most recently connected body: what she can perform. */
   let bodyPack: PackSummary | undefined
+  /** She can also live in DSH's own web page (VPS, no desktop). */
+  const webBody = new WebBody(paths.root)
+  /** The act id's body for the web page (desktop bodies count up from 1). */
+  const WEB_BODY_ID = -1
+  /** What she can do now: a desktop body speaks for her, else the web page. */
+  const refreshBodyPack = () => {
+    bodyPack = server?.bodies.at(-1)?.hello.packs[0] ?? (webBody.connected ? webBody.summary() : undefined)
+  }
+  const desktopConnected = () => (server?.bodies.length ?? 0) > 0
   /** What the body reports about itself, for the "她" page. */
   let bodyPacks: PackSummary[] = []
   let activePack: string | undefined
@@ -406,7 +416,8 @@ export function apply(ctx: Context, config: HerConfig): void {
   const playAction = (action: string): Promise<{ ok: boolean; reason?: string; transcript?: string }> => {
     // The latest body that shows her (has packs), not a text-only client that connected after it.
     const bodies = server?.bodies ?? []
-    const body = [...bodies].reverse().find(b => b.hello.packs.length > 0) ?? bodies.at(-1)
+    const desktop = [...bodies].reverse().find(b => b.hello.packs.length > 0) ?? bodies.at(-1)
+    const body = desktop ?? (webBody.connected ? { id: WEB_BODY_ID, send: (message: BrainMessage) => webBody.send(message) } : undefined)
     log({ event: 'play-action', action, body: body?.id ?? null, packActions: bodyPack?.actions.map(a => a.id) ?? null })
     if (body === undefined) return Promise.resolve({ ok: false, reason: 'no body' })
     const known = bodyPack?.actions.find(a => a.id === action)
@@ -437,7 +448,10 @@ export function apply(ctx: Context, config: HerConfig): void {
     }
   }
 
-  const broadcast = (message: BrainMessage) => server?.broadcast(message)
+  const broadcast = (message: BrainMessage) => {
+    server?.broadcast(message)
+    webBody.send(message)
+  }
 
   /** A reply with no words: record what the turn did instead (tool calls, reasoning only, errors). */
   /** Log the end of her session after a reply with no words; the model's error, when the turn ended on one. */
@@ -632,6 +646,14 @@ export function apply(ctx: Context, config: HerConfig): void {
     return { t: 'panel', cid, character: { name, persona, callYou, pronoun }, memory: { facts, episodes, diary }, ...(error === undefined ? {} : { error }) }
   }
 
+  /** Whether the page should show her: asked for, or (the default) while no desktop body is here. */
+  const webShown = (): boolean => {
+    const mode = webBody.mode
+    return mode === 'on' || (mode === 'auto' && !desktopConnected() && !bodyRunning(paths.root))
+  }
+  /** A message from the page, as main fills in the character id for the desktop page. */
+  const withCid = (message: BodyMessage): BodyMessage => ('cid' in message && typeof message.cid === 'string' && message.cid !== '' ? message : { ...message, cid } as BodyMessage)
+
   /** The "她" page's view of everything, and what it can change. */
   const api: ApiRuntime = {
     state: () => {
@@ -654,8 +676,10 @@ export function apply(ctx: Context, config: HerConfig): void {
           install: { ...installState, ...(installedBody(paths.root) === undefined ? {} : { installed: installedBody(paths.root)!.version }) },
           ...(body === undefined ? {} : { info: { kind: body.hello.body.kind, version: body.hello.body.version, os: body.hello.body.os } }),
           ...(bodyPack === undefined ? {} : { pack: bodyPack }),
-          packs: bodyPacks,
-          ...(activePack === undefined ? {} : { activePack }),
+          // With no desktop body the brain itself knows her packs (docs/网页身体设计.md).
+          packs: body === undefined ? webBody.packList() : bodyPacks,
+          ...((body === undefined ? webBody.activeId() : activePack) === undefined ? {} : { activePack: body === undefined ? webBody.activeId()! : activePack! }),
+          web: { mode: webBody.mode, connected: webBody.connected, show: webShown() },
           ...(bodyMode === undefined ? {} : { mode: bodyMode }),
           ...(bodyLook === undefined ? {} : { look: bodyLook }),
           ...(body === undefined ? {} : { screens: body.hello.caps.screens.map(({ w, h, scale }) => ({ w, h, scale })) }),
@@ -733,8 +757,20 @@ export function apply(ctx: Context, config: HerConfig): void {
       body.send({ t: 'pack.pick', id: `i${Date.now()}` })
     },
     usePack: packId => {
+      if (!desktopConnected()) {
+        if (!webBody.packList().some(p => p.packId === packId)) throw new Error('没有这个外形包')
+        webBody.use(packId)
+        refreshBodyPack()
+        return
+      }
       if (!bodyPacks.some(p => p.packId === packId)) throw new Error('没有这个外形包')
       broadcast({ t: 'pack.use', packId })
+    },
+    webStatus: () => ({ show: webShown(), mode: webBody.mode }),
+    webConfig: () => webBody.config(desktopConnected()),
+    webSend: message => onBodyMessage(withCid(message), undefined),
+    webSetMode: (mode: WebMode) => {
+      webBody.mode = mode
     },
     workshopList: () => listProjects(),
     workshopNew: name => {
@@ -942,7 +978,9 @@ export function apply(ctx: Context, config: HerConfig): void {
         }
         const stream = nextStream++
         if (seq === 0) log({ event: 'first-audio', uid, sinceSendMs: sentAt === undefined ? null : Date.now() - sentAt, durationMs: audio.durationMs })
-        server?.broadcastWithAudio({ t: 'speak.seg', cid, uid, seq, text, durationMs: audio.durationMs, format: audio.format, stream, ...withCues }, stream, audio.audio)
+        const seg: BrainMessage = { t: 'speak.seg', cid, uid, seq, text, durationMs: audio.durationMs, format: audio.format, stream, ...withCues }
+        server?.broadcastWithAudio(seg, stream, audio.audio)
+        webBody.sendWithAudio(seg, audio.audio)
       },
       end(uid) {
         broadcast({ t: 'speak.end', cid, uid })
@@ -966,7 +1004,7 @@ export function apply(ctx: Context, config: HerConfig): void {
       },
       message: (_client, message, audio) => onBodyMessage(message, audio),
       closed: client => {
-        bodyPack = server?.bodies.at(-1)?.hello.packs[0]
+        refreshBodyPack()
         // Only what that body was doing is lost; another body (or a text-only client) leaving changes nothing.
         for (const [id, pending] of pendingActs) {
           if (pending.body !== client.id) continue
@@ -1038,6 +1076,40 @@ export function apply(ctx: Context, config: HerConfig): void {
         return new Response(readFileSync(file), { headers: { 'content-type': type, 'cache-control': 'no-cache' } })
       },
     }))
+  })
+
+  ctx.inject(['connection'], (webCtx) => {
+    const connection = (webCtx as unknown as { connection: { fetch: { register(route: { path: string; methods: string[]; requestBody: 'buffered'; fetch: (request: Request) => Response | Promise<Response> }): () => void } } }).connection
+    const get = (path: string, fetch: (request: Request) => Response | Promise<Response>) =>
+      webCtx.effect(() => connection.fetch.register({ path: `${WEB_BASE}/${path}`, methods: ['GET', 'HEAD'], requestBody: 'buffered', fetch }))
+    get('page', () => webBody.asset('index.html'))
+    get('renderer.js', () => webBody.asset('renderer.js'))
+    get('mic-worklet.js', () => webBody.asset('mic-worklet.js'))
+    get('file', request => webBody.file(request))
+    get('events', request => webBody.connect(request.signal, () => {
+      webBody.send({ t: 'welcome', v: PROTOCOL_VERSION, sessionId: session?.sessionId ?? '', characters: [{ cid, name: character.name, mode: 'overlay' }], config: { mic: config.voice.mic, bargeIn: true } })
+      refreshBodyPack()
+      log({ event: 'web-body', state: 'connected' })
+    }, () => {
+      refreshBodyPack()
+      log({ event: 'web-body', state: 'closed' })
+      for (const [id, pending] of pendingActs) {
+        if (pending.body !== WEB_BODY_ID) continue
+        pendingActs.delete(id)
+        pending.settle({ ok: false, reason: 'no body' })
+      }
+    }))
+    // What you said in the page: 16-bit mono PCM at 16 kHz, as a desktop body sends it.
+    webCtx.effect(() => connection.fetch.register({
+      path: `${WEB_BASE}/utterance`, methods: ['POST'], requestBody: 'buffered',
+      fetch: async request => {
+        const query = new URL(request.url).searchParams
+        const pcm = new Uint8Array(await request.arrayBuffer())
+        onBodyMessage({ t: 'user.utterance', cid, uttId: query.get('uttId') ?? `w${Date.now()}`, format: 'pcm16@16k', durationMs: Number(query.get('durationMs')) || 0, stream: 0 }, pcm)
+        return new Response(JSON.stringify({ ok: true }), { headers: { 'content-type': 'application/json' } })
+      },
+    }))
+    webCtx.effect(() => () => webBody.close())
   })
 
   ctx.inject([...SERVICES], (serviceCtx) => {

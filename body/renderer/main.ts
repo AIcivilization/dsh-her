@@ -26,7 +26,7 @@
 
 import type { BrainMessage, Cue } from '../../src/protocol/index.ts'
 import type { BodyConfig, HerBridge, LinkStatus, MicMode, PackClipInfo, PackLayout, SceneLayout } from '../shared/types.ts'
-import { fitScene } from '../shared/fit.ts'
+import { fitScene } from '../../src/pack/fit.ts'
 import { Bubble } from './bubble.ts'
 import { Mic } from './mic.ts'
 import { Player } from './player.ts'

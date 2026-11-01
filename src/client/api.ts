@@ -45,6 +45,7 @@ export const herApi = {
   bodyInstallDownloaded: () => post<WithState>('/body/install-downloaded'),
   bodyCancel: () => post<WithState>('/body/cancel'),
   bodyOpenFolder: () => post<Record<string, never>>('/body/open-folder'),
+  webSet: (mode: 'auto' | 'on' | 'off') => post<WithState>('/web/set', { mode }),
   pluginLatest: () => post<{ latest: string; updateAvailable: boolean }>('/update/plugin-latest'),
   mingInstall: () => post<WithState>('/voice/ming/install'),
   mingUninstall: () => post<WithState>('/voice/ming/uninstall'),

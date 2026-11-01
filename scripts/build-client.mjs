@@ -3,7 +3,7 @@
 // React and cordis come from the page through the injected `require`;
 // everything else is bundled. Runs the same on macOS, Windows and Linux.
 import { build } from 'esbuild'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 
@@ -50,3 +50,29 @@ if (stray.length > 0) {
   process.exit(1)
 }
 console.log(`lib/client.js: ${(out.length / 1024).toFixed(1)} KiB, externals: ${[...new Set(required)].join(', ')}`)
+
+// The web body's page (src/client/web-bridge.ts + the body's renderer), served by the brain.
+await build({
+  entryPoints: ['src/client/web-body-entry.ts'],
+  bundle: true,
+  outfile: 'lib/web-body/renderer.js',
+  format: 'iife',
+  platform: 'browser',
+  target: 'es2022',
+  legalComments: 'inline',
+  logLevel: 'warning',
+})
+copyFileSync('body/renderer/mic-worklet.js', 'lib/web-body/mic-worklet.js')
+// Clips come from DSH's own address here, not file: URLs.
+const html = readFileSync('body/renderer/index.html', 'utf8')
+const csp = /<meta http-equiv="Content-Security-Policy"[^>]*>/
+if (!csp.test(html)) throw new Error('body/renderer/index.html has no CSP to replace')
+// The window is small here: her words go over the top of a scene, whatever its layout says.
+const WEB_STYLE = `<style>
+    body.scene #bubble, body.region.scene #bubble { left: 4%; right: 4%; width: auto; top: 6px; bottom: auto; justify-content: center; }
+  </style>
+</head>`
+writeFileSync('lib/web-body/index.html', html
+  .replace(csp, `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; media-src 'self' blob:; img-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'">`)
+  .replace('</head>', WEB_STYLE))
+console.log('lib/web-body: page and renderer')

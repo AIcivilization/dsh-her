@@ -6,10 +6,10 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { PackSummary } from '../../src/protocol/index.ts'
-import type { LookPrefs } from '../shared/look.ts'
-import type { Mode } from '../shared/types.ts'
-import { loadPack, summarize } from './pack/load.ts'
+import type { PackSummary } from '../protocol/index.ts'
+import type { LookPrefs } from './look.ts'
+import type { Mode } from './types.ts'
+import { loadPack, summarize } from './load.ts'
 
 export interface BodySettings {
   /** Imported pack id, under `<home>/packs`. */
