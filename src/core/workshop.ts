@@ -93,7 +93,7 @@ export interface ClipPlan {
   /** File name without .mp4: `<pose>_<role>_<nn>`. */
   file: string
   action: string
-  /** Part of the minimum: idle and two talks. */
+  /** Part of the minimum: one idle clip. */
   required?: boolean
   /** Left out of the task (the user unticked it). */
   off?: boolean
@@ -176,10 +176,10 @@ export interface LookProject {
 }
 
 /** Preset actions; `{pose}` reads 站着 / 坐着 / 躺着. */
-const PRESETS: Array<{ role: string; n: number; action: string; required?: boolean }> = [
+const PRESETS: Array<{ role: string; n: number; action: string; required?: boolean; ticked?: boolean }> = [
   { role: 'idle', n: 1, required: true, action: '安静地{pose}，自然呼吸，偶尔眨眼，头极轻微地晃动，嘴巴闭合，浅浅地笑' },
-  { role: 'talk', n: 1, required: true, action: '看着镜头温柔地说话，嘴巴自然持续开合，轻轻点头，手有很小的动作。最后一秒闭嘴回到原姿势' },
-  { role: 'talk', n: 2, required: true, action: '看着镜头说话，换一种节奏，略带笑意，嘴巴自然持续开合，一只手轻轻抬起又放下。最后一秒闭嘴回到原姿势' },
+  { role: 'talk', n: 1, ticked: true, action: '看着镜头温柔地说话，嘴巴自然持续开合，轻轻点头，手有很小的动作。最后一秒闭嘴回到原姿势' },
+  { role: 'talk', n: 2, ticked: true, action: '看着镜头说话，换一种节奏，略带笑意，嘴巴自然持续开合，一只手轻轻抬起又放下。最后一秒闭嘴回到原姿势' },
   { role: 'idle', n: 2, action: '安静地{pose}，轻轻把一缕头发拨到耳后，然后恢复原姿势' },
   { role: 'listen', n: 1, action: '认真地听，嘴巴闭着，轻轻点头两次，眼神专注看着镜头' },
   { role: 'think', n: 1, action: '眼睛看向右上方像在思考，食指轻碰下巴，然后放下手，视线回到镜头' },
@@ -190,12 +190,12 @@ const PRESETS: Array<{ role: string; n: number; action: string; required?: boole
   { role: 'sleepy', n: 1, action: '打一个小哈欠，用手背轻揉眼睛，然后对镜头笑一下，恢复原姿势' },
 ]
 
-/** The preset clips for a pose: the minimum ticked, the rest offered unticked. */
+/** The preset clips for a pose: idle and two talks ticked, the rest offered unticked. */
 export function presetClips(pose: Pose): ClipPlan[] {
   return PRESETS.map(p => ({
     file: `${pose}_${p.role}_${String(p.n).padStart(2, '0')}`,
     action: p.action.replaceAll('{pose}', POSE_WORDS[pose]),
-    ...(p.required === true ? { required: true } : { off: true }),
+    ...(p.required === true ? { required: true } : p.ticked === true ? {} : { off: true }),
   }))
 }
 

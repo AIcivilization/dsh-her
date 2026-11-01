@@ -43,10 +43,10 @@ import { PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type LookView, t
 import { BrainServer } from '../server/brain-server.ts'
 import { API_BASE, apiHandlers, handle, type ApiRuntime } from './api.ts'
 import { bodyRunning, findDevBody, launchBody, type LaunchPlan } from './body-launcher.ts'
-import { compareVersions, downloadFolder, install, installDownloaded, installedBody, installedPlan, latestRelease, manualInstall, type InstallState, type ManualInstall } from './body-install.ts'
+import { compareVersions, desktopBodyExists, downloadFolder, install, installDownloaded, installedBody, installedPlan, latestRelease, manualInstall, type InstallState, type ManualInstall } from './body-install.ts'
 import { IDLE_IMPORT, type ImportStatus, type ReportLine } from './import-status.ts'
 import { DESK_DIR, newProject, sceneDir } from '../core/workshop.ts'
-import { exampleFile, examples, exportProject, findProject, importProject, listProjects, prepareImport, projectStatus, saveProject } from './workshop.ts'
+import { assignClip, exampleFile, examples, exportProject, findProject, importProject, listProjects, prepareImport, projectStatus, removeStray, saveProject } from './workshop.ts'
 import type { HerConfig } from './config.ts'
 import { HerSession, type DshServices, type ModelRoute } from './her-session.ts'
 import { heardText, SpeechQueue } from '../voice/speech-queue.ts'
@@ -55,7 +55,8 @@ import { saveUpload, uploadAllowed, uploadTarget } from './uploads.ts'
 import { importLook, type LookRequest } from '../pack/import-look.ts'
 import { importPack } from '../pack/import.ts'
 import { plateIn, saveFrame } from '../pack/frame.ts'
-import { hasFfmpeg, stillSize } from '../pack/media.ts'
+import { ffmpegCommand, stillSize } from '../pack/media.ts'
+import { ensureFfmpeg, findFfmpeg } from './ffmpeg-fetch.ts'
 import { Voice } from '../voice/voice.ts'
 import { httpFetch, NetError, setMirrors } from '../net.ts'
 import { defaultIdleMinutes, MingVoice } from '../voice/ming.ts'
@@ -659,13 +660,15 @@ export function apply(ctx: Context, config: HerConfig): void {
    * With no desktop body the brain imports by itself (it has the files and
    * ffmpeg). Progress and the report show the same way as from a body.
    */
+  /** A full path only: a bare name means it is on the PATH the body has too. */
+  const ffmpegForBody = () => (ffmpegCommand() === 'ffmpeg' ? {} : { ffmpeg: ffmpegCommand() })
   const importHere = async (work: (onProgress: (done: number, total: number, step: string) => void) => Promise<{ ok: boolean; lines: ReportLine[]; show?: string }>, cleanup?: () => void): Promise<void> => {
     if (importStatus.state === 'running') throw new Error('已经有一个在导入了，等它做完')
-    if (!await hasFfmpeg()) throw new Error('这台电脑上找不到 ffmpeg，导入要用它。Ubuntu / Debian：sudo apt install ffmpeg；mac：brew install ffmpeg；Windows：winget install ffmpeg')
-    importStatus = { ...IDLE_IMPORT, state: 'running' }
-    void work((done, total, step) => {
+    importStatus = { ...IDLE_IMPORT, state: 'running', step: '准备中…' }
+    const onProgress = (done: number, total: number, step: string) => {
       importStatus = { ...importStatus, state: 'running', done, total, step }
-    }).then(result => {
+    }
+    void ensureFfmpeg(paths.root, (done, total) => onProgress(done, total, `第一次导入：下载 ffmpeg（约 ${Math.round(total / 1e6)} MB）`)).then(() => work(onProgress)).then(result => {
       importStatus = { ...importStatus, state: result.ok ? 'done' : 'failed', lines: result.lines }
       if (result.show !== undefined) {
         webBody.use(result.show)
@@ -707,6 +710,7 @@ export function apply(ctx: Context, config: HerConfig): void {
           connected: body !== undefined,
           running: body !== undefined || bodyRunning(paths.root),
           canStart: !('missing' in bodyPlan()),
+          desktopExists: desktopBodyExists() || installState.dev,
           install: { ...installState, ...(installedBody(paths.root) === undefined ? {} : { installed: installedBody(paths.root)!.version }) },
           ...(body === undefined ? {} : { info: { kind: body.hello.body.kind, version: body.hello.body.version, os: body.hello.body.os } }),
           ...(bodyPack === undefined ? {} : { pack: bodyPack }),
@@ -788,7 +792,7 @@ export function apply(ctx: Context, config: HerConfig): void {
       const body = server?.bodies.at(-1)
       if (body === undefined) throw new Error('身体还没连上，导入素材要在身体所在的电脑上选文件夹')
       importStatus = { ...IDLE_IMPORT, state: 'picking' }
-      body.send({ t: 'pack.pick', id: `i${Date.now()}` })
+      void findFfmpeg(paths.root).then(() => body.send({ t: 'pack.pick', id: `i${Date.now()}`, ...ffmpegForBody() }))
     },
     usePack: packId => {
       if (!desktopConnected()) {
@@ -826,6 +830,7 @@ export function apply(ctx: Context, config: HerConfig): void {
       const dir = join(found.dir, sceneDir(scene))
       const plate = plateIn(dir)
       if (plate === undefined) throw new Error('这个场景还没有照片：先按提示词生成，存成 plate.png 传上来')
+      await ensureFfmpeg(paths.root, () => {})
       const size = await stillSize(join(dir, plate))
       let region: { x: number; y: number; width: number; height: number } | undefined
       try {
@@ -839,6 +844,7 @@ export function apply(ctx: Context, config: HerConfig): void {
       const found = findProject(id)
       const scene = found?.project.scenes.find(s => s.id === sceneId)
       if (found === undefined || scene === undefined) throw new Error('找不到这个场景')
+      await ensureFfmpeg(paths.root, () => {})
       await saveFrame(join(found.dir, sceneDir(scene)), region)
       return projectStatus(found.project, found.dir)
     },
@@ -853,6 +859,8 @@ export function apply(ctx: Context, config: HerConfig): void {
       return saveProject(newProject(`p${Date.now().toString(36)}`, name), mainScreen())
     },
     workshopSave: project => saveProject(project, mainScreen()),
+    workshopAssignClip: (id, folder, file, clip) => assignClip(id, folder, file, clip, mainScreen()),
+    workshopRemoveStray: (id, folder, file) => removeStray(id, folder, file),
     workshopExport: async (id, media) => {
       const dest = await pickFolder('导出到哪个文件夹', '导出到这里')
       return dest === undefined ? undefined : exportProject(id, dest, media)
@@ -881,7 +889,7 @@ export function apply(ctx: Context, config: HerConfig): void {
       if (found === undefined) throw new Error('找不到这个项目')
       const body = server?.bodies.at(-1)
       const status = projectStatus(found.project, found.dir)
-      if (!status.importable) throw new Error('还没有可以导入的部分：至少要有参考图和桌宠的 3 段，或者一个框好人物区的场景和它的 3 段')
+      if (!status.importable) throw new Error('还没有可以导入的部分：至少要有参考图和桌宠的一段待机，或者一个框好人物区的场景和它的一段待机')
       prepareImport(found.project, found.dir)
       const ready = (folder: string) => status.parts.find(p => p.folder === folder)?.enough === true
       const { project } = found
@@ -901,7 +909,7 @@ export function apply(ctx: Context, config: HerConfig): void {
         })
       }
       importStatus = { ...IDLE_IMPORT, state: 'running' }
-      body.send({ t: 'look.import', ...request })
+      void findFfmpeg(paths.root).then(() => body.send({ t: 'look.import', ...request, ...ffmpegForBody() }))
     },
     setLook: change => {
       if (bodyLook === undefined) throw new Error('现在用的不是多场景的形象')

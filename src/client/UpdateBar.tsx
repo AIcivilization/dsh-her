@@ -86,7 +86,8 @@ const FAILURES: Record<string, string> = {
 export function UpdateBar({ state, apply }: { state: StateView; apply: Apply }) {
   const [plugin, setPlugin] = useState<Plugin>({ kind: 'idle' })
   const install = state.body.install
-  const bodyVersion = install.dev ? `${state.body.info?.version ?? ''} 开发版`.trim() : state.body.info?.version ?? install.installed ?? '未安装'
+  const web = !state.body.connected && state.body.web.connected
+  const bodyVersion = web ? '网页里' : install.dev ? `${state.body.info?.version ?? ''} 开发版`.trim() : state.body.info?.version ?? install.installed ?? '未安装'
   const bodyBusy = install.state === 'checking' || install.state === 'downloading' || install.state === 'installing'
 
   // A quiet look when the page opens (a recent answer is fine); the button asks again.

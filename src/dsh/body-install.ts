@@ -30,6 +30,8 @@ const run = promisify(execFile)
 export const MANIFEST = 'body-latest.json'
 /** The app inside a release zip (and in `<home>/body/<version>/`). */
 export const appName = (platform: string = process.platform) => (platform === 'win32' ? 'dsh-her' : 'dsh-her.app')
+/** Whether this computer can have the desktop body at all (its package is in the release); else she lives in the web page. */
+export const desktopBodyExists = (platform: string = process.platform, arch: string = process.arch) => (platform === 'darwin' && arch === 'arm64') || (platform === 'win32' && arch === 'x64')
 /** Platforms with a body in the release. */
 const PACKAGED = new Set(['darwin', 'win32'])
 

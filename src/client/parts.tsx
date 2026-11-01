@@ -67,13 +67,14 @@ export function BodyStatus({ state, apply }: { state: StateView; apply: Apply })
   return (
     <div>
       {body.web.connected
-        ? <p><Dot tone="ok" />她现在住在这个网页里（右下角，能拖动）。想让她到真正的桌面上，可以装桌面身体：</p>
+        ? <p><Dot tone="ok" />她现在住在这个网页里（右下角，能拖动）。{body.desktopExists ? '想让她到真正的桌面上，可以装桌面身体：' : ''}</p>
         : <p><Dot tone={body.running ? 'warn' : 'bad'} />{body.running ? '身体在运行，正在连接…' : '身体还没运行'}</p>}
       {!body.running && (
         <div className="her-row">
-          {body.canStart
+          {!body.desktopExists && <span className="her-muted">这台电脑没有桌面身体（只有 macOS Apple 芯片和 Windows 有），她住在 dsh 网页里。</span>}
+          {body.desktopExists && body.canStart
             ? <button className="her-btn primary" onClick={() => void start()}>启动身体</button>
-            : <>
+            : body.desktopExists && <>
                 <button className="her-btn primary" disabled={busy} onClick={() => { setManual(false); void apply(herApi.installBody()) }}>直接下载安装</button>
                 <button className={`her-btn ${manual ? 'primary' : ''}`} onClick={() => setManual(!manual)}>用下载软件下载</button>
                 <span className="her-muted">她在桌面上的样子是一个单独的小程序（150–220 MB），装在 dsh-her 自己的文件夹里，装好就自动启动。直接下载慢的话，可以复制链接用下载软件下。</span>
@@ -408,6 +409,14 @@ export function ModelPicker({ state, apply }: { state: StateView; apply: Apply }
 }
 
 export function MicCheck({ state }: { state: StateView }) {
+  if (!state.body.connected && !window.isSecureContext) {
+    return (
+      <div>
+        <p className="her-warn">浏览器只在 HTTPS 或 localhost 下才让网页用麦克风，所以这样打开时只能打字给她（双击她，或者右键菜单）。</p>
+        <p className="her-muted">想说话：用 SSH 隧道从 localhost 打开（<code>ssh -L 3000:127.0.0.1:3000 你的VPS</code>，再开 http://localhost:3000），或者给 dsh 配 HTTPS。见 docs/VPS部署.md。</p>
+      </div>
+    )
+  }
   const shortcut = state.platform === 'darwin' ? '⌃⌥空格' : 'Ctrl+Alt+空格'
   const fresh = state.heard !== undefined && Date.now() - state.heard.at < 120_000
   return (

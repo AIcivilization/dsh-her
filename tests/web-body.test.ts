@@ -1,10 +1,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
+import { gzipSync } from 'node:zlib'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileResponse, frameFor, packFile, parseRange, WEB_BASE, WebBody } from '../src/dsh/web-body.ts'
 import { saveUpload, uploadAllowed, uploadTarget } from '../src/dsh/uploads.ts'
+import { desktopBodyExists } from '../src/dsh/body-install.ts'
+import { importPack } from '../src/pack/import.ts'
+import { downloadFfmpeg, ffmpegInOutput } from '../src/dsh/ffmpeg-fetch.ts'
 import { clampRegion } from '../src/pack/frame.ts'
 import type { PackInfo } from '../src/pack/types.ts'
 
@@ -146,4 +152,65 @@ test('a frame stays inside the photo, on even sizes', () => {
   const photo = { width: 1000, height: 800 }
   assert.deepEqual(clampRegion({ x: 10.4, y: 20.6, width: 301.2, height: 533 }, photo), { x: 10, y: 21, width: 300, height: 532 })
   assert.deepEqual(clampRegion({ x: -5, y: 790, width: 2000, height: 50 }, photo), { x: 0, y: 790, width: 1000, height: 10 })
+})
+
+test('a pack file with its date in the address is kept for good', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'her-web-'))
+  try {
+    const path = join(dir, 'a.mp4')
+    writeFileSync(path, 'x')
+    assert.match(fileResponse(path, new Request('http://x/'), true).headers.get('cache-control')!, /immutable/)
+    assert.match(fileResponse(path, new Request('http://x/')).headers.get('cache-control')!, /no-cache/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the desktop body exists only where it is packaged', () => {
+  assert.ok(desktopBodyExists('darwin', 'arm64'))
+  assert.ok(desktopBodyExists('win32', 'x64'))
+  for (const [platform, arch] of [['linux', 'x64'], ['linux', 'arm64'], ['darwin', 'x64'], ['win32', 'arm64']] as const) assert.ok(!desktopBodyExists(platform, arch), `${platform} ${arch}`)
+})
+
+test('ffmpeg is downloaded once, checked, unpacked and made runnable', { skip: process.platform === 'win32' }, async () => {
+  const home = mkdtempSync(join(tmpdir(), 'her-ff-'))
+  const script = '#!/bin/sh\nexit 0\n'
+  const gz = gzipSync(script)
+  const build = { size: gz.length, sha256: createHash('sha256').update(gz).digest('hex') }
+  const server = createServer((_req, res) => res.end(gz))
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r))
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/f.gz`
+  try {
+    const target = join(home, 'ffmpeg')
+    await downloadFfmpeg(url, target, build, () => {})
+    assert.equal(readFileSync(target, 'utf8'), script)
+    assert.ok(statSync(target).mode & 0o100, 'runnable')
+    const bad = join(home, 'bad')
+    await assert.rejects(downloadFfmpeg(url, bad, { ...build, sha256: '0'.repeat(64) }, () => {}), /校验不对/)
+    assert.ok(!existsSync(bad) && !existsSync(`${bad}.part`), 'nothing left behind')
+  } finally {
+    server.close()
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('the first import on a new home makes its packs folder', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'her-first-'))
+  try {
+    const packs = join(dir, 'new', 'packs')
+    const source = join(dir, 'clips')
+    mkdirSync(source)
+    writeFileSync(join(source, 'stand_idle_01.mp4'), 'not a video')
+    const result = await importPack(source, packs, {})
+    assert.ok(existsSync(packs), 'packs folder')
+    assert.ok(result.report.every(line => !line.text.includes('ENOENT')), JSON.stringify(result.report))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the ffmpeg a login shell names is picked out of whatever its rc files print', () => {
+  assert.equal(ffmpegInOutput('welcome back\n/Users/a/bin/ffmpeg\n'), '/Users/a/bin/ffmpeg')
+  assert.equal(ffmpegInOutput('ffmpeg not found\n'), undefined)
+  assert.equal(ffmpegInOutput(''), undefined)
 })

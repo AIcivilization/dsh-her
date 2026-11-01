@@ -14,7 +14,15 @@ const run = promisify(execFile)
 /** Electron's resources folder (the installed body); not there in plain Node. */
 const resources = (process as { resourcesPath?: unknown }).resourcesPath
 const bundled = typeof resources === 'string' ? join(resources, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg') : undefined
-const FFMPEG = process.env.DSH_HER_FFMPEG ?? (bundled !== undefined && existsSync(bundled) ? bundled : 'ffmpeg')
+let FFMPEG = process.env.DSH_HER_FFMPEG ?? (bundled !== undefined && existsSync(bundled) ? bundled : 'ffmpeg')
+
+/** Use this ffmpeg from now on (one the brain found or downloaded). */
+export function useFfmpeg(path: string): void {
+  FFMPEG = path
+}
+
+/** The ffmpeg in use: a full path once one was found, else the bare name on PATH. */
+export const ffmpegCommand = () => FFMPEG
 
 async function ffmpeg(args: string[]): Promise<string> {
   try {

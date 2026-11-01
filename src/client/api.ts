@@ -54,6 +54,8 @@ export const herApi = {
   bodyOpenFolder: () => post<Record<string, never>>('/body/open-folder'),
   webNewBatch: () => post<{ batch: string }>('/web/new-batch'),
   webImportBatch: (batch: string, name?: string) => post<WithState>('/web/import-batch', { batch, ...(name === undefined ? {} : { name }) }),
+  workshopAssignClip: (id: string, folder: string, file: string, clip: string) => post<{ project: LookProject; status: ProjectStatus }>('/workshop/assign-clip', { id, folder, file, clip }),
+  workshopRemoveStray: (id: string, folder: string, file: string) => post<{ status: ProjectStatus }>('/workshop/remove-stray', { id, folder, file }),
   workshopFrameInfo: (id: string, scene: string) => post<{ width: number; height: number; file: string; region?: FrameRegion }>('/workshop/frame-info', { id, scene }),
   workshopFrameSave: (id: string, scene: string, region: FrameRegion) => post<{ status: ProjectStatus }>('/workshop/frame-save', { id, scene, region }),
   webSet: (mode: 'auto' | 'on' | 'off') => post<WithState>('/web/set', { mode }),

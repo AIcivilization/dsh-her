@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import {
   clipList, clipPrompt, comfyuiList, customClip, describe, generatorInfo, isAdult, minimaxTask, newProject, newScene, plannedClips, presetClips, promptsFile, referencePrompt, screenColor, validateProject,
 } from '../src/core/workshop.ts'
-import { examples, exportProject, importProject, listProjects, prepareImport, projectStatus, saveProject } from '../src/dsh/workshop.ts'
+import { assignClip, examples, exportProject, findProject, importProject, listProjects, prepareImport, projectStatus, removeStray, saveProject } from '../src/dsh/workshop.ts'
 
 test('the card becomes one sentence, used in every prompt', () => {
   const project = newProject('p1', '居家眼镜')
@@ -39,8 +39,8 @@ test('green clothes get a grey screen', () => {
 
 test('presets: the minimum ticked, the rest offered; custom clips get their own names', () => {
   const clips = presetClips('sit')
-  assert.deepEqual(clips.filter(c => c.required).map(c => c.file), ['sit_idle_01', 'sit_talk_01', 'sit_talk_02'])
-  assert.ok(clips.filter(c => !c.required).every(c => c.off === true))
+  assert.deepEqual(clips.filter(c => c.required).map(c => c.file), ['sit_idle_01'])
+  assert.deepEqual(clips.filter(c => c.off !== true).map(c => c.file), ['sit_idle_01', 'sit_talk_01', 'sit_talk_02'])
   assert.match(clips[0]!.action, /坐着/)
   const one = customClip('sit', clips, '翻一页书')
   assert.equal(one.file, 'sit_act1_01')
@@ -90,7 +90,7 @@ test('the clip list and the ComfyUI list name every clip', () => {
   const project = newProject('p1', '测试')
   project.generator = 'comfyui'
   project.scenes.push(newScene('s1', '卧室'))
-  assert.match(clipList(project, '/root'), /## 卧室 \/ stand_talk_02（必须）/)
+  assert.match(clipList(project, '/root'), /## 卧室 \/ stand_idle_01（必须）/)
   const list = JSON.parse(comfyuiList(project, '/root')) as { negative: string; clips: Array<{ image: string; output: string; prompt: string }> }
   assert.equal(list.clips.length, plannedClips(project).length)
   assert.equal(list.clips[0]!.image, '/root/参考图.png')
@@ -118,10 +118,10 @@ test('saving writes the folders and prompts; status follows the files', () => {
     assert.equal(saved.status.importable, false)
 
     // The desk pet's minimum and the reference picture: importable.
-    for (const f of ['stand_idle_01', 'stand_talk_01', 'stand_talk_02']) writeFileSync(join(dir, '桌宠', `${f}.mp4`), '')
+    writeFileSync(join(dir, '桌宠', 'stand_idle_01.mp4'), '')
     writeFileSync(join(dir, '参考图.png'), '')
     const status = projectStatus(project, dir)
-    assert.deepEqual(status.parts.map(p => [p.name, p.made, p.enough, p.framed]), [['桌宠', 3, true, undefined], ['卧室', 0, false, false]])
+    assert.deepEqual(status.parts.map(p => [p.name, p.made, p.enough, p.framed]), [['桌宠', 1, true, undefined], ['卧室', 0, false, false]])
     assert.equal(status.importable, true)
     prepareImport(project, dir)
     assert.ok(existsSync(join(dir, '桌宠', 'anchor_stand.png')))
@@ -176,5 +176,54 @@ test('every card has example slots, reported as not ready until the files are th
     assert.ok(list.every(e => !e.ready))
   } finally {
     rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('a video with its own name is a stray until the user says which clip it is', () => {
+  const root = mkdtempSync(join(tmpdir(), 'her-workshop-'))
+  try {
+    const project = newProject('p1', '居家')
+    const dir = saveProject(project, undefined, root).status.dir
+    writeFileSync(join(dir, '桌宠', '绿幕人像自然呼吸.MP4'), 'a')
+    writeFileSync(join(dir, '桌宠', '另一段.mov'), 'b')
+    writeFileSync(join(dir, '桌宠', 'stand_dance_01.mp4'), 'c') // the importer reads this name by itself
+    writeFileSync(join(dir, '桌宠', '说明.txt'), 'd')
+    const before = projectStatus(project, dir).parts[0]!
+    assert.deepEqual(before.strays.sort(), ['另一段.mov', '绿幕人像自然呼吸.MP4'].sort())
+    assert.equal(before.enough, false)
+
+    const after = assignClip('p1', '桌宠', '绿幕人像自然呼吸.MP4', 'stand_idle_01', undefined, root)
+    assert.ok(existsSync(join(dir, '桌宠', 'stand_idle_01.mp4')))
+    assert.equal(after.status.parts[0]!.enough, true)
+    assert.deepEqual(after.status.parts[0]!.have, ['stand_idle_01'])
+
+    // Another type counts; a clip that was unticked is ticked.
+    const wave = assignClip('p1', '桌宠', '另一段.mov', 'stand_wave_01', undefined, root)
+    assert.ok(existsSync(join(dir, '桌宠', 'stand_wave_01.mov')))
+    assert.notEqual(wave.project.desk.clips.find(c => c.file === 'stand_wave_01')?.off, true)
+    assert.equal(wave.status.parts[0]!.made, 2)
+    assert.equal(findProject('p1', root)!.project.desk.clips.find(c => c.file === 'stand_wave_01')?.off, undefined)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a clip that is there is not overwritten, and only strays can be removed', () => {
+  const root = mkdtempSync(join(tmpdir(), 'her-workshop-'))
+  try {
+    const dir = saveProject(newProject('p1', '居家'), undefined, root).status.dir
+    writeFileSync(join(dir, '桌宠', 'stand_idle_01.mp4'), 'real')
+    writeFileSync(join(dir, '桌宠', '新的.mp4'), 'new')
+    assert.throws(() => assignClip('p1', '桌宠', '新的.mp4', 'stand_idle_01', undefined, root), /已经有视频/)
+    assert.throws(() => assignClip('p1', '桌宠', '新的.mp4', 'nope', undefined, root), /清单里没有/)
+    assert.throws(() => assignClip('p1', '../桌宠', '新的.mp4', 'stand_idle_01', undefined, root), /没有这部分/)
+    assert.throws(() => removeStray('p1', '桌宠', 'stand_idle_01.mp4', root), /找不到/)
+    assert.throws(() => removeStray('p1', '桌宠', '../形象.json', root), /找不到/)
+    assert.equal(readFileSync(join(dir, '桌宠', 'stand_idle_01.mp4'), 'utf8'), 'real')
+    assert.ok(existsSync(join(dir, '形象.json')))
+    assert.deepEqual(removeStray('p1', '桌宠', '新的.mp4', root).parts[0]!.strays, [])
+    assert.ok(!existsSync(join(dir, '桌宠', '新的.mp4')))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
   }
 })

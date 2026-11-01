@@ -15,7 +15,7 @@ export const projectFileUrl = (projectId: string, path: string) => `/api/dsh-her
  * One upload button. `named`: the file becomes this (its extension kept);
  * otherwise the files keep their names, into `folder`.
  */
-export function ProjectUpload({ projectId, folder, named, accept, label, onDone }: { projectId: string; folder?: string; named?: string; accept: string; label: string; onDone: () => void }) {
+export function ProjectUpload({ projectId, folder, named, accept, label, small, onDone }: { projectId: string; folder?: string; named?: string; accept: string; label: string; small?: boolean; onDone: () => void }) {
   const input = useRef<HTMLInputElement>(null)
   const [progress, setProgress] = useState<UploadProgress>()
   const [error, setError] = useState<string>()
@@ -39,7 +39,7 @@ export function ProjectUpload({ projectId, folder, named, accept, label, onDone 
   return (
     <>
       <input ref={input} type="file" hidden multiple={named === undefined} accept={accept} onChange={e => void send([...(e.target.files ?? [])])} />
-      <button className="her-btn" disabled={progress !== undefined} onClick={() => input.current?.click()}>{progress === undefined ? label : `正在上传 ${progress.file}（${progress.total === 0 ? 0 : Math.round((progress.done / progress.total) * 100)}%）`}</button>
+      <button className={small === true ? 'her-btn small' : 'her-btn'} disabled={progress !== undefined} onClick={() => input.current?.click()}>{progress === undefined ? label : `正在上传 ${progress.file}（${progress.total === 0 ? 0 : Math.round((progress.done / progress.total) * 100)}%）`}</button>
       {error !== undefined && <span className="her-danger">{error}</span>}
     </>
   )

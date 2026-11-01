@@ -161,11 +161,13 @@ export async function importPack(source: string, packsDir: string, options: Impo
     say('error', `起始姿势「${inferred.start}」没有待机片段（${inferred.start}_idle_01.mp4）`)
     return { report }
   }
-  if (at('state', 'talk').length === 0) say('warn', '没有说话片段（stand_talk_01.mp4），说话时会用待机片段代替')
+  if (at('state', 'talk').length === 0) say('warn', `没有说话片段（${inferred.start}_talk_01.mp4），说话时会用待机片段代替，嘴不会动`)
   for (const state of ['listen', 'think'] as const) {
     if (at('state', state).length === 0) say('warn', `没有${state === 'listen' ? '倾听' : '思考'}片段，会用待机代替`)
   }
 
+  // A new home (a fresh server) has no packs folder yet.
+  mkdirSync(packsDir, { recursive: true })
   const work = mkdtempSync(join(packsDir, '.import-'))
   try {
     const total = inferred.clips.length * 2 + 3
@@ -336,6 +338,8 @@ export async function importPack(source: string, packsDir: string, options: Impo
         }
         if (plates.length > 0) scene.plates = plates
         const ratio = (first.width / first.height) / (r.width / r.height)
+        // Clips of the whole picture in a framed region: squeezed or cut off, and only the user can say which they meant.
+        if (Math.abs(ratio - 1) > 0.03 && Math.abs((first.width / first.height) / (value.width / value.height) - 1) <= 0.03) say('warn', '这些视频是整张画面的比例，却框了一小块人物区：到形象工坊点"用整张画面"，再导入一次')
         if (Math.abs(ratio - 1) > 0.03) say('warn', `视频的长宽比（${first.width}×${first.height}）和人物区（${r.width}×${r.height}）不一样，边上会被裁掉一点。生成视频时请用做场景时导出的 crop 图`)
       } catch (error) {
         say('warn', `scene.json 读不懂（${(error as Error).message}），按普通场景包处理`)

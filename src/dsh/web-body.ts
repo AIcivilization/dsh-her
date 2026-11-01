@@ -72,7 +72,7 @@ export function packFile(packsDir: string, packId: string, file: string): string
 }
 
 /** A pack file as an HTTP response: seekable, and revalidated by ETag so it is only downloaded once. */
-export function fileResponse(path: string, request: Request): Response {
+export function fileResponse(path: string, request: Request, forever = false): Response {
   if (!existsSync(path) || !statSync(path).isFile()) return new Response('not found', { status: 404 })
   const { size, mtimeMs } = statSync(path)
   const etag = `"${size.toString(16)}-${Math.floor(mtimeMs).toString(16)}"`
@@ -80,7 +80,8 @@ export function fileResponse(path: string, request: Request): Response {
     'content-type': TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream',
     'accept-ranges': 'bytes',
     etag,
-    'cache-control': 'private, no-cache',
+    // An address with the file's date in it never changes: the browser need not even ask (traffic, on a VPS).
+    'cache-control': forever ? 'private, max-age=31536000, immutable' : 'private, no-cache',
   }
   if (request.headers.get('if-none-match') === etag) return new Response(null, { status: 304, headers })
   const range = parseRange(request.headers.get('range'), size)
@@ -94,6 +95,15 @@ export function fileResponse(path: string, request: Request): Response {
   }
   if (size === 0) return new Response(new Uint8Array(0), { headers: { ...headers, 'content-length': '0' } })
   return new Response(stream(0, size - 1), { headers: { ...headers, 'content-length': String(size) } })
+}
+
+/** `&v=<date>` for a pack file's address, so a re-imported file is a new address. */
+function versionOf(path: string): string {
+  try {
+    return `&v=${Math.floor(statSync(path).mtimeMs).toString(36)}`
+  } catch {
+    return ''
+  }
 }
 
 /** The floating window's size for a pack: a scene shows whole, a figure gets room for her bubble. */
@@ -169,7 +179,7 @@ export class WebBody {
     const id = this.shownId()
     if (id === undefined) return NO_PACK
     try {
-      return loadPack(join(this.packsDir, id), undefined, (dir, file) => `${WEB_BASE}/file?p=${encodeURIComponent(id)}&f=${encodeURIComponent(file)}`)
+      return loadPack(join(this.packsDir, id), undefined, (dir, file) => `${WEB_BASE}/file?p=${encodeURIComponent(id)}&f=${encodeURIComponent(file)}${versionOf(join(dir, file))}`)
     } catch {
       return NO_PACK
     }
@@ -224,7 +234,7 @@ export class WebBody {
   file(request: Request): Response {
     const query = new URL(request.url).searchParams
     const path = packFile(this.packsDir, query.get('p') ?? '', query.get('f') ?? '')
-    return path === undefined ? new Response('not found', { status: 404 }) : fileResponse(path, request)
+    return path === undefined ? new Response('not found', { status: 404 }) : fileResponse(path, request, query.has('v'))
   }
 
   /** The renderer's own files, built next to the plugin (lib/web-body). */

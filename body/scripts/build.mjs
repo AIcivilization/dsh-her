@@ -14,4 +14,5 @@ await Promise.all([
 ])
 copyFileSync('renderer/index.html', 'dist/index.html')
 copyFileSync('renderer/panel.html', 'dist/panel.html')
+copyFileSync('renderer/input.html', 'dist/input.html')
 copyFileSync('renderer/mic-worklet.js', 'dist/mic-worklet.js')

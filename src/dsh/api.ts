@@ -42,6 +42,8 @@ export interface StateView {
     running: boolean
     /** There is a body to start (the development one, or the installed app). */
     canStart: boolean
+    /** This computer can have the desktop body; else she only lives in the web page (a VPS, Linux). */
+    desktopExists: boolean
     /** The installed body app: installing, updating, a newer version waiting for a restart. */
     install: InstallState
     info?: { kind: string; version: string; os: string }
@@ -120,6 +122,9 @@ export interface ApiRuntime {
   workshopExamples(): Array<{ card: WorkshopCard; file: string; label: string; ready: boolean }>
   workshopOpen(id: string): void
   workshopFrame(id: string, sceneId: string): void
+  /** A video in a part's folder is this clip; or it is not wanted. */
+  workshopAssignClip(id: string, folder: string, file: string, clip: string): { project: LookProject; status: ProjectStatus }
+  workshopRemoveStray(id: string, folder: string, file: string): ProjectStatus
   workshopImport(id: string): void | Promise<void>
   memoryRemove(ids: string[]): number
   memoryConfirm(ids: string[]): number
@@ -321,6 +326,8 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
       rt.workshopFrame(str(body.id, '项目'), str(body.scene, '场景'))
       return {}
     },
+    '/workshop/assign-clip': async body => rt.workshopAssignClip(str(body.id, '项目'), str(body.folder, '部分'), str(body.file, '文件'), str(body.clip, '片段')),
+    '/workshop/remove-stray': async body => ({ status: rt.workshopRemoveStray(str(body.id, '项目'), str(body.folder, '部分'), str(body.file, '文件')) }),
     '/workshop/import': async body => {
       await rt.workshopImport(str(body.id, '项目'))
       return withState()

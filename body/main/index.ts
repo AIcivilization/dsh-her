@@ -32,6 +32,7 @@ import { idleLookSummary, listLooks, lookPackId, lookSummary, lookView } from '.
 import { importPack } from '../../src/pack/import.ts'
 import { clipsView, loadPack, saveClipUses, summarize } from '../../src/pack/load.ts'
 import { pickScenePhoto, saveScene, scenePhotoIn } from './scene-maker.ts'
+import { hasFfmpeg, useFfmpeg } from '../../src/pack/media.ts'
 import { listPacks, loadSettings, saveSettings, type BodySettings } from '../../src/pack/settings.ts'
 import { iconPixels } from '../shared/icon.ts'
 import { importLook } from '../../src/pack/import-look.ts'
@@ -352,7 +353,13 @@ function usePack(packId: string): void {
 }
 
 /** Let the user pick a folder here, import it, show it. Progress and the report go to the brain. */
-async function pickAndImport(): Promise<void> {
+/** The brain's ffmpeg, when this body has none it can run (development: no copy of its own, a bare PATH). */
+async function ffmpegFromBrain(path: string | undefined): Promise<void> {
+  if (path !== undefined && !await hasFfmpeg()) useFfmpeg(path)
+}
+
+async function pickAndImport(ffmpeg?: string): Promise<void> {
+  await ffmpegFromBrain(ffmpeg)
   const send = (message: BodyMessage) => link?.send(message)
   if (process.platform === 'darwin') app.focus({ steal: true })
   const choice = await dialog.showOpenDialog({ title: '选择素材文件夹', buttonLabel: '导入', properties: ['openDirectory'] })
@@ -379,6 +386,7 @@ async function pickAndImport(): Promise<void> {
  * together and she shows it. One report for all of it.
  */
 async function importLookHere(request: Extract<BrainMessage, { t: 'look.import' }>): Promise<void> {
+  await ffmpegFromBrain(request.ffmpeg)
   const { size, scaleFactor } = screen.getPrimaryDisplay()
   const result = await importLook(request, {
     home: expand(home), packsDir,
@@ -454,14 +462,33 @@ function refreshTray(): void {
   tray.setToolTip(`dsh-her · ${statusLabel()}`)
 }
 
-/** Send to her page; a wallpaper window takes no keys, so for typing she comes out first. */
-function toHer(channel: 'show-input' | 'talk'): void {
-  if (mode === 'wallpaper' && channel === 'show-input') {
-    switchMode('overlay')
-    win?.webContents.once('did-finish-load', () => win?.webContents.send(channel))
+let typingWindow: BrowserWindow | undefined
+
+/** A wallpaper window takes no keys: typing gets a small window of its own, and she stays where she is. */
+function openTyping(): void {
+  if (process.platform === 'darwin') app.focus({ steal: true })
+  if (typingWindow !== undefined && !typingWindow.isDestroyed()) {
+    typingWindow.show()
+    typingWindow.focus()
     return
   }
-  win?.webContents.send(channel)
+  const area = screen.getPrimaryDisplay().workArea
+  const size = { width: 480, height: 96 }
+  typingWindow = new BrowserWindow({
+    ...size, x: Math.round(area.x + (area.width - size.width) / 2), y: area.y + area.height - size.height - 40,
+    frame: false, transparent: true, hasShadow: false, resizable: false, skipTaskbar: true, alwaysOnTop: true, show: false, backgroundColor: '#00000000',
+    webPreferences: { preload: join(__dirname, 'preload.cjs') },
+  })
+  typingWindow.setAlwaysOnTop(true, 'floating')
+  typingWindow.once('ready-to-show', () => typingWindow?.show())
+  typingWindow.on('closed', () => { typingWindow = undefined })
+  void typingWindow.loadFile(join(__dirname, 'input.html'))
+}
+
+/** Send to her page, except typing to her in the wallpaper. */
+function toHer(channel: 'show-input' | 'talk'): void {
+  if (mode === 'wallpaper' && channel === 'show-input') openTyping()
+  else win?.webContents.send(channel)
 }
 
 let panelWindow: BrowserWindow | undefined
@@ -488,6 +515,7 @@ function openPanel(tab: 'persona' | 'memory' | 'clips' | 'scene', extra: Record<
 function showInput(): void {
   toHer('show-input')
 }
+if (debug) Object.assign(globalThis, { herShowInput: showInput })
 
 function talk(): void {
   toHer('talk')
@@ -657,7 +685,7 @@ if (!app.requestSingleInstanceLock()) {
           link?.send({ t: 'act.done', cid: message.cid, id: message.id, ok, ...(ok ? {} : { reason: 'no such scene' }) })
           return
         } else if (message.t === 'pack.pick') {
-          pickAndImport().catch(error => link?.send({ t: 'pack.report', id: '', ok: false, lines: [{ level: 'error', text: (error as Error).message }] }))
+          pickAndImport(message.ffmpeg).catch(error => link?.send({ t: 'pack.report', id: '', ok: false, lines: [{ level: 'error', text: (error as Error).message }] }))
           return
         }
         if (message.t.startsWith('speak.')) lastTalkAt = Date.now()

@@ -82,7 +82,7 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
   return (
     <>
       <div className="her-head">
-        <h1>让她住到你的桌面上</h1>
+        <h1>{body.desktopExists ? '让她住到你的桌面上' : '让她住到 dsh 里'}</h1>
         {state.character.onboarded && <button className="her-btn link" onClick={onDone}>回到管理页</button>}
       </div>
       <div className="her-steps">
@@ -105,10 +105,10 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
       {step === 1 && (
         <div className="her-card">
           <h2>她的身体</h2>
-          <p className="her-muted">她的样子和声音在一个单独的桌面程序里（"身体"），这里的 dsh 是她的大脑。两边连上她才能出现在桌面上。</p>
+          <p className="her-muted">{body.desktopExists ? '她可以住在 dsh 网页里（什么都不用装），也可以装一个桌面程序（"身体"），住到真正的桌面上。' : '这台电脑没有桌面程序可装，她住在 dsh 网页里：右下角那个就是她，能拖动。'}</p>
           <BodyStatus state={state} apply={apply} />
-          {nav(body.connected, body.connected ? undefined : '也可以先跳过，之后在管理页再连')}
-          {!body.connected && <div className="her-row"><button className="her-btn link" onClick={next}>先跳过</button></div>}
+          {nav(body.connected || body.web.connected, body.connected || body.web.connected ? undefined : '也可以先跳过，之后在管理页再连')}
+          {!body.connected && !body.web.connected && <div className="her-row"><button className="her-btn link" onClick={next}>先跳过</button></div>}
         </div>
       )}
       {step === 2 && (
@@ -136,7 +136,7 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
       {step === 5 && (
         <div className="her-card">
           <h2>试试和她说话</h2>
-          {body.connected ? <MicCheck state={state} /> : <p className="her-muted">身体连上之后才能用麦克风。</p>}
+          {body.connected || body.web.connected ? <MicCheck state={state} /> : <p className="her-muted">身体连上之后才能用麦克风。</p>}
           {nav(true)}
         </div>
       )}
@@ -144,8 +144,9 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
         <div className="her-card">
           <h2>把她放到桌面上</h2>
           <p className="her-muted">随时可以在管理页改。</p>
-          <ModePicker state={state} apply={apply} />
-          {!body.connected && <p className="her-muted">身体连上之后才能切换。</p>}
+          {body.desktopExists && <ModePicker state={state} apply={apply} />}
+          {body.desktopExists && !body.connected && <p className="her-muted">桌面身体连上之后才能切换这几种。</p>}
+          <WebModePicker state={state} apply={apply} />
           {nav(true)}
         </div>
       )}
@@ -182,6 +183,7 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
               <div className="her-row"><button className="her-btn primary" onClick={() => goSettings('model')}>去换模型</button></div>
             </div>
           )}
+          <NowCard state={state} onChange={goSettings} />
           <div className="her-card">
             <h2>身体</h2>
             <BodyStatus state={state} apply={apply} />
@@ -195,7 +197,6 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
             <p className="her-muted">记得 {state.memory.facts.length} 件关于你的事、{state.memory.episodes.length} 个事件，写了 {state.memory.diary.length} 天日记。</p>
             {state.heard !== undefined && <p className="her-faint">最近听到：「{state.heard.text}」</p>}
           </div>
-          <p className="her-muted">改人设、换声音、外形、模型，都在"设置"里；她记住了什么，在"她记得的事"里。</p>
         </>
       )}
       {tab === 'settings' && <Settings state={state} apply={apply} jump={jump} onJumped={() => setJump(undefined)} />}
@@ -206,6 +207,34 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
 }
 
 type Section = 'persona' | 'voice' | 'look' | 'model' | 'place'
+
+/** What she is set to right now, each with a way to change it. */
+function NowCard({ state, onChange }: { state: StateView; onChange: (section: Section) => void }) {
+  const c = state.character
+  const body = state.body
+  const here = body.connected || body.web.connected
+  const pack = body.packs.find(p => p.packId === body.activePack)
+  const scene = body.look?.scenes.find(s => s.id === body.look?.current)
+  const onDesk = body.mode === 'overlay' && body.look?.desk === true
+  const row = (label: string, value: string, section: Section) => (
+    <div className="her-row" style={{ margin: '4px 0' }}>
+      <span className="her-muted" style={{ width: 72, flexShrink: 0 }}>{label}</span>
+      <span style={{ flex: 1, minWidth: 0 }}>{value}</span>
+      <button className="her-btn small" onClick={() => onChange(section)}>改</button>
+    </div>
+  )
+  return (
+    <div className="her-card">
+      <h2>现在的她</h2>
+      {row('人物', `${c.name}，叫你「${c.callYou || '（没设）'}」`, 'persona')}
+      {row('形象', !here ? '身体没连上' : pack?.name ?? '还没有形象：到"形象工坊"做一个', 'look')}
+      {body.look !== undefined && row('场景', onDesk ? '桌宠（浮在最上层时用）' : `${scene?.name ?? '—'}${body.look.locked ? '（锁定）' : body.look.auto && body.look.scenes.length > 1 ? '（自动换）' : ''}`, 'look')}
+      {row('放在哪里', body.connected ? (body.mode === undefined ? '—' : MODE_TEXT[body.mode]?.title ?? body.mode) : body.web.connected ? 'dsh 网页里' : '身体没连上', 'place')}
+      {row('声音', `${voiceLabel(state, c.voice.id)} · ${SERVICE_SHORT[serviceOf(c.voice.id)]}${c.voice.speed === 1 ? '' : ` · 语速 ${c.voice.speed}`}`, 'voice')}
+      {row('模型', state.model === null ? '没有可用的模型' : `${state.model.provider} / ${state.model.model}`, 'model')}
+    </div>
+  )
+}
 
 const SETTINGS_FOLDS: Record<Section, boolean> = { persona: false, voice: false, look: false, model: false, place: false }
 
@@ -238,7 +267,7 @@ function Settings({ state, apply, jump, onJumped }: { state: StateView; apply: A
         <><PackPicker state={state} apply={apply} /><ScenePicker state={state} apply={apply} /></>)}
       {card('model', '模型', state.model === null ? '没有可用的模型' : `${state.model.provider} / ${state.model.model}${state.model.chosen ? '' : '（dsh 默认）'}${state.problem === undefined ? '' : ' · 上一次回答失败了'}`,
         state.model === null || state.problem !== undefined ? 'bad' : 'ok', <ModelPicker state={state} apply={apply} />)}
-      {card('place', '放在哪里', body.connected ? (body.mode === undefined ? '—' : MODE_TEXT[body.mode]?.title ?? body.mode) : body.web.connected ? 'dsh 网页里' : '身体没连上', body.connected || body.web.connected ? 'ok' : 'off', <><ModePicker state={state} apply={apply} /><WebModePicker state={state} apply={apply} /></>)}
+      {card('place', '放在哪里', body.connected ? (body.mode === undefined ? '—' : MODE_TEXT[body.mode]?.title ?? body.mode) : body.web.connected ? 'dsh 网页里' : '身体没连上', body.connected || body.web.connected ? 'ok' : 'off', <>{body.desktopExists && <ModePicker state={state} apply={apply} />}<WebModePicker state={state} apply={apply} /></>)}
     </>
   )
 }

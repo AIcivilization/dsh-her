@@ -118,10 +118,18 @@ export class EdgeVoice {
     try {
       const python = this.viaUv ? undefined : await findPython()
       const venvPython = venvBin(this.ownDir, win ? 'python' : 'python3')
+      let built = false
       if (python !== undefined) {
-        if (!existsSync(venvPython)) await run(python, ['-m', 'venv', this.ownDir], 120_000)
-        await run(venvPython, ['-m', 'pip', 'install', '-q', '--disable-pip-version-check', '--upgrade', 'edge-tts'], 300_000)
-      } else {
+        try {
+          if (!existsSync(venvPython)) await run(python, ['-m', 'venv', this.ownDir], 120_000)
+          await run(venvPython, ['-m', 'pip', 'install', '-q', '--disable-pip-version-check', '--upgrade', 'edge-tts'], 300_000)
+          built = true
+        } catch {
+          // A server's Python often has no venv or pip (Debian splits them off): uv does not need them.
+          await rm(this.ownDir, { recursive: true, force: true })
+        }
+      }
+      if (!built) {
         // No Python here: uv brings one of its own, kept next to edge-tts.
         const uvHome = join(dirname(this.ownDir), 'uv')
         const uv = await installUv(uvHome)

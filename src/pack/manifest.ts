@@ -60,6 +60,8 @@ const ACTION_WORDS: Record<string, string> = {
   show: '展示身上的衣服',
   dance: '跟着节奏轻轻摇摆',
   nod: '点头',
+  stretch: '伸个懒腰',
+  gaze: '转头看向窗外发一会儿呆',
 }
 
 const ANCHOR = '[a-z]+(?:@[a-z0-9]+)?'

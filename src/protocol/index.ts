@@ -169,7 +169,7 @@ export type BrainMessage =
   | { t: 'mode'; cid: string; mode: WindowMode; screen?: number; pos?: { x: number; y: number }; scale?: number }
   | { t: 'config'; mic?: 'push-to-talk' | 'always'; bargeIn?: boolean }
   /** Let the user choose a folder on the body's computer and import it (progress and report follow). */
-  | { t: 'pack.pick'; id: string }
+  | { t: 'pack.pick'; id: string; ffmpeg?: string }
   | { t: 'pack.import'; id: string; dir: string }
   /** Show this imported pack (or `look:<id>`) from now on. */
   | { t: 'pack.use'; packId: string }
@@ -182,6 +182,8 @@ export type BrainMessage =
    */
   | {
     t: 'look.import'; id: string; name: string; dir: string; desk?: string; default?: string
+    /** The ffmpeg the brain found, for a body that has none of its own and was started with a bare PATH. */
+    ffmpeg?: string
     scenes: Array<{ id: string; name: string; folder: string; when?: { hours?: string; user?: 'active' | 'idle' } }>
   }
   /** Open 做场景 on a project's scene folder: its plate.png is the photo, scene.json and crop.png are written there. */

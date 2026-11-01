@@ -11,6 +11,10 @@
  *   桌宠/提示词.txt         + the desk pet's clips
  *   场景-卧室/提示词.txt     + 照片提示词.txt, plate.png, scene.json, crop.png, clips
  *
+ * A part's minimum is one idle clip (without talk clips her mouth does not
+ * move, but she is there). A video whose name matches nothing is listed as a
+ * stray, so the page can ask which clip it is.
+ *
  * The prompts are rewritten on every save; the user's pictures and clips are
  * never touched. Importing hands the folders to the body (same computer).
  */
@@ -21,7 +25,7 @@ import { basename, dirname, extname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   clipList, comfyuiList, DESK_DIR, EXAMPLE_FILES, EXAMPLE_SLOTS, minimaxTask, PROJECT_FILE, promptsFile, REFERENCE_FILE, referencePrompt, safeName, sceneDir, scenePhotoPrompt, validateProject,
-  type Generator, type LookProject, type WorkshopCard,
+  type ClipPlan, type Generator, type LookProject, type WorkshopCard,
 } from '../core/workshop.ts'
 
 export const MATERIALS_DIR = join(homedir(), 'Documents', 'dsh-her 素材')
@@ -33,8 +37,12 @@ export interface PartStatus {
   /** Clips planned, and how many of them are in the folder. */
   planned: number
   made: number
-  /** The minimum (idle and two talks) is there. */
+  /** The minimum (one idle clip) is there. */
   enough: boolean
+  /** The clips in the folder, by planned name. */
+  have: string[]
+  /** Videos in the folder whose names match no clip: which clip each is, the user says. */
+  strays: string[]
   /** Scenes: the photo, and her region framed on it (scene.json and crop.png). */
   photo?: boolean
   framed?: boolean
@@ -76,13 +84,33 @@ export function findProject(id: string, root = MATERIALS_DIR): { project: LookPr
 
 const has = (dir: string, file: string) => existsSync(join(dir, file))
 
+const CLIP_TYPES = ['.mp4', '.mov', '.webm']
+const hasClip = (folder: string, name: string) => CLIP_TYPES.some(type => existsSync(join(folder, `${name}${type}`)))
+/** A name the importer understands by itself (pose_role_nn). */
+const IMPORTER_NAME = /^[a-z]+(?:@[a-z0-9]+)?_[a-z0-9_]+$/
+
+function straysIn(folder: string, clips: readonly ClipPlan[]): string[] {
+  if (!existsSync(folder)) return []
+  return readdirSync(folder).filter(file => {
+    const type = extname(file).toLowerCase()
+    const name = basename(file, extname(file))
+    return !file.startsWith('.') && CLIP_TYPES.includes(type) && !clips.some(clip => clip.file === name) && !IMPORTER_NAME.test(name)
+  })
+}
+
+function partClips(project: LookProject, folder: string): ClipPlan[] | undefined {
+  return folder === DESK_DIR ? project.desk.clips : project.scenes.find(scene => sceneDir(scene) === folder)?.clips
+}
+
 export function projectStatus(project: LookProject, dir: string): ProjectStatus {
   const parts: PartStatus[] = []
   const count = (folder: string, clips: LookProject['desk']['clips']) => {
     const planned = clips.filter(c => c.off !== true)
-    const made = planned.filter(c => has(join(dir, folder), `${c.file}.mp4`))
-    const enough = clips.filter(c => c.required === true).every(c => has(join(dir, folder), `${c.file}.mp4`))
-    return { planned: planned.length, made: made.length, enough }
+    const here = join(dir, folder)
+    const have = clips.filter(c => hasClip(here, c.file)).map(c => c.file)
+    const made = planned.filter(c => have.includes(c.file))
+    const enough = have.some(file => /_idle_\d+$/.test(file))
+    return { planned: planned.length, made: made.length, enough, have, strays: straysIn(here, clips) }
   }
   if (project.desk.on) parts.push({ name: '桌宠', folder: DESK_DIR, ...count(DESK_DIR, project.desk.clips) })
   for (const scene of project.scenes) {
@@ -146,6 +174,35 @@ export function saveProject(input: unknown, screen?: { width: number; height: nu
     write(join(folder, '提示词.txt'), promptsFile(project, scene))
   }
   return { project, status: projectStatus(project, dir) }
+}
+
+/** A stray video is this clip: it takes the clip's name, and a clip that was unticked is ticked. */
+export function assignClip(id: string, folder: string, file: string, clip: string, screen?: { width: number; height: number }, root = MATERIALS_DIR): { project: LookProject; status: ProjectStatus } {
+  const found = findProject(id, root)
+  if (found === undefined) throw new Error('找不到这个项目')
+  const clips = partClips(found.project, folder)
+  if (clips === undefined) throw new Error('这个项目没有这部分')
+  const target = clips.find(c => c.file === clip)
+  if (target === undefined) throw new Error('清单里没有这一段')
+  const here = join(found.dir, folder)
+  if (!straysIn(here, clips).includes(file)) throw new Error(`找不到 ${file}`)
+  if (hasClip(here, clip)) throw new Error(`${clip} 已经有视频了`)
+  renameSync(join(here, file), join(here, `${clip}${extname(file).toLowerCase()}`))
+  if (target.off !== true) return { project: found.project, status: projectStatus(found.project, found.dir) }
+  delete target.off
+  return saveProject(found.project, screen, root)
+}
+
+/** Delete a stray video the user does not want (only a stray, never a clip or anything else). */
+export function removeStray(id: string, folder: string, file: string, root = MATERIALS_DIR): ProjectStatus {
+  const found = findProject(id, root)
+  if (found === undefined) throw new Error('找不到这个项目')
+  const clips = partClips(found.project, folder)
+  if (clips === undefined) throw new Error('这个项目没有这部分')
+  const here = join(found.dir, folder)
+  if (!straysIn(here, clips).includes(file)) throw new Error(`找不到 ${file}`)
+  rmSync(join(here, file))
+  return projectStatus(found.project, found.dir)
 }
 
 /** Before importing: the desk pet's anchor is the reference picture. */

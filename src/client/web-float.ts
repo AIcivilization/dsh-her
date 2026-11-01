@@ -179,7 +179,7 @@ export function mountWebFloat(): () => void {
 
   const onKey = (event: KeyboardEvent) => {
     guest()?.unlockAudio()
-    if (event.ctrlKey && event.altKey && event.code === 'Space') {
+    if (event.ctrlKey && event.altKey && event.code === 'Space' && window.isSecureContext) {
       event.preventDefault()
       guest()?.talk()
     }

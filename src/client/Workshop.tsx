@@ -78,7 +78,7 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
   const save = async () => {
     if (draft === undefined) return false
     const result = await herApi.workshopSave(draft)
-    if (!report(result, '已保存：提示词都写进文件夹了')) return false
+    if (!report(result, '已保存：提示词都写进文件夹了。她要换上这个形象，还要在第 5 步点"导入这个形象"')) return false
     setDirty(false)
     await reload()
     return true
@@ -91,6 +91,26 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
       return
     }
     report(await herApi.workshopFrame(draft!.id, scene.id), '已在桌面上打开"做场景"窗口：框好她的活动范围，点保存')
+  }
+  const frameWhole = async (scene: ProjectScene) => {
+    if (dirty && !(await save())) return
+    const info = await herApi.workshopFrameInfo(draft!.id, scene.id)
+    if (!report(info, '') || !info.ok) return
+    report(await herApi.workshopFrameSave(draft!.id, scene.id, { x: 0, y: 0, width: info.width, height: info.height }), `「${scene.name}」用整张画面：视频盖满照片，不用框了`)
+    await reload()
+  }
+  const assignClip = async (folder: string, file: string, clip: string) => {
+    if (dirty && !(await save())) return
+    const result = await herApi.workshopAssignClip(draft!.id, folder, file, clip)
+    if (report(result, `${file} 现在是 ${clip}`) && result.ok) {
+      setDraft(structuredClone(result.project))
+      setDirty(false)
+    }
+    await reload()
+  }
+  const removeStray = async (folder: string, file: string) => {
+    report(await herApi.workshopRemoveStray(draft!.id, folder, file), `已删掉 ${file}`)
+    await reload()
   }
   const importLook = async () => {
     if (dirty && !(await save())) return
@@ -134,14 +154,19 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
   const screen = state.body.screens?.[0]
   const screenPx = screen === undefined ? undefined : { width: Math.round(screen.w * screen.scale), height: Math.round(screen.h * screen.scale) }
   const desk = status?.parts.find(p => p.folder === DESK_DIR)
-  const fold = (card: WorkshopCard, title: string, summary: string, done: boolean, body: ReactNode, saveLabel = '保存这一步') => (
+  const lookId = draft === undefined ? '' : `look:${draft.id}`
+  const imported = state.body.packs.some(p => p.packId === lookId)
+  const inUse = imported && state.body.activePack === lookId
+  const fold = (card: WorkshopCard, title: string, summary: string, done: boolean, body: ReactNode, saveLabel: string | null = '保存这一步') => (
     <Fold title={title} summary={summary} summaryClass={done ? 'her-ok' : 'her-muted'} open={unfolded[card]} onToggle={() => toggle(card)}>
       {body}
       <ExampleStrip examples={examples.filter(e => e.card === card)} />
-      <div className="her-row">
-        <button className="her-btn primary" onClick={() => void saveStep(card)}>{saveLabel}</button>
-        {dirty && <span className="her-warn">有改动还没保存</span>}
-      </div>
+      {saveLabel !== null && (
+        <div className="her-row">
+          <button className="her-btn primary" onClick={() => void saveStep(card)}>{saveLabel}</button>
+          {dirty && <span className="her-warn">有改动还没保存</span>}
+        </div>
+      )}
     </Fold>
   )
 
@@ -223,7 +248,7 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
             </div>
           </>)}
 
-          {fold('desk', '3. 桌宠（浮在最上层时的她）', !draft.desk.on ? '不要桌宠' : desk === undefined ? '还没保存' : `${desk.made}/${desk.planned} 段${desk.enough ? '，够用了' : ''}`, !draft.desk.on || desk?.enough === true, <>
+          {fold('desk', '3. 桌宠（浮在最上层时的她）', !draft.desk.on ? '不要桌宠' : desk === undefined ? '还没保存' : `${desk.made}/${desk.planned} 段${desk.enough ? '，够导入了' : ''}`, !draft.desk.on || desk?.enough === true, <>
             <label><input type="checkbox" checked={draft.desk.on} onChange={e => edit(p => { p.desk.on = e.target.checked })} /> 要桌宠：绿幕全身视频，导入时抠掉背景，她浮在所有窗口上面</label>
             {draft.desk.on && (
               <>
@@ -231,9 +256,10 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
                 <p className="her-muted">首帧用「参考图.png」，生成竖版 9:16、1080P、5–6 秒。</p>
                 <div className="her-row">
                   <ProjectUpload projectId={draft.id} folder={DESK_DIR} accept="video/*,.mp4,.webm,.mov" label="上传片段…" onDone={() => void reload()} />
-                  <span className="her-muted">文件名按下面的清单（比如 stand_idle_01.mp4），可以一次选多个。</span>
+                  <span className="her-muted">一次传多个时，文件名对不上清单的会问你是哪一段；也可以在下面每一段旁边单独上传。</span>
                 </div>
-                <ClipList project={draft} kind="desk" clips={draft.desk.clips} pose="stand" onChange={clips => edit(p => { p.desk.clips = clips })} />
+                <StrayClips part={desk} clips={draft.desk.clips} onAssign={(file, clip) => void assignClip(DESK_DIR, file, clip)} onRemove={file => void removeStray(DESK_DIR, file)} />
+                <ClipList project={draft} kind="desk" clips={draft.desk.clips} pose="stand" folder={DESK_DIR} have={desk?.have ?? []} onUploaded={() => void reload()} onChange={clips => edit(p => { p.desk.clips = clips })} />
               </>
             )}
           </>)}
@@ -250,28 +276,32 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
                 onChange={change => edit(p => { change(p.scenes[i]!) })}
                 onDefault={() => edit(p => { p.default = scene.id })}
                 onRemove={() => edit(p => { p.scenes.splice(i, 1) })}
-                onFrame={() => void frame(scene)}
+                onFrame={() => void frame(scene)} onFrameWhole={() => void frameWhole(scene)}
+                onAssign={(file, clip) => void assignClip(sceneDir(scene), file, clip)} onRemoveStray={file => void removeStray(sceneDir(scene), file)}
                 framing={framing === scene.id} desktop={state.body.connected} onFramed={() => { setFraming(undefined); void reload() }} onUploaded={() => void reload()}
               />
             ))}
             <button className="her-btn" onClick={() => edit(p => { p.scenes.push(newScene(`s${Date.now().toString(36)}`, `场景${p.scenes.length + 1}`)) })}>加一个场景</button>
           </>)}
 
-          {fold('import', '5. 生成、导入', status.importable ? '可以导入了' : '片段还不够', false, <>
+          {fold('import', '5. 生成、导入', importSummary(status, state.import.state === 'running', imported, inUse), imported, <>
             <ol className="her-muted" style={{ margin: '4px 0', paddingLeft: 18 }}>
               <li>每一步填完点"保存这一步"：提示词写进项目文件夹，所有片段列在「生成清单.md」{draft.generator === 'minimax' ? '，还有给 MiniMax Code 的「MiniMax生成任务.md」' : draft.generator === 'comfyui' ? '，还有给脚本用的「ComfyUI生成清单.json」' : ''}。</li>
               <li>{generatorInfo(draft).how}</li>
-              <li>场景的照片放好后点"框人物区"；片段齐了就"导入这个形象"。每部分至少要 3 段（待机、说话 ×2），其他的以后补，再导入一次就会更新。</li>
+              <li>场景的照片放好后点"框人物区"（视频是全屏的就点"用整张画面"）；然后"导入这个形象"，她才会换上。每部分最少一段待机就能导入；没有说话片段时，她说话嘴不会动。其他的以后补，再导入一次就会更新。</li>
             </ol>
             <div className="her-row">
               {state.body.connected
                 ? <button className="her-btn" onClick={() => void herApi.workshopOpen(draft.id).then(r => report(r, '已打开文件夹'))}>打开文件夹</button>
                 : <span className="her-muted">项目在 dsh 所在电脑的 {status.dir}</span>}
-              <button className="her-btn" disabled={!status.importable || state.import.state === 'running'} onClick={() => void importLook()}>导入这个形象</button>
+              <button className="her-btn primary" disabled={!status.importable || state.import.state === 'running'} onClick={() => void importLook()}>{imported ? '再导入一次（更新她）' : '导入这个形象'}</button>
+              {inUse && <span className="her-ok">✓ 她正在用这个形象</span>}
+              {imported && !inUse && <span className="her-muted">已导入，在 设置 → 外形 里可以换上。</span>}
             </div>
+            <ImportChecklist status={status} />
             <ImportProgress state={state} />
-          </>, '保存')}
-          {note !== undefined && <p className={note.kind === 'error' ? 'her-danger' : 'her-ok'}>{note.text}</p>}
+          </>, null)}
+          {note !== undefined && <p className={`her-card ${note.kind === 'error' ? 'her-danger' : 'her-ok'}`} style={{ position: 'sticky', bottom: 8, zIndex: 1 }}>{note.text}</p>}
         </>
       )}
     </>
@@ -311,11 +341,81 @@ function progressText(status: ProjectStatus): string {
   return status.parts.map(p => `${p.name} ${p.made}/${p.planned}${p.framed === false ? (p.photo === true ? '·未框' : '·缺照片') : ''}`).join(' · ')
 }
 
+/** What a part still needs before it can be imported. */
+function partMissing(status: ProjectStatus, part: ProjectStatus['parts'][number]): string[] {
+  return [
+    ...(part.folder === DESK_DIR && !status.reference ? ['参考图'] : []),
+    ...(part.photo === false ? ['照片 plate.png'] : []),
+    ...(part.photo === true && part.framed === false ? ['框人物区（或者"用整张画面"）'] : []),
+    ...(part.enough ? [] : ['一段待机片段']),
+  ]
+}
+
+/** The import card, folded: has she got this look yet, and if not, what would come along. */
+function importSummary(status: ProjectStatus, running: boolean, imported: boolean, inUse: boolean): string {
+  if (running) return '正在导入…'
+  if (inUse) return '✓ 已导入，她正在用这个形象'
+  if (imported) return '已导入'
+  const ready = status.parts.filter(part => partMissing(status, part).length === 0).map(part => part.name)
+  return ready.length === 0 ? '还差素材，点开看缺什么' : `还没导入：点开，点"导入这个形象"（会导入 ${ready.join('、')}）`
+}
+
+/** Each part: what importing it still needs, or that it will come along. */
+function ImportChecklist({ status }: { status: ProjectStatus }) {
+  const lines = status.parts.map(part => {
+    const missing = partMissing(status, part)
+    const talks = part.have.some(file => /_talk_\d+$/.test(file))
+    return missing.length > 0
+      ? <li key={part.folder} className="her-warn">{part.name}：这次不会导入，还差{missing.join('、')}{part.strays.length > 0 ? `（有 ${part.strays.length} 个视频还没说是哪一段）` : ''}</li>
+      : <li key={part.folder} className="her-ok">{part.name}：可以导入{talks ? '' : '（没有说话片段，她说话时嘴不会动）'}</li>
+  })
+  return <ul className="her-report">{lines}</ul>
+}
+
+/** Videos whose names match no clip: which clip is each? */
+function StrayClips({ part, clips, onAssign, onRemove }: { part: ProjectStatus['parts'][number] | undefined; clips: ClipPlan[]; onAssign: (file: string, clip: string) => void; onRemove: (file: string) => void }) {
+  if (part === undefined || part.strays.length === 0) return null
+  const free = clips.filter(clip => !part.have.includes(clip.file))
+  return (
+    <div className="her-scenes">
+      <p className="her-warn">这些视频的文件名和清单对不上，还没算进去。选一下每个是哪一段：</p>
+      {part.strays.map(file => <StrayRow key={file} file={file} free={free} onAssign={clip => onAssign(file, clip)} onRemove={() => onRemove(file)} />)}
+    </div>
+  )
+}
+
+function StrayRow({ file, free, onAssign, onRemove }: { file: string; free: ClipPlan[]; onAssign: (clip: string) => void; onRemove: () => void }) {
+  const [clip, setClip] = useState('')
+  const [sure, setSure] = useState(false)
+  const chosen = free.some(c => c.file === clip) ? clip : free[0]?.file ?? ''
+  return (
+    <div className="her-row" style={{ margin: '3px 0' }}>
+      <span style={{ flex: 1, minWidth: 180, wordBreak: 'break-all' }}>{file}</span>
+      <select className="her-select" style={{ width: 200 }} value={chosen} onChange={e => setClip(e.target.value)}>
+        {free.map(c => <option key={c.file} value={c.file}>{clipLabel(c)}</option>)}
+      </select>
+      <button className="her-btn small primary" disabled={chosen === ''} onClick={() => onAssign(chosen)}>就是这一段</button>
+      {sure
+        ? <button className="her-btn small" onClick={onRemove}>确定删掉</button>
+        : <button className="her-btn small" onClick={() => setSure(true)}>不用了</button>}
+    </div>
+  )
+}
+
+const ROLE_WORDS: Record<string, string> = { idle: '待机', talk: '说话', listen: '倾听', think: '思考', happy: '开心', shy: '害羞', wave: '挥手', touched: '被戳', sleepy: '犯困' }
+
+/** "待机 1（stand_idle_01）" */
+function clipLabel(clip: ClipPlan): string {
+  const match = /_([a-z]+)_(\d+)$/.exec(clip.file)
+  const word = match === null ? undefined : ROLE_WORDS[match[1]!]
+  return word === undefined ? clip.file : `${word} ${Number(match![2])}（${clip.file}）`
+}
+
 function PartStatusLine({ status }: { status: ProjectStatus['parts'][number] | undefined }) {
   if (status === undefined) return <p className="her-muted">保存后会建好这部分的文件夹。</p>
   return (
     <p>
-      已有 {status.made}/{status.planned} 段{status.enough ? <span className="her-ok">，够用了</span> : <span className="her-warn">，最少要待机、说话 ×2 这 3 段</span>}
+      已有 {status.made}/{status.planned} 段{status.enough ? <span className="her-ok">，够导入了</span> : <span className="her-warn">，最少要一段待机</span>}
       {status.photo === false && <span className="her-warn">；还没有照片 plate.png</span>}
       {status.photo === true && status.framed === false && <span className="her-warn">；照片有了，还没框人物区</span>}
       {status.framed === true && <span className="her-ok">；人物区已框好</span>}
@@ -359,10 +459,11 @@ function CardEditor({ card, onChange }: { card: CharacterCard; onChange: (card: 
   )
 }
 
-function SceneEditor({ project, scene, isDefault, status, screen, onChange, onDefault, onRemove, onFrame, framing, desktop, onFramed, onUploaded }: {
+function SceneEditor({ project, scene, isDefault, status, screen, onChange, onDefault, onRemove, onFrame, onFrameWhole, onAssign, onRemoveStray, framing, desktop, onFramed, onUploaded }: {
   project: LookProject; scene: ProjectScene; isDefault: boolean; status: ProjectStatus['parts'][number] | undefined
   screen: { width: number; height: number } | undefined
-  onChange: (change: (s: ProjectScene) => void) => void; onDefault: () => void; onRemove: () => void; onFrame: () => void
+  onChange: (change: (s: ProjectScene) => void) => void; onDefault: () => void; onRemove: () => void; onFrame: () => void; onFrameWhole: () => void
+  onAssign: (file: string, clip: string) => void; onRemoveStray: (file: string) => void
   /** A desktop body is connected (framing opens its window). */
   framing: boolean; desktop: boolean; onFramed: () => void; onUploaded: () => void
 }) {
@@ -403,14 +504,16 @@ function SceneEditor({ project, scene, isDefault, status, screen, onChange, onDe
       </div>
       {framing && <FrameScene projectId={project.id} sceneId={scene.id} sceneName={scene.name} onDone={onFramed} />}
       <div className="her-row"><button className="her-btn" disabled={status?.photo !== true} onClick={onFrame}>框人物区</button><span className="her-muted">{desktop ? '在桌面上打开"做场景"' : '就在这里'}，框出她活动的那一块；之后用 crop.png 当首帧生成视频。</span></div>
-      <ClipList project={project} kind="scene" scene={scene} clips={scene.clips} pose={scene.pose} onChange={clips => onChange(s => { s.clips = clips })} />
+      <div className="her-row"><button className="her-btn" disabled={status?.photo !== true} onClick={onFrameWhole}>用整张画面</button><span className="her-muted">你的视频就是整张照片动起来（海浪也会动），就点这个，不用框。视频和照片比例要一样，文件也大一些。</span></div>
+      <StrayClips part={status} clips={scene.clips} onAssign={onAssign} onRemove={onRemoveStray} />
+      <ClipList project={project} kind="scene" scene={scene} clips={scene.clips} pose={scene.pose} folder={sceneDir(scene)} have={status?.have ?? []} onUploaded={onUploaded} onChange={clips => onChange(s => { s.clips = clips })} />
     </div>
   )
 }
 
 /** The clips of one part: tick which to make, edit what she does, copy the full prompt, add your own. */
-function ClipList({ project, kind, scene, clips, pose, onChange }: {
-  project: LookProject; kind: 'desk' | 'scene'; scene?: ProjectScene; clips: ClipPlan[]; pose: Pose; onChange: (clips: ClipPlan[]) => void
+function ClipList({ project, kind, scene, clips, pose, folder, have, onUploaded, onChange }: {
+  project: LookProject; kind: 'desk' | 'scene'; scene?: ProjectScene; clips: ClipPlan[]; pose: Pose; folder: string; have: string[]; onUploaded: () => void; onChange: (clips: ClipPlan[]) => void
 }) {
   const [own, setOwn] = useState('')
   const set = (i: number, change: Partial<ClipPlan>) => onChange(clips.map((c, j) => (j === i ? { ...c, ...change } : c)))
@@ -418,11 +521,12 @@ function ClipList({ project, kind, scene, clips, pose, onChange }: {
     <div>
       {clips.map((clip, i) => (
         <div key={clip.file} className="her-row" style={{ margin: '3px 0' }}>
-          <label style={{ width: 150 }}>
-            <input type="checkbox" checked={clip.off !== true} disabled={clip.required === true} onChange={e => set(i, { off: !e.target.checked })} /> {clip.file}
+          <label style={{ width: 170 }} className={have.includes(clip.file) ? 'her-ok' : undefined}>
+            <input type="checkbox" checked={clip.off !== true} disabled={clip.required === true} onChange={e => set(i, { off: !e.target.checked })} /> {have.includes(clip.file) ? '✓ ' : ''}{clip.file}
           </label>
           <input className="her-input" style={{ flex: 1, minWidth: 200 }} value={clip.action} disabled={clip.off === true} onChange={e => set(i, { action: e.target.value })} />
           <button className="her-btn small" disabled={clip.off === true} onClick={() => copy(clipPrompt(project, kind, clip, scene))}>复制提示词</button>
+          {clip.off !== true && <ProjectUpload projectId={project.id} folder={folder} named={clip.file} small accept="video/*,.mp4,.webm,.mov" label={have.includes(clip.file) ? '换一段' : '上传'} onDone={onUploaded} />}
         </div>
       ))}
       <div className="her-row">

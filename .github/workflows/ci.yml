@@ -1,5 +1,5 @@
-# Checks on every push: the plugin's tests on Linux, Windows and macOS, and
-# the Windows body: packaged the way a release ships it, then started once
+# Checks on every push: the plugin's tests on Linux, Windows and macOS, the
+# web body on a machine with no desktop, and the Windows body: packaged the way a release ships it, then started once
 # (--smoke). The Windows package is kept as a build artifact; a release
 # attaches it with the macOS one (docs/M6记录.md).
 
@@ -38,6 +38,26 @@ jobs:
           tar -cjf t/a.tar.bz2 -C t src
           "$SYSTEMROOT/System32/tar.exe" -xjf "$(cygpath -w t/a.tar.bz2)" -C "$(cygpath -w t/out)"
           test "$(cat t/out/src/a.txt)" = hi
+
+  # A computer with no desktop: a real dsh and a real browser (docs/VPS部署.md).
+  headless:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: npm i -g @deepseek-ai/dsh
+      - run: npm i --no-save playwright-core && npx playwright-core install --with-deps chromium
+      - run: node scripts/headless-check.mjs
+      # What a server needs that a Mac test never touches: uv's Linux build, and sherpa's native library.
+      - name: uv's Linux build is what we pinned
+        run: node --input-type=module -e "import { installUv, run } from './src/voice/uv.ts'; const uv = await installUv('.check-uv'); console.log(await run(uv, ['--version'], 30000))"
+      - name: speech recognition loads
+        run: LD_LIBRARY_PATH="$PWD/node_modules/sherpa-onnx-linux-x64" node -e "require('sherpa-onnx-node'); console.log('ok')"
 
   body-windows:
     runs-on: windows-latest
