@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { herApi, type StateView } from './api.ts'
+import { desktopHere, desktopOffered, herApi, type StateView } from './api.ts'
 import type { Apply } from './parts.tsx'
 
 const MARKET = '/dsh-market/api/v1'
@@ -86,7 +86,7 @@ const FAILURES: Record<string, string> = {
 export function UpdateBar({ state, apply }: { state: StateView; apply: Apply }) {
   const [plugin, setPlugin] = useState<Plugin>({ kind: 'idle' })
   const install = state.body.install
-  const web = !state.body.connected && state.body.web.connected
+  const web = !desktopHere(state.body) && (state.body.web.connected || !desktopOffered(state.body))
   const bodyVersion = web ? '网页里' : install.dev ? `${state.body.info?.version ?? ''} 开发版`.trim() : state.body.info?.version ?? install.installed ?? '未安装'
   const bodyBusy = install.state === 'checking' || install.state === 'downloading' || install.state === 'installing'
 
@@ -102,9 +102,9 @@ export function UpdateBar({ state, apply }: { state: StateView; apply: Apply }) 
   const check = useCallback(async () => {
     setPlugin({ kind: 'checking' })
     // The body checks too, and installs a newer one in the background (not a first install: that is its own button).
-    if (!install.dev && install.installed !== undefined) await apply(herApi.installBody())
+    if (desktopOffered(state.body) && !install.dev && install.installed !== undefined) await apply(herApi.installBody())
     setPlugin(await checkPlugin(true))
-  }, [apply, install.dev, install.installed])
+  }, [apply, install.dev, install.installed, state.body])
 
   const update = useCallback(async (force: boolean) => {
     setPlugin({ kind: 'updating' })

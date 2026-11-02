@@ -1,6 +1,6 @@
 # dsh-her
 
-**DSH 桌面女友，[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）插件。** 她住在你真正的桌面上（浮在所有窗口上面，或者住在壁纸里），能聊天、记得你。支持 macOS / Windows。
+**DSH 桌面女友，[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）插件。** 她可以住在你真正的桌面上（浮在所有窗口上面，或者住在壁纸里），也可以住在 dsh 的网页里，能聊天、记得你。桌面程序支持 macOS（Apple 芯片）和 Windows；Linux、VPS 和手机上她住在网页里，见 [docs/VPS部署.md](docs/VPS部署.md)。
 
 > 开发中（P1）。设计和计划见 [docs/](docs/)，从 [docs/P1开发计划.md](docs/P1开发计划.md) 看起。
 

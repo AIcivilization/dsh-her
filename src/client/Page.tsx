@@ -6,13 +6,13 @@
  */
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { herApi, type StateView } from './api.ts'
+import { desktopHere, desktopOffered, herApi, remotePage, type StateView } from './api.ts'
 import { serviceOf } from '../core/voices.ts'
 import { UpdateBar } from './UpdateBar.tsx'
 import { Workshop } from './Workshop.tsx'
 import { Fold, useFolds } from './fold.tsx'
 import { SERVICE_SHORT, voiceLabel } from './choice.tsx'
-import { BodyStatus, Dot, KeyHelp, MemoryView, MicCheck, ModelPicker, MODE_TEXT, ModePicker, PackPicker, PersonaEditor, ScenePicker, VoicePicker, WebModePicker, type Apply } from './parts.tsx'
+import { BodyStatus, Dot, KeyHelp, MemoryView, MicCheck, ModelPicker, MODE_TEXT, ModePicker, PackPicker, PersonaEditor, platformName, ScenePicker, VoicePicker, WebModePicker, type Apply } from './parts.tsx'
 
 const POLL_MS = 2000
 
@@ -60,7 +60,7 @@ export function HerPage() {
   )
 }
 
-const STEPS = ['检查', '身体', '外形', '人设', '声音', '麦克风', '放到桌面'] as const
+const STEPS = ['检查', '身体', '外形', '人设', '声音', '麦克风', '放在哪里'] as const
 
 function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDone: () => void }) {
   const [step, setStep] = useState(0)
@@ -69,6 +69,8 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
     if (await apply(herApi.saveCharacter({ onboarded: true }))) onDone()
   }
   const body = state.body
+  const offered = desktopOffered(body)
+  const ready = desktopHere(body) || body.web.connected
   const nav = (canNext: boolean, hint?: string) => (
     <div className="her-row">
       {step > 0 && <button className="her-btn" onClick={() => setStep(step - 1)}>上一步</button>}
@@ -82,7 +84,7 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
   return (
     <>
       <div className="her-head">
-        <h1>{body.desktopExists ? '让她住到你的桌面上' : '让她住到 dsh 里'}</h1>
+        <h1>{offered ? '让她住到你身边' : '让她住到 dsh 网页里'}</h1>
         {state.character.onboarded && <button className="her-btn link" onClick={onDone}>回到管理页</button>}
       </div>
       <div className="her-steps">
@@ -98,17 +100,17 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
           <p><Dot tone={toneOf(state.voice.speaking.status)} />她的声音：{speakingText(state.voice.speaking.status, state.voice.speaking.service)}</p>
           {(state.voice.speaking.status === 'no-key' || state.voice.speaking.status === 'no-quota') && <KeyHelp state={state} />}
           <p><Dot tone={toneOf(state.voice.status)} />听你说话：{listeningText(state.voice.status)}</p>
-          <p><Dot tone="ok" />系统：{platformText(state.platform)}</p>
+          <p><Dot tone="ok" />dsh 跑在 {platformName(state.platform)} 上{remotePage ? '，你是从别的设备打开这个网页的' : ''}。{offered ? '她可以住在桌面上，也可以住在 dsh 网页里。' : '她住在 dsh 网页里，不用安装桌面程序。'}</p>
           {nav(state.model !== null, state.model === null ? '没有模型她没法说话' : undefined)}
         </div>
       )}
       {step === 1 && (
         <div className="her-card">
           <h2>她的身体</h2>
-          <p className="her-muted">{body.desktopExists ? '她可以住在 dsh 网页里（什么都不用装），也可以装一个桌面程序（"身体"），住到真正的桌面上。' : '这台电脑没有桌面程序可装，她住在 dsh 网页里：右下角那个就是她，能拖动。'}</p>
+          <p className="her-muted">{offered ? '她可以住在 dsh 网页里（什么都不用装），也可以装一个桌面程序，住到桌面上，选哪个都可以。' : '右下角那个就是她，在 dsh 的每个页面上都在。'}</p>
           <BodyStatus state={state} apply={apply} />
-          {nav(body.connected || body.web.connected, body.connected || body.web.connected ? undefined : '也可以先跳过，之后在管理页再连')}
-          {!body.connected && !body.web.connected && <div className="her-row"><button className="her-btn link" onClick={next}>先跳过</button></div>}
+          {nav(ready, ready ? undefined : '也可以先跳过，之后在管理页再连')}
+          {!ready && <div className="her-row"><button className="her-btn link" onClick={next}>先跳过</button></div>}
         </div>
       )}
       {step === 2 && (
@@ -136,16 +138,16 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
       {step === 5 && (
         <div className="her-card">
           <h2>试试和她说话</h2>
-          {body.connected || body.web.connected ? <MicCheck state={state} /> : <p className="her-muted">身体连上之后才能用麦克风。</p>}
+          {ready ? <MicCheck state={state} /> : <p className="her-muted">身体连上之后才能用麦克风。</p>}
           {nav(true)}
         </div>
       )}
       {step === 6 && (
         <div className="her-card">
-          <h2>把她放到桌面上</h2>
+          <h2>{offered ? '把她放在哪里' : '她在网页里'}</h2>
           <p className="her-muted">随时可以在管理页改。</p>
-          {body.desktopExists && <ModePicker state={state} apply={apply} />}
-          {body.desktopExists && !body.connected && <p className="her-muted">桌面身体连上之后才能切换这几种。</p>}
+          {offered && <ModePicker state={state} apply={apply} />}
+          {offered && !body.connected && <p className="her-muted">桌面程序连上之后才能切换这几种。</p>}
           <WebModePicker state={state} apply={apply} />
           {nav(true)}
         </div>
@@ -229,7 +231,7 @@ function NowCard({ state, onChange }: { state: StateView; onChange: (section: Se
       {row('人物', `${c.name}，叫你「${c.callYou || '（没设）'}」`, 'persona')}
       {row('形象', !here ? '身体没连上' : pack?.name ?? '还没有形象：到"形象工坊"做一个', 'look')}
       {body.look !== undefined && row('场景', onDesk ? '桌宠（浮在最上层时用）' : `${scene?.name ?? '—'}${body.look.locked ? '（锁定）' : body.look.auto && body.look.scenes.length > 1 ? '（自动换）' : ''}`, 'look')}
-      {row('放在哪里', body.connected ? (body.mode === undefined ? '—' : MODE_TEXT[body.mode]?.title ?? body.mode) : body.web.connected ? 'dsh 网页里' : '身体没连上', 'place')}
+      {row('放在哪里', desktopHere(body) ? (body.mode === undefined ? '—' : MODE_TEXT[body.mode]?.title ?? body.mode) : body.web.connected ? 'dsh 网页里' : '身体没连上', 'place')}
       {row('声音', `${voiceLabel(state, c.voice.id)} · ${SERVICE_SHORT[serviceOf(c.voice.id)]}${c.voice.speed === 1 ? '' : ` · 语速 ${c.voice.speed}`}`, 'voice')}
       {row('模型', state.model === null ? '没有可用的模型' : `${state.model.provider} / ${state.model.model}`, 'model')}
     </div>
@@ -267,7 +269,7 @@ function Settings({ state, apply, jump, onJumped }: { state: StateView; apply: A
         <><PackPicker state={state} apply={apply} /><ScenePicker state={state} apply={apply} /></>)}
       {card('model', '模型', state.model === null ? '没有可用的模型' : `${state.model.provider} / ${state.model.model}${state.model.chosen ? '' : '（dsh 默认）'}${state.problem === undefined ? '' : ' · 上一次回答失败了'}`,
         state.model === null || state.problem !== undefined ? 'bad' : 'ok', <ModelPicker state={state} apply={apply} />)}
-      {card('place', '放在哪里', body.connected ? (body.mode === undefined ? '—' : MODE_TEXT[body.mode]?.title ?? body.mode) : body.web.connected ? 'dsh 网页里' : '身体没连上', body.connected || body.web.connected ? 'ok' : 'off', <>{body.desktopExists && <ModePicker state={state} apply={apply} />}<WebModePicker state={state} apply={apply} /></>)}
+      {card('place', '放在哪里', desktopHere(body) ? (body.mode === undefined ? '—' : MODE_TEXT[body.mode]?.title ?? body.mode) : body.web.connected ? 'dsh 网页里' : '身体没连上', body.connected || body.web.connected ? 'ok' : 'off', <>{desktopOffered(body) && <ModePicker state={state} apply={apply} />}<WebModePicker state={state} apply={apply} /></>)}
     </>
   )
 }
@@ -303,8 +305,3 @@ function listeningText(status: string): string {
   }
 }
 
-function platformText(platform: string): string {
-  if (platform === 'darwin') return 'macOS'
-  if (platform === 'win32') return 'Windows'
-  return platform
-}

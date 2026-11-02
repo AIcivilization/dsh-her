@@ -50,7 +50,7 @@ import { assignClip, exampleFile, examples, exportProject, findProject, importPr
 import type { HerConfig } from './config.ts'
 import { HerSession, type DshServices, type ModelRoute } from './her-session.ts'
 import { heardText, SpeechQueue } from '../voice/speech-queue.ts'
-import { fileResponse, packFile, WEB_BASE, WebBody, type WebMode } from './web-body.ts'
+import { webShows, fileResponse, packFile, WEB_BASE, WebBody, type WebMode } from './web-body.ts'
 import { saveUpload, uploadAllowed, uploadTarget } from './uploads.ts'
 import { importLook, type LookRequest } from '../pack/import-look.ts'
 import { importPack } from '../pack/import.ts'
@@ -331,7 +331,9 @@ export function apply(ctx: Context, config: HerConfig): void {
   let discovery: { url: string; token: string } | undefined
   /** Actions sent to a body, waiting for its `act.done`. */
   /** The installed body: download, check, install, update (body-install.ts). */
-  const devBody = (): ReturnType<typeof findDevBody> => (config.body.useDev ? findDevBody() : { missing: 'useDev is off' })
+  /** A server: nowhere to show a window, whatever is in the repository. */
+  const noScreen = process.platform === 'linux' && process.env.DISPLAY === undefined && process.env.WAYLAND_DISPLAY === undefined
+  const devBody = (): ReturnType<typeof findDevBody> => (noScreen ? { missing: 'no screen on this computer' } : config.body.useDev ? findDevBody() : { missing: 'useDev is off' })
   let installState: InstallState = { state: 'idle', dev: !('missing' in devBody()) }
   /** The body to start: the development one in the repository when there is one, else the installed app. */
   const bodyPlan = (): LaunchPlan | { missing: string } => {
@@ -684,10 +686,7 @@ export function apply(ctx: Context, config: HerConfig): void {
   const browserScreen = () => (webScreen === undefined ? {} : { screen: { width: webScreen.w, height: webScreen.h, scale: webScreen.scale } })
 
   /** Whether the page should show her: asked for, or (the default) while no desktop body is here. */
-  const webShown = (): boolean => {
-    const mode = webBody.mode
-    return mode === 'on' || (mode === 'auto' && !desktopConnected() && !bodyRunning(paths.root))
-  }
+  const webShown = (remote = false): boolean => webShows(webBody.mode, desktopConnected() || bodyRunning(paths.root), remote)
   /** A message from the page, as main fills in the character id for the desktop page. */
   const withCid = (message: BodyMessage): BodyMessage => ('cid' in message && typeof message.cid === 'string' && message.cid !== '' ? message : { ...message, cid } as BodyMessage)
 
@@ -809,9 +808,9 @@ export function apply(ctx: Context, config: HerConfig): void {
       mkdirSync(join(uploadsDir, batch), { recursive: true })
       return batch
     },
-    webStatus: screen => {
+    webStatus: (screen, remote) => {
       if (screen !== undefined) webScreen = screen
-      return { show: webShown(), mode: webBody.mode }
+      return { show: webShown(remote), mode: webBody.mode }
     },
     importBatch: async (batch, name) => {
       const dir = uploadTarget(uploadsDir, batch)
@@ -848,7 +847,8 @@ export function apply(ctx: Context, config: HerConfig): void {
       await saveFrame(join(found.dir, sceneDir(scene)), region)
       return projectStatus(found.project, found.dir)
     },
-    webConfig: () => webBody.config(desktopConnected()),
+    // Beside a desktop body she keeps quiet, unless that desktop is on another computer than this page.
+    webConfig: remote => webBody.config(desktopConnected() && !remote),
     webSend: message => onBodyMessage(withCid(message), undefined),
     webSetMode: (mode: WebMode) => {
       webBody.mode = mode
@@ -1111,7 +1111,7 @@ export function apply(ctx: Context, config: HerConfig): void {
         if (brain.bodies.length > 0 || bodyRunning(paths.root)) return
         const plan = bodyPlan()
         if ('missing' in plan) {
-          ctx.logger.info(`dsh-her: no body to start yet (${plan.missing}); the "她" page offers to install it`)
+          ctx.logger.info(desktopBodyExists() ? `dsh-her: no body to start yet (${plan.missing}); the "她" page offers to install it` : 'dsh-her: no desktop body on this computer; she lives in the web page')
           return
         }
         const pid = launchBody(plan, { url: started.url, token: started.token, home: paths.root, pack: config.body.pack })

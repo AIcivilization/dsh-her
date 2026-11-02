@@ -78,14 +78,15 @@ export interface ApiRuntime {
   bodyCancelDownload(): void
   bodyOpenFolder(): void
   /** The web body: whether to show, her config, a message from the page, the setting. */
-  webStatus(screen?: { w: number; h: number; scale: number }): { show: boolean; mode: WebMode }
+  /** `remote`: the page is open on another device than the one running dsh. */
+  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; mode: WebMode }
   /** A new folder for files coming from the browser, and importing it as a pack (with no desktop body). */
   webNewBatch(): string
   importBatch(batch: string, name?: string): Promise<void>
   /** Framing a 形象工坊 scene in the page: its photo and region, and saving the region. */
   workshopFrameInfo(id: string, sceneId: string): Promise<{ width: number; height: number; file: string; region?: { x: number; y: number; width: number; height: number } }>
   workshopFrameSave(id: string, sceneId: string, region: { x: number; y: number; width: number; height: number }): Promise<ProjectStatus>
-  webConfig(): WebConfig
+  webConfig(remote: boolean): WebConfig
   webSend(message: BodyMessage): void
   webSetMode(mode: WebMode): void
   /** The newest plugin on npm, for hosts without dshmarket (which otherwise answers this). */
@@ -194,7 +195,7 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
     '/web/status': async body => {
       const s = body.screen as { w?: unknown; h?: unknown; scale?: unknown } | undefined
       const screen = typeof s?.w === 'number' && typeof s.h === 'number' && typeof s.scale === 'number' ? { w: s.w, h: s.h, scale: s.scale } : undefined
-      return rt.webStatus(screen)
+      return rt.webStatus(screen, body.remote === true)
     },
     '/web/new-batch': async () => ({ batch: rt.webNewBatch() }),
     '/web/import-batch': async body => {
@@ -206,7 +207,7 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
       const r = body.region as Record<string, unknown> | undefined
       return { status: await rt.workshopFrameSave(str(body.id, '项目'), str(body.scene, '场景'), { x: num(r?.x, '人物区'), y: num(r?.y, '人物区'), width: num(r?.width, '人物区'), height: num(r?.height, '人物区') }) }
     },
-    '/web/config': async () => ({ config: rt.webConfig() }),
+    '/web/config': async body => ({ config: rt.webConfig(body.remote === true) }),
     '/web/send': async body => {
       const message = body.message as BodyMessage | undefined
       if (typeof message?.t !== 'string') throw new ApiError('消息不对')

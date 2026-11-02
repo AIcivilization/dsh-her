@@ -5,6 +5,7 @@
  * floating window around it (web-float.ts, in DSH's page) is its "main process".
  */
 
+import { isRemotePage } from '../core/where.ts'
 import type { BodyMessage, BrainMessage } from '../protocol/index.ts'
 import type { BodyConfig, HerBridge, LinkStatus, MicMode } from '../../body/shared/types.ts'
 import type { WebConfig } from '../dsh/web-body.ts'
@@ -113,7 +114,7 @@ const notHere = { ok: false, message: '网页身体里还不能做这个' }
 
 window.her = {
   config: async (): Promise<BodyConfig> => {
-    const answer = await post<{ config: WebConfig }>('/web/config', {})
+    const answer = await post<{ config: WebConfig }>('/web/config', { remote: isRemotePage(location.protocol, location.hostname) })
     if (answer === undefined) throw new Error('读不到她的外形')
     host()?.frame(answer.config.frame)
     return answer.config

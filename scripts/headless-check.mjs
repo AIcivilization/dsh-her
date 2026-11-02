@@ -103,7 +103,15 @@ async function run(url, clips) {
     const state = (await herPost(page, '/state')).value.state
     if (state.body.connected) throw new Error('a desktop body is connected: this is not the check it should be')
     console.log(`desktop body exists here: ${state.body.desktopExists}; web: ${JSON.stringify(state.body.web)}`)
-    if (process.platform === 'linux' && state.body.desktopExists) throw new Error('Linux must not offer the desktop body')
+    if (process.platform === 'linux') {
+      if (state.body.desktopExists) throw new Error('Linux must not offer the desktop body')
+      await page.getByRole('button', { name: '她', exact: true }).first().click()
+      await page.getByRole('button', { name: '2. 身体' }).click()
+      await page.getByText('dsh 跑在 Linux 上').waitFor({ timeout: 30_000 })
+      if (await page.getByRole('button', { name: '直接下载安装' }).count() > 0) throw new Error('Linux must not offer to install a desktop program')
+      if (await page.getByRole('button', { name: '启动身体' }).count() > 0) throw new Error('Linux must not offer to start a desktop program')
+      console.log('the wizard says she lives in the page, and offers nothing to install')
+    }
 
     step('upload a folder and import it on the brain')
     const { batch } = (await herPost(page, '/web/new-batch')).value

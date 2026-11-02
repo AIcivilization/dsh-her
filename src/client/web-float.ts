@@ -10,6 +10,7 @@
  * renderer's own hit test (click mask, alpha) still decides when she takes it.
  */
 
+import { isRemotePage } from '../core/where.ts'
 import type { FloatHost } from './web-bridge.ts'
 
 const STATUS_EVERY_MS = 5000
@@ -235,7 +236,7 @@ export function mountWebFloat(): () => void {
   const sync = async () => {
     if (document.hidden) return
     try {
-      const res = await fetch('/api/dsh-her/web/status', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ screen: { w: screen.width, h: screen.height, scale: devicePixelRatio } }) })
+      const res = await fetch('/api/dsh-her/web/status', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ screen: { w: screen.width, h: screen.height, scale: devicePixelRatio }, remote: isRemotePage(location.protocol, location.hostname) }) })
       const value = await res.json() as { ok: boolean; show?: boolean }
       if (value.ok) shown = value.show === true
     } catch {

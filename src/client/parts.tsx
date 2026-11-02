@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react'
 import { serviceOf, SERVICE_NAMES, VOICES, type VoiceService } from '../core/voices.ts'
 import { choiceClass, choiceNote, SERVICE_SHORT, voiceLabel } from './choice.tsx'
-import { herApi, modelCatalog, playAudio, type ModelGroup, type Result, type StateView } from './api.ts'
+import { desktopHere, desktopOffered, herApi, modelCatalog, playAudio, remotePage, type ModelGroup, type Result, type StateView } from './api.ts'
 import { BodyManual } from './BodyManual.tsx'
 import { MingSection } from './MingVoice.tsx'
 import { insideFolder, uploadFiles, worthSending, type UploadProgress } from './upload.ts'
@@ -48,6 +48,19 @@ export function BodyStatus({ state, apply }: { state: StateView; apply: Apply })
     </div>
   )
   const failed = install.state === 'failed' && <p className="her-danger">下载安装没成功：{install.error}</p>
+  // Nothing to install for whoever is looking: she is in this page.
+  if (!desktopOffered(body)) {
+    return (
+      <div>
+        {body.web.connected
+          ? <p><Dot tone="ok" />她住在这个 dsh 网页里（右下角，能拖动）。不用安装任何东西，用手机或别的电脑打开这个网页，她也在。</p>
+          : body.web.mode === 'off'
+            ? <p><Dot tone="off" />你把她从网页里关了：在"放在哪里"可以打开。</p>
+            : <p><Dot tone="warn" />她正在进到这个网页里…</p>}
+        <p className="her-muted">{remotePage ? `dsh 跑在另一台电脑（${platformName(state.platform)}）上，你是从别的设备打开这个网页的，所以这里不需要桌面程序。` : `dsh 跑在 ${platformName(state.platform)} 上，这个系统没有桌面程序，她就住在网页里。`}</p>
+      </div>
+    )
+  }
   if (body.connected) {
     return (
       <div>
@@ -67,14 +80,13 @@ export function BodyStatus({ state, apply }: { state: StateView; apply: Apply })
   return (
     <div>
       {body.web.connected
-        ? <p><Dot tone="ok" />她现在住在这个网页里（右下角，能拖动）。{body.desktopExists ? '想让她到真正的桌面上，可以装桌面身体：' : ''}</p>
+        ? <p><Dot tone="ok" />她现在住在这个网页里（右下角，能拖动）。也可以装桌面程序，让她住在桌面上：</p>
         : <p><Dot tone={body.running ? 'warn' : 'bad'} />{body.running ? '身体在运行，正在连接…' : '身体还没运行'}</p>}
       {!body.running && (
         <div className="her-row">
-          {!body.desktopExists && <span className="her-muted">这台电脑没有桌面身体（只有 macOS Apple 芯片和 Windows 有），她住在 dsh 网页里。</span>}
-          {body.desktopExists && body.canStart
+          {body.canStart
             ? <button className="her-btn primary" onClick={() => void start()}>启动身体</button>
-            : body.desktopExists && <>
+            : <>
                 <button className="her-btn primary" disabled={busy} onClick={() => { setManual(false); void apply(herApi.installBody()) }}>直接下载安装</button>
                 <button className={`her-btn ${manual ? 'primary' : ''}`} onClick={() => setManual(!manual)}>用下载软件下载</button>
                 <span className="her-muted">她在桌面上的样子是一个单独的小程序（150–220 MB），装在 dsh-her 自己的文件夹里，装好就自动启动。直接下载慢的话，可以复制链接用下载软件下。</span>
@@ -90,6 +102,11 @@ export function BodyStatus({ state, apply }: { state: StateView; apply: Apply })
 }
 
 const mb = (bytes: number | undefined) => ((bytes ?? 0) / 1e6).toFixed(0)
+
+/** The name of the system dsh runs on. */
+export function platformName(platform: string): string {
+  return platform === 'darwin' ? 'macOS' : platform === 'win32' ? 'Windows' : platform === 'linux' ? 'Linux' : platform
+}
 
 export function PackPicker({ state, apply }: { state: StateView; apply: Apply }) {
   const body = state.body
@@ -107,10 +124,10 @@ export function PackPicker({ state, apply }: { state: StateView; apply: Apply })
         {body.packs.length === 0 && <p className="her-muted">还没有导入过外形包。</p>}
       </div>
       <div className="her-row">
-        {body.connected
+        {desktopHere(body)
           ? <button className="her-btn" disabled={imp.state === 'picking' || imp.state === 'running'} onClick={() => void apply(herApi.pickPack())}>导入我的素材…</button>
           : <UploadPack apply={apply} busy={imp.state === 'running'} />}
-        <span className="her-muted">{body.connected ? '会在身体那台电脑上弹出选择文件夹的窗口。' : '选一个素材文件夹，传上去就导入。'}素材怎么做、怎么命名，见 docs/素材生成提示词.md。</span>
+        <span className="her-muted">{desktopHere(body) ? '会在身体那台电脑上弹出选择文件夹的窗口。' : '选一个素材文件夹，传上去就导入。'}素材怎么做、怎么命名，见 docs/素材生成提示词.md。</span>
       </div>
       {imp.state === 'picking' && <p className="her-muted">请在桌面上弹出的窗口里选择素材文件夹…</p>}
       {imp.state === 'running' && (
@@ -409,7 +426,7 @@ export function ModelPicker({ state, apply }: { state: StateView; apply: Apply }
 }
 
 export function MicCheck({ state }: { state: StateView }) {
-  if (!state.body.connected && !window.isSecureContext) {
+  if (!desktopHere(state.body) && !window.isSecureContext) {
     return (
       <div>
         <p className="her-warn">浏览器只在 HTTPS 或 localhost 下才让网页用麦克风，所以这样打开时只能打字给她（双击她，或者右键菜单）。</p>
@@ -467,19 +484,22 @@ export function ModePicker({ state, apply }: { state: StateView; apply: Apply })
 }
 
 const WEB_MODES: Array<['auto' | 'on' | 'off', string, string]> = [
-  ['auto', '自动', '没有桌面身体时，住在 dsh 网页里'],
+  ['auto', '自动', '桌面程序没在运行时，住在 dsh 网页里'],
   ['on', '一直在网页里', '也显示在 dsh 网页里（有桌面身体时不出声）'],
   ['off', '不在网页里', '只用桌面身体'],
 ]
 
 /** Whether she also lives in DSH's own page (for a computer with no desktop, or no desktop body). */
 export function WebModePicker({ state, apply }: { state: StateView; apply: Apply }) {
-  const current = state.body.web.mode
+  // With no desktop body in reach, "auto" and "always" are the same thing.
+  const offered = desktopOffered(state.body)
+  const current = !offered && state.body.web.mode === 'on' ? 'auto' : state.body.web.mode
+  const modes = offered ? WEB_MODES : WEB_MODES.filter(([mode]) => mode !== 'on').map(([mode, title, desc]): typeof WEB_MODES[number] => (mode === 'auto' ? [mode, '住在网页里', '在 dsh 的每个页面上，能拖动'] : [mode, title, '这个网页里不显示她，打字和说话都用不了']))
   return (
     <div>
-      <label className="her-label">dsh 网页里的她（VPS 这种没有桌面的电脑，也能这样用）</label>
+      <label className="her-label">dsh 网页里的她</label>
       <div className="her-grid">
-        {WEB_MODES.map(([mode, title, desc]) => (
+        {modes.map(([mode, title, desc]) => (
           <button key={mode} className={choiceClass(mode, current)} onClick={() => void apply(herApi.webSet(mode))}>
             {title}<small>{choiceNote(mode, current, desc)}</small>
           </button>

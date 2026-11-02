@@ -6,8 +6,9 @@ import { createServer } from 'node:http'
 import { gzipSync } from 'node:zlib'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileResponse, frameFor, packFile, parseRange, WEB_BASE, WebBody } from '../src/dsh/web-body.ts'
+import { fileResponse, frameFor, packFile, parseRange, WEB_BASE, WebBody, webShows } from '../src/dsh/web-body.ts'
 import { saveUpload, uploadAllowed, uploadTarget } from '../src/dsh/uploads.ts'
+import { isRemotePage } from '../src/core/where.ts'
 import { desktopBodyExists } from '../src/dsh/body-install.ts'
 import { importPack } from '../src/pack/import.ts'
 import { downloadFfmpeg, ffmpegInOutput } from '../src/dsh/ffmpeg-fetch.ts'
@@ -214,3 +215,20 @@ test('the ffmpeg a login shell names is picked out of whatever its rc files prin
   assert.equal(ffmpegInOutput('ffmpeg not found\n'), undefined)
   assert.equal(ffmpegInOutput(''), undefined)
 })
+
+test('a page is remote unless it is on the computer running dsh', () => {
+  for (const host of ['localhost', 'LOCALHOST', 'her.localhost', '127.0.0.1', '127.1.2.3', '[::1]']) assert.equal(isRemotePage('http:', host), false, host)
+  for (const host of ['her.example.com', '203.0.113.7', '192.168.1.8', '127.0.0.1.example.com', 'localhost.example.com']) assert.equal(isRemotePage('https:', host), true, host)
+  // DSH's desktop app is not on http(s).
+  assert.equal(isRemotePage('dsh-desktop:', 'app'), false)
+  assert.equal(isRemotePage('file:', ''), false)
+})
+
+test('she is in every page opened from another device, and beside a desktop body only when asked', () => {
+  assert.equal(webShows('auto', false, false), true)
+  assert.equal(webShows('auto', true, false), false)
+  assert.equal(webShows('auto', true, true), true)
+  assert.equal(webShows('on', true, false), true)
+  assert.equal(webShows('off', false, true), false)
+})
+

@@ -2,6 +2,7 @@
 
 import type { StateView } from '../dsh/api.ts'
 import type { ManualInstall } from '../dsh/body-install.ts'
+import { isRemotePage } from '../core/where.ts'
 import type { LookProject, WorkshopCard } from '../core/workshop.ts'
 import type { ProjectStatus } from '../dsh/workshop.ts'
 
@@ -40,6 +41,13 @@ async function post<T>(path: string, body: Record<string, unknown> = {}): Promis
 }
 
 type WithState = { state: StateView }
+
+/** This page is open on another device than the one running dsh (core/where.ts). */
+export const remotePage = isRemotePage(location.protocol, location.hostname)
+/** A desktop body could be installed or started for whoever is looking at this page. */
+export const desktopOffered = (body: StateView['body']) => body.desktopExists && !remotePage
+/** A desktop body is connected, on the computer this page is open on: its windows are in front of the viewer. */
+export const desktopHere = (body: StateView['body']) => body.connected && !remotePage
 
 export const herApi = {
   state: () => post<WithState>('/state'),

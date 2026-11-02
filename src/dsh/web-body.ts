@@ -97,6 +97,14 @@ export function fileResponse(path: string, request: Request, forever = false): R
   return new Response(stream(0, size - 1), { headers: { ...headers, 'content-length': String(size) } })
 }
 
+/**
+ * Is she shown in a page? "auto": unless a desktop body is here for her. A page
+ * opened from another device always has her: that desktop is not in front of its viewer.
+ */
+export function webShows(mode: WebMode, desktopHere: boolean, remotePage: boolean): boolean {
+  return mode === 'on' || (mode === 'auto' && (remotePage || !desktopHere))
+}
+
 /** `&v=<date>` for a pack file's address, so a re-imported file is a new address. */
 function versionOf(path: string): string {
   try {
