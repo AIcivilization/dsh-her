@@ -88,7 +88,7 @@ async function herPost(page, path, body = {}) {
 async function run(url, clips) {
   const browser = await chromium.launch({ headless: true, ...(channel === undefined ? {} : { channel }) })
   try {
-    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+    const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, locale: 'zh-CN' })
     const failures = []
     page.on('pageerror', error => failures.push(error.message))
     const packResponses = []
@@ -105,6 +105,8 @@ async function run(url, clips) {
     console.log(`desktop body exists here: ${state.body.desktopExists}; web: ${JSON.stringify(state.body.web)}`)
     if (process.platform === 'linux') {
       if (state.body.desktopExists) throw new Error('Linux must not offer the desktop body')
+      // A new profile opens with DSH's own welcome.
+      await page.getByRole('button', { name: '继续' }).click({ timeout: 10_000 }).catch(() => {})
       await page.getByRole('button', { name: '她', exact: true }).first().click()
       await page.getByRole('button', { name: '2. 身体' }).click()
       await page.getByText('dsh 跑在 Linux 上').waitFor({ timeout: 30_000 })
