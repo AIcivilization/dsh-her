@@ -70,6 +70,8 @@ if (!csp.test(html)) throw new Error('body/renderer/index.html has no CSP to rep
 // The window is small here: her words go over the top of a scene, whatever its layout says.
 const WEB_STYLE = `<style>
     body.scene #bubble, body.region.scene #bubble { left: 4%; right: 4%; width: auto; top: 6px; bottom: auto; justify-content: center; }
+    /* As the page's background: clear of her face, up in a corner. */
+    body.wallpaper.scene #bubble { left: auto !important; right: 4%; width: min(34%, 420px); top: 56px; bottom: auto !important; justify-content: flex-end; }
   </style>
 </head>`
 writeFileSync('lib/web-body/index.html', html

@@ -53,7 +53,7 @@ export function BodyStatus({ state, apply }: { state: StateView; apply: Apply })
     return (
       <div>
         {body.web.connected
-          ? <p><Dot tone="ok" />她住在这个 dsh 网页里（右下角，能拖动）。不用安装任何东西，用手机或别的电脑打开这个网页，她也在。</p>
+          ? <p><Dot tone="ok" />她住在这个 dsh 网页里（{webWhere(body.web)}）。不用安装任何东西，用手机或别的电脑打开这个网页，她也在。</p>
           : body.web.mode === 'off'
             ? <p><Dot tone="off" />你把她从网页里关了：在"放在哪里"可以打开。</p>
             : <p><Dot tone="warn" />她正在进到这个网页里…</p>}
@@ -80,7 +80,7 @@ export function BodyStatus({ state, apply }: { state: StateView; apply: Apply })
   return (
     <div>
       {body.web.connected
-        ? <p><Dot tone="ok" />她现在住在这个网页里（右下角，能拖动）。也可以装桌面程序，让她住在桌面上：</p>
+        ? <p><Dot tone="ok" />她现在住在这个网页里（{webWhere(body.web)}）。也可以装桌面程序，让她住在桌面上：</p>
         : <p><Dot tone={body.running ? 'warn' : 'bad'} />{body.running ? '身体在运行，正在连接…' : '身体还没运行'}</p>}
       {!body.running && (
         <div className="her-row">
@@ -100,6 +100,8 @@ export function BodyStatus({ state, apply }: { state: StateView; apply: Apply })
     </div>
   )
 }
+
+const webWhere = (web: StateView['body']['web']) => (web.place === 'pet' ? '右下角，能拖动' : web.scope === 'page' ? '整个页面的背景' : '对话窗口的背景')
 
 const mb = (bytes: number | undefined) => ((bytes ?? 0) / 1e6).toFixed(0)
 
@@ -505,6 +507,48 @@ export function WebModePicker({ state, apply }: { state: StateView; apply: Apply
           </button>
         ))}
       </div>
+    </div>
+  )
+}
+
+/**
+ * How she shows in this page: a figure on it or the scene behind it, how much
+ * of the page, and a switch for now (kept per browser, so it can be turned off
+ * here at work and stay on at home).
+ */
+export function WebPlaceCard({ state, apply }: { state: StateView; apply: Apply }) {
+  const web = state.body.web
+  const [, redraw] = useState(0)
+  useEffect(() => {
+    const again = () => redraw(n => n + 1)
+    window.addEventListener('dsh-her:float', again)
+    return () => window.removeEventListener('dsh-her:float', again)
+  }, [])
+  const float = window.__herFloat
+  const choose = async (change: { place?: 'pet' | 'background'; scope?: 'page' | 'chat' }) => {
+    if (await apply(herApi.webPlace(change))) float?.refresh()
+  }
+  if (!web.show && !web.connected && !remotePage) return null
+  const hidden = float?.hidden() === true
+  return (
+    <div className="her-card">
+      <h2>她在网页里的样子</h2>
+      <div className="her-row">
+        <span>{hidden ? <><Dot tone="off" />暂时关掉了</> : <><Dot tone="ok" />正在显示</>}</span>
+        <button className="her-btn small" onClick={() => float?.setHidden(!hidden)}>{hidden ? '打开' : '暂时关掉'}</button>
+        <span className="her-muted">只影响这个浏览器。</span>
+      </div>
+      <div className="her-grid">
+        <button className={choiceClass('pet', web.place)} onClick={() => void choose({ place: 'pet' })}>桌宠<small>{choiceNote('pet', web.place, '浮在页面上，能拖动、点她')}</small></button>
+        <button className={choiceClass('background', web.place)} disabled={!web.canBackground} onClick={() => void choose({ place: 'background' })}>背景<small>{choiceNote('background', web.place, web.canBackground ? '场景铺在页面后面，文字浮在上面' : '这个形象还没有场景：到形象工坊加一个再导入')}</small></button>
+      </div>
+      {web.place === 'background' && (
+        <div className="her-grid">
+          <button className={choiceClass('page', web.scope)} onClick={() => void choose({ scope: 'page' })}>整个页面<small>{choiceNote('page', web.scope, '连左边的列表一起')}</small></button>
+          <button className={choiceClass('chat', web.scope)} onClick={() => void choose({ scope: 'chat' })}>只在对话窗口<small>{choiceNote('chat', web.scope, '左边的列表不变')}</small></button>
+        </div>
+      )}
+      {web.place === 'background' && <p className="her-muted">背景不能点：右下角的"她"按钮可以打字、说话或者暂时关掉。</p>}
     </div>
   )
 }

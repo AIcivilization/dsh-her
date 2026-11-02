@@ -67,6 +67,7 @@ export const herApi = {
   workshopFrameInfo: (id: string, scene: string) => post<{ width: number; height: number; file: string; region?: FrameRegion }>('/workshop/frame-info', { id, scene }),
   workshopFrameSave: (id: string, scene: string, region: FrameRegion) => post<{ status: ProjectStatus }>('/workshop/frame-save', { id, scene, region }),
   webSet: (mode: 'auto' | 'on' | 'off') => post<WithState>('/web/set', { mode }),
+  webPlace: (change: { place?: 'pet' | 'background'; scope?: 'page' | 'chat' }) => post<WithState>('/web/place', change),
   pluginLatest: () => post<{ latest: string; updateAvailable: boolean }>('/update/plugin-latest'),
   mingInstall: () => post<WithState>('/voice/ming/install'),
   mingUninstall: () => post<WithState>('/voice/ming/uninstall'),

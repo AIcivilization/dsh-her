@@ -716,7 +716,7 @@ export function apply(ctx: Context, config: HerConfig): void {
           // With no desktop body the brain itself knows her packs (docs/网页身体设计.md).
           packs: body === undefined ? webBody.packList() : bodyPacks,
           ...((body === undefined ? webBody.activeId() : activePack) === undefined ? {} : { activePack: body === undefined ? webBody.activeId()! : activePack! }),
-          web: { mode: webBody.mode, connected: webBody.connected, show: webShown() },
+          web: { mode: webBody.mode, connected: webBody.connected, show: webShown(), ...webBody.place() },
           ...(bodyMode === undefined ? {} : { mode: bodyMode }),
           ...(bodyLook === undefined ? {} : { look: bodyLook }),
           ...(body === undefined ? {} : { screens: body.hello.caps.screens.map(({ w, h, scale }) => ({ w, h, scale })) }),
@@ -810,7 +810,8 @@ export function apply(ctx: Context, config: HerConfig): void {
     },
     webStatus: (screen, remote) => {
       if (screen !== undefined) webScreen = screen
-      return { show: webShown(remote), mode: webBody.mode }
+      const { place, scope } = webBody.place()
+      return { show: webShown(remote), mode: webBody.mode, place, scope }
     },
     importBatch: async (batch, name) => {
       const dir = uploadTarget(uploadsDir, batch)
@@ -852,6 +853,10 @@ export function apply(ctx: Context, config: HerConfig): void {
     webSend: message => onBodyMessage(withCid(message), undefined),
     webSetMode: (mode: WebMode) => {
       webBody.mode = mode
+    },
+    webSetPlace: change => {
+      webBody.setPlace(change)
+      refreshBodyPack()
     },
     workshopList: () => listProjects(),
     workshopNew: name => {

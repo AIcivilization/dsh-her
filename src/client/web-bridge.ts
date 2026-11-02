@@ -25,12 +25,18 @@ export interface FloatHost {
   needsGesture(): void
   /** Another tab took her over. */
   replaced(): void
+  /** The "她" page: is she shown here, show or hide her, look at the brain's choices again. */
+  hidden(): boolean
+  setHidden(hidden: boolean): void
+  refresh(): void
 }
 
 /** What the floating window can ask of her. */
 export interface FloatGuest {
   talk(): void
   showInput(): void
+  /** Say something to her, from outside her window (it takes no clicks as a background). */
+  say(text: string): Promise<boolean>
   /** A user gesture in the page: let her sound start (browsers keep audio off until one). */
   unlockAudio(): void
   audioStates(): string[]
@@ -166,6 +172,7 @@ window.__herGuest = {
   showInput: () => {
     for (const listener of inputListeners) listener()
   },
+  say: text => window.her.say(text),
   unlockAudio: () => {
     for (const context of audioContexts) {
       if (context.state === 'suspended') void context.resume()

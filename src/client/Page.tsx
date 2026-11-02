@@ -12,7 +12,7 @@ import { UpdateBar } from './UpdateBar.tsx'
 import { Workshop } from './Workshop.tsx'
 import { Fold, useFolds } from './fold.tsx'
 import { SERVICE_SHORT, voiceLabel } from './choice.tsx'
-import { BodyStatus, Dot, KeyHelp, MemoryView, MicCheck, ModelPicker, MODE_TEXT, ModePicker, PackPicker, PersonaEditor, platformName, ScenePicker, VoicePicker, WebModePicker, type Apply } from './parts.tsx'
+import { BodyStatus, Dot, KeyHelp, MemoryView, MicCheck, ModelPicker, MODE_TEXT, ModePicker, PackPicker, PersonaEditor, platformName, ScenePicker, VoicePicker, WebModePicker, WebPlaceCard, type Apply } from './parts.tsx'
 
 const POLL_MS = 2000
 
@@ -107,7 +107,7 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
       {step === 1 && (
         <div className="her-card">
           <h2>她的身体</h2>
-          <p className="her-muted">{offered ? '她可以住在 dsh 网页里（什么都不用装），也可以装一个桌面程序，住到桌面上，选哪个都可以。' : '右下角那个就是她，在 dsh 的每个页面上都在。'}</p>
+          <p className="her-muted">{offered ? '她可以住在 dsh 网页里（什么都不用装），也可以装一个桌面程序，住到桌面上，选哪个都可以。' : '她在 dsh 的每个页面上都在。'}</p>
           <BodyStatus state={state} apply={apply} />
           {nav(ready, ready ? undefined : '也可以先跳过，之后在管理页再连')}
           {!ready && <div className="her-row"><button className="her-btn link" onClick={next}>先跳过</button></div>}
@@ -186,6 +186,7 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
             </div>
           )}
           <NowCard state={state} onChange={goSettings} />
+          <WebPlaceCard state={state} apply={apply} />
           <div className="her-card">
             <h2>身体</h2>
             <BodyStatus state={state} apply={apply} />
@@ -231,7 +232,7 @@ function NowCard({ state, onChange }: { state: StateView; onChange: (section: Se
       {row('人物', `${c.name}，叫你「${c.callYou || '（没设）'}」`, 'persona')}
       {row('形象', !here ? '身体没连上' : pack?.name ?? '还没有形象：到"形象工坊"做一个', 'look')}
       {body.look !== undefined && row('场景', onDesk ? '桌宠（浮在最上层时用）' : `${scene?.name ?? '—'}${body.look.locked ? '（锁定）' : body.look.auto && body.look.scenes.length > 1 ? '（自动换）' : ''}`, 'look')}
-      {row('放在哪里', desktopHere(body) ? (body.mode === undefined ? '—' : MODE_TEXT[body.mode]?.title ?? body.mode) : body.web.connected ? 'dsh 网页里' : '身体没连上', 'place')}
+      {row('放在哪里', desktopHere(body) ? (body.mode === undefined ? '—' : MODE_TEXT[body.mode]?.title ?? body.mode) : body.web.connected ? `dsh 网页里 · ${body.web.place === 'pet' ? '桌宠' : body.web.scope === 'page' ? '整个页面的背景' : '对话窗口的背景'}` : '身体没连上', 'place')}
       {row('声音', `${voiceLabel(state, c.voice.id)} · ${SERVICE_SHORT[serviceOf(c.voice.id)]}${c.voice.speed === 1 ? '' : ` · 语速 ${c.voice.speed}`}`, 'voice')}
       {row('模型', state.model === null ? '没有可用的模型' : `${state.model.provider} / ${state.model.model}`, 'model')}
     </div>

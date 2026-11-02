@@ -27,6 +27,16 @@ import { listPacks, loadSettings, saveSettings } from '../pack/settings.ts'
 import type { BodyConfig, PackInfo } from '../pack/types.ts'
 
 export type WebMode = 'auto' | 'on' | 'off'
+/** A figure floating on the page, or the scene behind the page. */
+export type WebPlace = 'pet' | 'background'
+/** How much of the page the background is behind: all of it, or the chat column. */
+export type WebScope = 'page' | 'chat'
+
+interface WebSettings {
+  mode?: WebMode
+  place?: WebPlace
+  scope?: WebScope
+}
 
 export const WEB_BASE = '/api/dsh-her/web'
 const KEEPALIVE_MS = 20_000
@@ -142,18 +152,50 @@ export class WebBody {
     return this.push !== undefined
   }
 
-  get mode(): WebMode {
+  private settings(): WebSettings {
     try {
-      const { mode } = JSON.parse(readFileSync(join(this.home, 'web-body.json'), 'utf8')) as { mode?: WebMode }
-      return mode === 'on' || mode === 'off' ? mode : 'auto'
+      return JSON.parse(readFileSync(join(this.home, 'web-body.json'), 'utf8')) as WebSettings
     } catch {
-      return 'auto'
+      return {}
     }
   }
 
-  set mode(mode: WebMode) {
+  private saveSettings(change: WebSettings): void {
     mkdirSync(this.home, { recursive: true })
-    writeFileSync(join(this.home, 'web-body.json'), `${JSON.stringify({ mode }, null, 2)}\n`)
+    writeFileSync(join(this.home, 'web-body.json'), `${JSON.stringify({ ...this.settings(), ...change }, null, 2)}\n`)
+  }
+
+  get mode(): WebMode {
+    const { mode } = this.settings()
+    return mode === 'on' || mode === 'off' ? mode : 'auto'
+  }
+
+  set mode(mode: WebMode) {
+    this.saveSettings({ mode })
+  }
+
+  /** The scene of what she wears now, when it has one: a background needs a scene, not a figure on a green screen. */
+  private scenePack(): string | undefined {
+    const { look, packId } = this.chosen()
+    if (look !== undefined) {
+      const scenes = look.scenes.filter(s => s.pack !== look.desk)
+      const chosen = loadSettings(this.home).looks?.[look.id]?.scene
+      return (scenes.find(s => s.id === chosen) ?? scenes.find(s => s.id === look.default) ?? scenes[0])?.pack
+    }
+    return packId !== undefined && listPacks(this.packsDir).find(p => p.packId === packId)?.layer === 'scene' ? packId : undefined
+  }
+
+  /** Where she is in the page: what was chosen, as far as what she wears allows. */
+  place(): { place: WebPlace; scope: WebScope; canBackground: boolean } {
+    const { place, scope } = this.settings()
+    const canBackground = this.scenePack() !== undefined
+    return { place: place === 'background' && canBackground ? 'background' : 'pet', scope: scope === 'chat' ? 'chat' : 'page', canBackground }
+  }
+
+  /** Choose where she is in the page, and have the page load what that shows. */
+  setPlace(change: { place?: WebPlace; scope?: WebScope }): void {
+    this.saveSettings(change)
+    this.reload()
   }
 
   /** The chosen look (or pack), else the first there is. */
@@ -177,6 +219,7 @@ export class WebBody {
   /** The pack on screen: in a floating window a look shows its desk pet, or else the scene she is in. */
   private shownId(): string | undefined {
     const { look, packId } = this.chosen()
+    if (this.place().place === 'background') return this.scenePack()
     if (look === undefined) return packId
     if (look.desk !== undefined) return look.desk
     const scene = loadSettings(this.home).looks?.[look.id]?.scene
@@ -235,7 +278,8 @@ export class WebBody {
   config(mute: boolean): WebConfig {
     const pack = this.shown()
     const { her, frame } = frameFor(pack)
-    return { mode: pack.layer === 'scene' ? 'window' : 'overlay', platform: 'web', pack, her, frame, debug: false, mute }
+    const mode = this.place().place === 'background' ? 'wallpaper' : pack.layer === 'scene' ? 'window' : 'overlay'
+    return { mode, platform: 'web', pack, her, frame, debug: false, mute }
   }
 
   /** A file of a pack, for `<video>` and friends. */

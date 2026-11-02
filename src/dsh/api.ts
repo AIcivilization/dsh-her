@@ -10,7 +10,7 @@
 
 import type { Character } from '../core/index.ts'
 import type { BodyMessage, LookView, PackSummary, WindowMode } from '../protocol/index.ts'
-import type { WebConfig, WebMode } from './web-body.ts'
+import type { WebConfig, WebMode, WebPlace, WebScope } from './web-body.ts'
 import type { Fact, Episode } from '../memory/store.ts'
 import type { ReportLine } from './import-status.ts'
 import type { LookProject, WorkshopCard } from '../core/workshop.ts'
@@ -54,7 +54,7 @@ export interface StateView {
     /** The look on screen, with its scenes (when a look rather than a single pack is chosen). */
     look?: LookView
     /** The web body: she in DSH's own page (no desktop needed). */
-    web: { mode: WebMode; connected: boolean; show: boolean }
+    web: { mode: WebMode; connected: boolean; show: boolean; place: WebPlace; scope: WebScope; canBackground: boolean }
     /** The body's screens (logical size, scale), for advice on sizes. */
     screens?: Array<{ w: number; h: number; scale: number }>
   }
@@ -79,7 +79,7 @@ export interface ApiRuntime {
   bodyOpenFolder(): void
   /** The web body: whether to show, her config, a message from the page, the setting. */
   /** `remote`: the page is open on another device than the one running dsh. */
-  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; mode: WebMode }
+  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; mode: WebMode; place: WebPlace; scope: WebScope }
   /** A new folder for files coming from the browser, and importing it as a pack (with no desktop body). */
   webNewBatch(): string
   importBatch(batch: string, name?: string): Promise<void>
@@ -88,6 +88,7 @@ export interface ApiRuntime {
   workshopFrameSave(id: string, sceneId: string, region: { x: number; y: number; width: number; height: number }): Promise<ProjectStatus>
   webConfig(remote: boolean): WebConfig
   webSend(message: BodyMessage): void
+  webSetPlace(change: { place?: WebPlace; scope?: WebScope }): void
   webSetMode(mode: WebMode): void
   /** The newest plugin on npm, for hosts without dshmarket (which otherwise answers this). */
   pluginLatest(): Promise<{ latest: string; updateAvailable: boolean }>
@@ -213,6 +214,14 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
       if (typeof message?.t !== 'string') throw new ApiError('消息不对')
       rt.webSend(message)
       return {}
+    },
+    '/web/place': async body => {
+      const place = body.place
+      const scope = body.scope
+      if (place !== undefined && place !== 'pet' && place !== 'background') throw new ApiError('放置方式不对')
+      if (scope !== undefined && scope !== 'page' && scope !== 'chat') throw new ApiError('背景范围不对')
+      rt.webSetPlace({ ...(place === undefined ? {} : { place }), ...(scope === undefined ? {} : { scope }) })
+      return withState()
     },
     '/web/set': async body => {
       const mode = str(body.mode, '显示方式')

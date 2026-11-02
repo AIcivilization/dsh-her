@@ -232,3 +232,37 @@ test('she is in every page opened from another device, and beside a desktop body
   assert.equal(webShows('off', false, true), false)
 })
 
+test('a background needs a scene, and the choice survives the other settings', () => {
+  const home = mkdtempSync(join(tmpdir(), 'her-place-'))
+  try {
+    const pack = (id: string, layer: string) => {
+      mkdirSync(join(home, 'packs', id), { recursive: true })
+      writeFileSync(join(home, 'packs', id, 'pack.json'), JSON.stringify({ format: 'dsh-her-pack@1', id, name: id, version: '1', kind: 'video', layer, canvas: { width: 720, height: 1280 }, background: 'chroma:#00B140', anchors: { stand: {} }, start: 'stand', clips: [], macros: [] }))
+    }
+    pack('p-desk', 'overlay')
+    pack('p-beach', 'scene')
+    const look = (scenes: Array<{ id: string; name: string; pack: string }>) => {
+      mkdirSync(join(home, 'looks', 'p'), { recursive: true })
+      writeFileSync(join(home, 'looks', 'p', 'look.json'), JSON.stringify({ format: 'dsh-her-look@1', id: 'p', name: 'p', desk: 'p-desk', scenes, default: scenes[0]!.id }))
+    }
+    const web = new WebBody(home)
+
+    // Only a desk pet: the background is not on offer, and asking for it changes nothing.
+    look([{ id: 'desk', name: '桌宠', pack: 'p-desk' }])
+    web.setPlace({ place: 'background' })
+    assert.deepEqual(web.place(), { place: 'pet', scope: 'page', canBackground: false })
+
+    // With a scene it is, the mode stays what it was, and the scope is remembered.
+    look([{ id: 'beach', name: '海边', pack: 'p-beach' }])
+    web.mode = 'on'
+    web.setPlace({ scope: 'chat' })
+    assert.deepEqual(web.place(), { place: 'background', scope: 'chat', canBackground: true })
+    assert.equal(web.mode, 'on')
+    web.setPlace({ place: 'pet' })
+    assert.equal(web.place().place, 'pet')
+    assert.equal(web.place().scope, 'chat')
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
