@@ -105,10 +105,11 @@ async function run(url, clips) {
     console.log(`desktop body exists here: ${state.body.desktopExists}; web: ${JSON.stringify(state.body.web)}`)
     if (process.platform === 'linux') {
       if (state.body.desktopExists) throw new Error('Linux must not offer the desktop body')
-      // A new profile opens with DSH's own welcome.
-      await page.getByRole('button', { name: '继续' }).click({ timeout: 10_000 }).catch(() => {})
-      await page.getByRole('button', { name: '她', exact: true }).first().click()
-      await page.getByRole('button', { name: '2. 身体' }).click()
+      // A new computer opens with DSH's own dialogs (its welcome, setting up a model): not what is checked here, so clicks go straight to the page.
+      const dialogs = await page.locator('[role="presentation"], [role="dialog"]').allInnerTexts()
+      console.log(`dialogs over the page: ${JSON.stringify(dialogs.map(text => text.replace(/\n+/g, ' ').slice(0, 60)))}`)
+      await page.getByRole('button', { name: '她', exact: true }).first().dispatchEvent('click')
+      await page.getByRole('button', { name: '2. 身体' }).dispatchEvent('click')
       await page.getByText('dsh 跑在 Linux 上').waitFor({ timeout: 30_000 })
       if (await page.getByRole('button', { name: '直接下载安装' }).count() > 0) throw new Error('Linux must not offer to install a desktop program')
       if (await page.getByRole('button', { name: '启动身体' }).count() > 0) throw new Error('Linux must not offer to start a desktop program')
