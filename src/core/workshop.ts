@@ -277,6 +277,9 @@ export function avatarPrompt(project: LookProject): string {
   ].join('。') + '。'
 }
 
+/** Her small picture moving: from that picture as the first frame, with the hands still, so the edge on the chat box does not jump. */
+export const AVATAR_CLIP_PROMPT = '以首帧图片为准，同一个人，脸、发型、衣服、桌子和背景全程完全不变。固定机位，不推拉摇移，不切镜。她坐在桌后，自然呼吸，偶尔眨眼，头轻轻晃动，浅浅地微笑，嘴巴闭合。双手始终放在桌沿上一动不动，手指位置不变。结束时回到和首帧一样的姿势。没有文字、水印、背景音乐。'
+
 /** A scene's full-screen photo, made with the reference picture so she stays the same person. */
 export function scenePhotoPrompt(project: LookProject, scene: ProjectScene, screen?: { width: number; height: number }): string {
   const size = screen === undefined ? '横版 16:10，2560 宽以上' : `横版，和屏幕一样的比例，${screen.width}×${screen.height}`

@@ -33,6 +33,8 @@ async function post<T>(path: string, body: Record<string, unknown> = {}): Promis
       body: JSON.stringify(body),
     })
     const value = await res.json().catch(() => null) as Result<T> | null
+    // This page is newer than the plugin running behind it: an update waits for a restart.
+    if (res.status === 404) return { ok: false, message: '这个功能要重启 dsh 才能用：插件更新过，dsh 还在运行旧版本。请完全退出 dsh，再重新打开。' }
     if (value === null) return { ok: false, message: `HTTP ${res.status}` }
     return value
   } catch (error) {
@@ -62,6 +64,7 @@ export const herApi = {
   bodyOpenFolder: () => post<Record<string, never>>('/body/open-folder'),
   webNewBatch: () => post<{ batch: string }>('/web/new-batch'),
   webImportBatch: (batch: string, name?: string) => post<WithState>('/web/import-batch', { batch, ...(name === undefined ? {} : { name }) }),
+  workshopAvatarClip: (id: string) => post<{ status: ProjectStatus }>('/workshop/avatar-clip', { id }),
   workshopAvatar: (id: string) => post<{ status: ProjectStatus }>('/workshop/avatar', { id }),
   workshopAssignClip: (id: string, folder: string, file: string, clip: string) => post<{ project: LookProject; status: ProjectStatus }>('/workshop/assign-clip', { id, folder, file, clip }),
   workshopRemoveStray: (id: string, folder: string, file: string) => post<{ status: ProjectStatus }>('/workshop/remove-stray', { id, folder, file }),

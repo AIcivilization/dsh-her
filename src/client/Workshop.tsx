@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import {
-  avatarPrompt, CARD_CHOICES, CARD_LABELS, clipPrompt, customClip, describe, DESK_DIR, GENERATORS, generatorInfo, MANUAL_LABEL, newScene, POSE_WORDS, referencePrompt, sceneDir, scenePhotoPrompt,
+  AVATAR_CLIP_PROMPT, avatarPrompt, CARD_CHOICES, CARD_LABELS, clipPrompt, customClip, describe, DESK_DIR, GENERATORS, generatorInfo, MANUAL_LABEL, newScene, POSE_WORDS, referencePrompt, sceneDir, scenePhotoPrompt,
   type CharacterCard, type ClipPlan, type Generator, type LookProject, type Pose, type ProjectScene, type WorkshopCard,
 } from '../core/workshop.ts'
 import type { ProjectStatus } from '../dsh/workshop.ts'
@@ -94,6 +94,11 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
   }
   const makeAvatar = async () => {
     report(await herApi.workshopAvatar(draft!.id), '头像处理好了')
+    await reload()
+  }
+  const makeAvatarClip = async () => {
+    setNote({ kind: 'ok', text: '正在处理头像视频，大约半分钟…' })
+    report(await herApi.workshopAvatarClip(draft!.id), '会动的头像处理好了')
     await reload()
   }
   const frameWhole = async (scene: ProjectScene) => {
@@ -252,13 +257,19 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
             </div>
           </>)}
 
-          {fold('avatar', '头像（可选）', status.avatar ? '✓ 已有' : status.avatarSource ? '上传了，还没处理' : '还没有', status.avatar, <>
+          {fold('avatar', '头像（可选）', status.avatarClip ? '✓ 已有，会动' : status.avatar ? '✓ 已有' : status.avatarSource ? '上传了，还没处理' : '还没有', status.avatar, <>
             <p>她扒在 dsh 对话框上的小图，点它可以和她说话。没有头像时显示一个"她"字。</p>
             <p className="her-muted">用文生图工具，把她的头像放进"参考图 / 保持人物一致"，粘贴下面的提示词。参考图穿得少可能被拒绝，裁到只剩头再传。生成好不用改图，绿幕和桌子会自动去掉。</p>
             <PromptBox text={avatarPrompt(draft)} />
             <div className="her-row">
               <ProjectUpload projectId={draft.id} named="头像原图" accept="image/png,image/jpeg,image/webp" label={status.avatarSource ? '换一张…' : '上传头像图…'} onDone={() => void makeAvatar()} />
               {status.avatar && <img src={projectFileUrl(draft.id, '头像.png')} alt="头像" style={{ height: 72, background: 'rgba(127,127,127,.25)', borderRadius: 8 }} />}
+            </div>
+            <p className="her-muted">想让她动起来：用这张头像图（绿幕、带桌子的原图）当首帧，生成一段 5–10 秒的视频。手不要动，否则和对话框的接缝会跳。上传后自动做成循环。</p>
+            <PromptBox text={AVATAR_CLIP_PROMPT} />
+            <div className="her-row">
+              <ProjectUpload projectId={draft.id} named="头像原视频" accept="video/*,.mp4,.webm,.mov" label={status.avatarClip ? '换一段视频…' : '上传头像视频…'} onDone={() => void makeAvatarClip()} />
+              {status.avatarClip && <span className="her-ok">✓ 已有会动的头像</span>}
             </div>
           </>)}
 

@@ -8,19 +8,32 @@
  * `头像原图.*` (what was uploaded) becomes `头像.png` and `头像.json` in the
  * project: how much of the picture's bottom hangs below the table's edge, for
  * placing it over the chat box.
+ *
+ * `头像原视频.*` is the same picture moving: each frame gets the same treatment,
+ * it plays forward then backward so it loops, and `头像.mp4` holds colour over
+ * mask, as her other clips do, because no format with transparency plays
+ * everywhere (body/renderer/stacked.ts draws it).
  */
 
 import { execFile, spawn } from 'node:child_process'
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { Transform } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { promisify } from 'node:util'
-import { ffmpegCommand, stillSize } from './media.ts'
+import { ffmpegCommand, frame, stillSize } from './media.ts'
 
 export const AVATAR_SOURCES = ['头像原图.png', '头像原图.jpg', '头像原图.jpeg', '头像原图.webp']
 export const AVATAR_FILE = '头像.png'
 export const AVATAR_INFO = '头像.json'
+export const AVATAR_CLIP_SOURCES = ['头像原视频.mp4', '头像原视频.mov', '头像原视频.webm', '头像原视频.m4v']
+export const AVATAR_CLIP = '头像.mp4'
 
 const AVATAR_SIZE = 256
+/** Keyed at this size, shown at about a third of it; fine for her edges, and small enough for a small server. */
+const CLIP_WORK_SIZE = 384
+const CLIP_FPS = 20
+const CLIP_MOST_SECONDS = 10
 /** A table is a strip along the bottom, not a light background. */
 const MOST_TABLE = 0.2
 /** Rows at the table's edge that are a blend of screen and table. */
@@ -97,6 +110,63 @@ export async function makeAvatar(dir: string): Promise<{ overhang: number }> {
     encode.stdin.end(stdout)
   })
   const overhang = (height - line) / height
-  writeFileSync(join(dir, AVATAR_INFO), `${JSON.stringify({ overhang }, null, 2)}\n`)
+  saveInfo(dir, { overhang })
+  return { overhang }
+}
+
+function saveInfo(dir: string, change: { overhang?: number; clipOverhang?: number }): void {
+  let info = {}
+  try {
+    info = JSON.parse(readFileSync(join(dir, AVATAR_INFO), 'utf8')) as object
+  } catch {
+    // the first one
+  }
+  writeFileSync(join(dir, AVATAR_INFO), `${JSON.stringify({ ...info, ...change }, null, 2)}\n`)
+}
+
+/** Make the moving picture from what was uploaded. Needs ffmpeg in use (ensureFfmpeg). */
+export async function makeAvatarClip(dir: string): Promise<{ overhang: number }> {
+  const source = AVATAR_CLIP_SOURCES.find(file => existsSync(join(dir, file)))
+  if (source === undefined) throw new Error('还没有上传头像视频')
+  const path = join(dir, source)
+  // Without a picture, its first frame is one: what shows where a clip cannot play.
+  if (!AVATAR_SOURCES.some(file => existsSync(join(dir, file)))) {
+    await frame(path, 'first', join(dir, AVATAR_SOURCES[0]!))
+    await makeAvatar(dir)
+  }
+  const size = CLIP_WORK_SIZE
+  const frameBytes = size * size * 4
+  const decode = spawn(ffmpegCommand(), ['-v', 'error', '-t', String(CLIP_MOST_SECONDS), '-i', path, '-filter_complex',
+    `[0]fps=${CLIP_FPS},scale=${size}:${size}:flags=lanczos,split[a][b];[b]reverse,trim=start_frame=1,setpts=PTS-STARTPTS[r];[a][r]concat=n=2:v=1,format=rgba`,
+    '-r', String(CLIP_FPS), '-f', 'rawvideo', '-pix_fmt', 'rgba', '-'], { stdio: ['ignore', 'pipe', 'pipe'] })
+  const encode = spawn(ffmpegCommand(), ['-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', `${size}x${size}`, '-r', String(CLIP_FPS), '-i', '-', '-filter_complex',
+    `[0]scale=${AVATAR_SIZE}:${AVATAR_SIZE}:flags=lanczos,format=rgba,split[c][a];[a]alphaextract,format=yuv420p[m];[c]format=yuv420p[rgb];[rgb][m]vstack,format=yuv420p`,
+    '-an', '-c:v', 'libx264', '-preset', 'medium', '-crf', '22', '-movflags', '+faststart', join(dir, AVATAR_CLIP)], { stdio: ['pipe', 'ignore', 'pipe'] })
+  let errors = ''
+  for (const process of [decode, encode]) process.stderr.on('data', chunk => { errors += chunk })
+  const finished = (process: typeof decode | typeof encode) => new Promise<number | null>(done => process.on('close', done))
+  let line: number | undefined
+  let held: Buffer = Buffer.alloc(0)
+  const key = new Transform({
+    transform(chunk: Buffer, _encoding, done) {
+      held = held.length === 0 ? chunk : Buffer.concat([held, chunk])
+      let at = 0
+      while (held.length - at >= frameBytes) {
+        const picture = Buffer.from(held.subarray(at, at + frameBytes))
+        line ??= tableLine(picture, size, size)
+        keyAvatar(picture, size, size, line)
+        this.push(picture)
+        at += frameBytes
+      }
+      held = held.subarray(at)
+      done()
+    },
+  })
+  const closed = Promise.all([finished(decode), finished(encode)])
+  await pipeline(decode.stdout, key, encode.stdin).catch(() => {})
+  const [decoded, encoded] = await closed
+  if (decoded !== 0 || encoded !== 0 || line === undefined) throw new Error(`处理头像视频没成功：${errors.trim().slice(-200) || '视频读不出来'}`)
+  const overhang = (size - line) / size
+  saveInfo(dir, { clipOverhang: overhang })
   return { overhang }
 }

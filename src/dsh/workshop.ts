@@ -28,7 +28,7 @@ import {
   type ClipPlan, type Generator, type LookProject, type WorkshopCard,
 } from '../core/workshop.ts'
 
-import { AVATAR_FILE, AVATAR_INFO, AVATAR_SOURCES } from '../pack/avatar.ts'
+import { AVATAR_CLIP, AVATAR_FILE, AVATAR_INFO, AVATAR_SOURCES } from '../pack/avatar.ts'
 
 export const MATERIALS_DIR = join(homedir(), 'Documents', 'dsh-her 素材')
 
@@ -56,6 +56,8 @@ export interface ProjectStatus {
   /** Her small picture for the chat box: uploaded, and made from that. */
   avatarSource: boolean
   avatar: boolean
+  /** Her small picture moving (optional on top of the picture). */
+  avatarClip: boolean
   parts: PartStatus[]
   /** Something can be imported: at least one part has its minimum (and a scene its frame). */
   importable: boolean
@@ -125,7 +127,7 @@ export function projectStatus(project: LookProject, dir: string): ProjectStatus 
     parts.push({ name: scene.name, folder, ...count(folder, scene.clips), photo, framed })
   }
   const reference = has(dir, REFERENCE_FILE)
-  return { dir, reference, avatarSource: AVATAR_SOURCES.some(file => has(dir, file)), avatar: has(dir, AVATAR_FILE), parts, importable: parts.some(p => p.enough && p.framed !== false && (p.folder !== DESK_DIR || reference || has(join(dir, DESK_DIR), 'anchor_stand.png'))) }
+  return { dir, reference, avatarSource: AVATAR_SOURCES.some(file => has(dir, file)), avatar: has(dir, AVATAR_FILE), avatarClip: has(dir, AVATAR_CLIP), parts, importable: parts.some(p => p.enough && p.framed !== false && (p.folder !== DESK_DIR || reference || has(join(dir, DESK_DIR), 'anchor_stand.png'))) }
 }
 
 /**
@@ -219,17 +221,18 @@ export function removeStray(id: string, folder: string, file: string, root = MAT
 }
 
 /** Her small picture for a look, when its project has one. */
-export function avatarOf(lookId: string, root = MATERIALS_DIR): { path: string; overhang: number } | undefined {
+export function avatarOf(lookId: string, root = MATERIALS_DIR): { path: string; overhang: number; clip?: string } | undefined {
   const found = findProject(lookId, root)
   if (found === undefined || !has(found.dir, AVATAR_FILE)) return undefined
-  let overhang = 0
+  const fit = (value: unknown) => (typeof value === 'number' && value >= 0 && value < 0.5 ? value : 0)
+  let info: { overhang?: unknown; clipOverhang?: unknown } = {}
   try {
-    const value = (JSON.parse(readFileSync(join(found.dir, AVATAR_INFO), 'utf8')) as { overhang?: unknown }).overhang
-    if (typeof value === 'number' && value >= 0 && value < 0.5) overhang = value
+    info = JSON.parse(readFileSync(join(found.dir, AVATAR_INFO), 'utf8')) as typeof info
   } catch {
     // no table was cut: it stands on the edge
   }
-  return { path: join(found.dir, AVATAR_FILE), overhang }
+  const clip = has(found.dir, AVATAR_CLIP)
+  return { path: join(found.dir, AVATAR_FILE), overhang: fit(clip ? info.clipOverhang : info.overhang), ...(clip ? { clip: join(found.dir, AVATAR_CLIP) } : {}) }
 }
 
 /** Before importing: the desk pet's anchor is the reference picture. */

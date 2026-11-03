@@ -11,6 +11,14 @@
 import type { Character } from '../core/index.ts'
 import type { BodyMessage, LookView, PackSummary, WindowMode } from '../protocol/index.ts'
 import type { WebConfig, WebMode, WebPlace, WebScope } from './web-body.ts'
+
+/** Her small picture in the page, and its moving version when she has one. */
+export interface AvatarView {
+  url: string
+  clipUrl?: string
+  /** How much of its bottom hangs below the table's edge. */
+  overhang: number
+}
 import type { Fact, Episode } from '../memory/store.ts'
 import type { ReportLine } from './import-status.ts'
 import type { LookProject, WorkshopCard } from '../core/workshop.ts'
@@ -54,7 +62,7 @@ export interface StateView {
     /** The look on screen, with its scenes (when a look rather than a single pack is chosen). */
     look?: LookView
     /** The web body: she in DSH's own page (no desktop needed). */
-    web: { mode: WebMode; connected: boolean; show: boolean; place: WebPlace; scope: WebScope; canBackground: boolean; avatar?: { url: string; overhang: number } }
+    web: { mode: WebMode; connected: boolean; show: boolean; place: WebPlace; scope: WebScope; canBackground: boolean; avatar?: AvatarView }
     /** The body's screens (logical size, scale), for advice on sizes. */
     screens?: Array<{ w: number; h: number; scale: number }>
   }
@@ -79,7 +87,7 @@ export interface ApiRuntime {
   bodyOpenFolder(): void
   /** The web body: whether to show, her config, a message from the page, the setting. */
   /** `remote`: the page is open on another device than the one running dsh. */
-  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; mode: WebMode; place: WebPlace; scope: WebScope; avatar?: { url: string; overhang: number } }
+  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; mode: WebMode; place: WebPlace; scope: WebScope; avatar?: AvatarView }
   /** A new folder for files coming from the browser, and importing it as a pack (with no desktop body). */
   webNewBatch(): string
   importBatch(batch: string, name?: string): Promise<void>
@@ -126,6 +134,8 @@ export interface ApiRuntime {
   workshopFrame(id: string, sceneId: string): void
   /** Make her small picture from the uploaded one. */
   workshopAvatar(id: string): Promise<ProjectStatus>
+  /** The same, moving, from the uploaded clip. */
+  workshopAvatarClip(id: string): Promise<ProjectStatus>
   /** A video in a part's folder is this clip; or it is not wanted. */
   workshopAssignClip(id: string, folder: string, file: string, clip: string): { project: LookProject; status: ProjectStatus }
   workshopRemoveStray(id: string, folder: string, file: string): ProjectStatus
@@ -339,6 +349,7 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
       return {}
     },
     '/workshop/avatar': async body => ({ status: await rt.workshopAvatar(str(body.id, '项目')) }),
+    '/workshop/avatar-clip': async body => ({ status: await rt.workshopAvatarClip(str(body.id, '项目')) }),
     '/workshop/assign-clip': async body => rt.workshopAssignClip(str(body.id, '项目'), str(body.folder, '部分'), str(body.file, '文件'), str(body.clip, '片段')),
     '/workshop/remove-stray': async body => ({ status: rt.workshopRemoveStray(str(body.id, '项目'), str(body.folder, '部分'), str(body.file, '文件')) }),
     '/workshop/import': async body => {

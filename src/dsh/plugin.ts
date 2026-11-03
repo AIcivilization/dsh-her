@@ -41,7 +41,7 @@ import { digestPrompt, notePrompt, parseDigest, transcriptOf } from '../memory/d
 import { dayOf, FileMemory } from '../memory/store.ts'
 import { PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type LookView, type PackSummary, type WindowMode } from '../protocol/index.ts'
 import { BrainServer } from '../server/brain-server.ts'
-import { API_BASE, apiHandlers, handle, type ApiRuntime } from './api.ts'
+import { type AvatarView, API_BASE, apiHandlers, handle, type ApiRuntime } from './api.ts'
 import { bodyRunning, findDevBody, launchBody, type LaunchPlan } from './body-launcher.ts'
 import { compareVersions, desktopBodyExists, downloadFolder, install, installDownloaded, installedBody, installedPlan, latestRelease, manualInstall, type InstallState, type ManualInstall } from './body-install.ts'
 import { IDLE_IMPORT, type ImportStatus, type ReportLine } from './import-status.ts'
@@ -55,7 +55,7 @@ import { saveUpload, uploadAllowed, uploadTarget } from './uploads.ts'
 import { importLook, type LookRequest } from '../pack/import-look.ts'
 import { importPack } from '../pack/import.ts'
 import { plateIn, saveFrame } from '../pack/frame.ts'
-import { makeAvatar } from '../pack/avatar.ts'
+import { makeAvatar, makeAvatarClip } from '../pack/avatar.ts'
 import { ffmpegCommand, stillSize } from '../pack/media.ts'
 import { ensureFfmpeg, findFfmpeg } from './ffmpeg-fetch.ts'
 import { Voice } from '../voice/voice.ts'
@@ -664,10 +664,16 @@ export function apply(ctx: Context, config: HerConfig): void {
    * ffmpeg). Progress and the report show the same way as from a body.
    */
   /** Her small picture for the look she wears, with an address that changes when the picture does. */
-  const webAvatar = (): { url: string; overhang: number } | undefined => {
+  const webAvatar = (): AvatarView | undefined => {
     const active = webBody.activeId()
     const avatar = active?.startsWith('look:') === true ? avatarOf(active.slice('look:'.length)) : undefined
-    return avatar === undefined ? undefined : { url: `/api/dsh-her/web/avatar?v=${Math.floor(statSync(avatar.path).mtimeMs).toString(36)}`, overhang: avatar.overhang }
+    if (avatar === undefined) return undefined
+    const version = (path: string) => Math.floor(statSync(path).mtimeMs).toString(36)
+    return {
+      url: `/api/dsh-her/web/avatar?v=${version(avatar.path)}`,
+      overhang: avatar.overhang,
+      ...(avatar.clip === undefined ? {} : { clipUrl: `/api/dsh-her/web/avatar?clip=1&v=${version(avatar.clip)}` }),
+    }
   }
   /** A full path only: a bare name means it is on the PATH the body has too. */
   const ffmpegForBody = () => (ffmpegCommand() === 'ffmpeg' ? {} : { ffmpeg: ffmpegCommand() })
@@ -877,6 +883,13 @@ export function apply(ctx: Context, config: HerConfig): void {
       if (found === undefined) throw new Error('找不到这个项目')
       await ensureFfmpeg(paths.root, () => {})
       await makeAvatar(found.dir)
+      return projectStatus(found.project, found.dir)
+    },
+    workshopAvatarClip: async id => {
+      const found = findProject(id)
+      if (found === undefined) throw new Error('找不到这个项目')
+      await ensureFfmpeg(paths.root, () => {})
+      await makeAvatarClip(found.dir)
       return projectStatus(found.project, found.dir)
     },
     workshopAssignClip: (id, folder, file, clip) => assignClip(id, folder, file, clip, mainScreen()),
@@ -1198,7 +1211,8 @@ export function apply(ctx: Context, config: HerConfig): void {
     get('avatar', request => {
       const active = webBody.activeId()
       const avatar = active?.startsWith('look:') === true ? avatarOf(active.slice('look:'.length)) : undefined
-      return avatar === undefined ? new Response('not found', { status: 404 }) : fileResponse(avatar.path, request, true)
+      const path = new URL(request.url).searchParams.has('clip') ? avatar?.clip : avatar?.path
+      return path === undefined ? new Response('not found', { status: 404 }) : fileResponse(path, request, true)
     })
     get('events', request => webBody.connect(request.signal, () => {
       webBody.send({ t: 'welcome', v: PROTOCOL_VERSION, sessionId: session?.sessionId ?? '', characters: [{ cid, name: character.name, mode: 'overlay' }], config: { mic: config.voice.mic, bargeIn: true } })

@@ -9,7 +9,9 @@ import { join } from 'node:path'
 import { fileResponse, frameFor, packFile, parseRange, WEB_BASE, WebBody, webShows } from '../src/dsh/web-body.ts'
 import { saveUpload, uploadAllowed, uploadTarget } from '../src/dsh/uploads.ts'
 import { isRemotePage } from '../src/core/where.ts'
-import { hasGreenScreen, keyAvatar, tableLine } from '../src/pack/avatar.ts'
+import { AVATAR_CLIP, hasGreenScreen, keyAvatar, makeAvatarClip, tableLine } from '../src/pack/avatar.ts'
+import { hasFfmpeg } from '../src/pack/media.ts'
+import { execFileSync } from 'node:child_process'
 import { desktopBodyExists } from '../src/dsh/body-install.ts'
 import { importPack } from '../src/pack/import.ts'
 import { downloadFfmpeg, ffmpegInOutput } from '../src/dsh/ffmpeg-fetch.ts'
@@ -296,5 +298,24 @@ test('a light background is not a table, and a picture on no screen keeps what i
   assert.equal(hasGreenScreen(dark), false)
   keyAvatar(dark, 7, 7, tableLine(dark, 7, 7))
   assert.equal(dark[3], 255)
+})
+
+test('her small picture moving: an uploaded clip becomes colour over mask, looping, with its picture made for it', { skip: !await hasFfmpeg() }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'her-clip-'))
+  try {
+    // A green screen, her as a block that sways, a white table along the bottom.
+    execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=0x02C446:s=240x240:r=24:d=1', '-vf', "drawbox=x='60+10*sin(t*6)':y=40:w=120:h=200:color=0x5A82BE:t=fill,drawbox=x=0:y=228:w=240:h=12:color=0xF0F0F5:t=fill", '-pix_fmt', 'yuv420p', join(dir, '头像原视频.mp4')])
+    const { overhang } = await makeAvatarClip(dir)
+    assert.ok(overhang > 0.03 && overhang < 0.08, String(overhang))
+    assert.ok(existsSync(join(dir, AVATAR_CLIP)))
+    assert.ok(existsSync(join(dir, '头像.png')), 'its first frame as the picture')
+    const info = JSON.parse(readFileSync(join(dir, '头像.json'), 'utf8')) as { overhang: number; clipOverhang: number }
+    assert.equal(info.clipOverhang, overhang)
+    const about = execFileSync('sh', ['-c', `ffmpeg -hide_banner -i "${join(dir, AVATAR_CLIP)}" 2>&1 || true`], { encoding: 'utf8' })
+    assert.match(about, /256x512/, 'colour over mask')
+    assert.match(about, /Duration: 00:00:0(1\.[89]|2\.0)/, 'forward then backward')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 

@@ -16,6 +16,8 @@
  */
 
 import { isRemotePage } from '../core/where.ts'
+import { StackedView } from '../../body/renderer/stacked.ts'
+import type { AvatarView } from '../dsh/api.ts'
 import type { FloatHost } from './web-bridge.ts'
 
 const STATUS_EVERY_MS = 5000
@@ -87,7 +89,8 @@ export function mountWebFloat(): () => void {
   let scope: Scope = 'page'
   let style: HTMLStyleElement | undefined
   let typing: HTMLFormElement | undefined
-  let avatar: { url: string; overhang: number } | undefined
+  let avatar: AvatarView | undefined
+  let avatarVideo: HTMLVideoElement | undefined
   let pillTimer: ReturnType<typeof setInterval> | undefined
   const background = () => wanted === 'background'
   const chatColumn = () => (scope === 'chat' ? document.querySelector(CHAT_COLUMN) ?? undefined : undefined)
@@ -336,10 +339,11 @@ export function mountWebFloat(): () => void {
   /** Her small picture when she has one, else a round button with her name. */
   const drawPill = () => {
     if (pill === undefined) return
-    const url = avatar?.url ?? ''
+    const url = avatar?.clipUrl ?? avatar?.url ?? ''
     if (pill.dataset.url === url) return
     pill.dataset.url = url
     pill.textContent = ''
+    avatarVideo = undefined
     pill.title = '她'
     pill.style.cssText = avatar === undefined
       ? 'position:fixed;z-index:1000;width:34px;height:34px;border-radius:50%;border:none;cursor:pointer;color:#fff;font:600 14px system-ui,sans-serif;background:#8b5cf6;box-shadow:0 4px 14px rgba(0,0,0,.25)'
@@ -354,6 +358,39 @@ export function mountWebFloat(): () => void {
     image.draggable = false
     image.style.cssText = 'display:block;width:100%;height:100%'
     pill.appendChild(image)
+    if (avatar.clipUrl !== undefined) playAvatar(avatar.clipUrl, image)
+  }
+
+  /** Her picture moving: it takes the picture's place once it plays, so a clip that cannot play leaves the picture. */
+  const playAvatar = (url: string, image: HTMLImageElement) => {
+    const video = document.createElement('video')
+    video.muted = true
+    video.loop = true
+    video.playsInline = true
+    video.preload = 'auto'
+    video.style.cssText = 'position:absolute;width:1px;height:1px;opacity:0;pointer-events:none'
+    let view: StackedView
+    try {
+      video.src = new URL(url, document.baseURI).href
+      view = new StackedView(video)
+    } catch {
+      return
+    }
+    view.canvas.style.cssText = 'display:none;width:100%;height:100%'
+    pill?.append(video, view.canvas)
+    video.addEventListener('playing', () => {
+      image.style.display = 'none'
+      view.canvas.style.display = 'block'
+    }, { once: true })
+    avatarVideo = video
+    if (!document.hidden) void video.play().catch(() => {})
+  }
+
+  /** Not seen, no need to decode. */
+  const onVisibility = () => {
+    if (document.hidden) avatarVideo?.pause()
+    else void avatarVideo?.play().catch(() => {})
+    void sync()
   }
 
   /** On the chat box's top edge, as if it were a table; with no chat box on the page, on the window's bottom edge. */
@@ -387,7 +424,7 @@ export function mountWebFloat(): () => void {
     if (document.hidden) return
     try {
       const res = await fetch('/api/dsh-her/web/status', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ screen: { w: screen.width, h: screen.height, scale: devicePixelRatio }, remote: isRemotePage(location.protocol, location.hostname) }) })
-      const value = await res.json() as { ok: boolean; show?: boolean; place?: Place; scope?: Scope; avatar?: { url: string; overhang: number } }
+      const value = await res.json() as { ok: boolean; show?: boolean; place?: Place; scope?: Scope; avatar?: AvatarView }
       if (value.ok) {
         shown = value.show === true
         avatar = value.avatar
@@ -405,7 +442,7 @@ export function mountWebFloat(): () => void {
   window.addEventListener('keydown', onKey)
   window.addEventListener('pointerdown', onGesture, { passive: true })
   window.addEventListener('resize', place)
-  document.addEventListener('visibilitychange', sync)
+  document.addEventListener('visibilitychange', onVisibility)
   const timer = setInterval(() => void sync(), STATUS_EVERY_MS)
   void sync()
 
@@ -419,7 +456,8 @@ export function mountWebFloat(): () => void {
     window.removeEventListener('keydown', onKey)
     window.removeEventListener('pointerdown', onGesture)
     window.removeEventListener('resize', place)
-    document.removeEventListener('visibilitychange', sync)
+    document.removeEventListener('visibilitychange', onVisibility)
+    avatarVideo?.pause()
     frame?.remove()
     pill?.remove()
     closeMenu()
