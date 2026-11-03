@@ -548,7 +548,7 @@ export function WebPlaceCard({ state, apply }: { state: StateView; apply: Apply 
           <button className={choiceClass('chat', web.scope)} onClick={() => void choose({ scope: 'chat' })}>只在对话窗口<small>{choiceNote('chat', web.scope, '左边的列表不变')}</small></button>
         </div>
       )}
-      {web.place === 'background' && <p className="her-muted">背景不能点：右下角的"她"按钮可以打字、说话或者暂时关掉。</p>}
+      {web.place === 'background' && <p className="her-muted">背景不能点：对话框上的她（或者"她"按钮）可以打字、说话或者暂时关掉。</p>}
     </div>
   )
 }

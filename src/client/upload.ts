@@ -47,4 +47,4 @@ export function insideFolder(file: File): string {
 }
 
 /** Hidden files and what the importer would never read are not worth the wait. */
-export const worthSending = (file: File) => !insideFolder(file).split('/').some(part => part.startsWith('.')) && /\.(mp4|webm|mov|m4v|png|jpe?g|wav|mp3|m4a|json|txt|md)$/i.test(file.name)
+export const worthSending = (file: File) => !insideFolder(file).split('/').some(part => part.startsWith('.')) && /\.(mp4|webm|mov|m4v|png|jpe?g|webp|wav|mp3|m4a|json|txt|md)$/i.test(file.name)

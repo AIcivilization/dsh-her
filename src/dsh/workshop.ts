@@ -24,9 +24,11 @@ import { homedir } from 'node:os'
 import { basename, dirname, extname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  clipList, comfyuiList, DESK_DIR, EXAMPLE_FILES, EXAMPLE_SLOTS, minimaxTask, PROJECT_FILE, promptsFile, REFERENCE_FILE, referencePrompt, safeName, sceneDir, scenePhotoPrompt, validateProject,
+  avatarPrompt, clipList, comfyuiList, DESK_DIR, EXAMPLE_FILES, EXAMPLE_SLOTS, minimaxTask, PROJECT_FILE, promptsFile, REFERENCE_FILE, referencePrompt, safeName, sceneDir, scenePhotoPrompt, validateProject,
   type ClipPlan, type Generator, type LookProject, type WorkshopCard,
 } from '../core/workshop.ts'
+
+import { AVATAR_FILE, AVATAR_INFO, AVATAR_SOURCES } from '../pack/avatar.ts'
 
 export const MATERIALS_DIR = join(homedir(), 'Documents', 'dsh-her 素材')
 
@@ -51,6 +53,9 @@ export interface PartStatus {
 export interface ProjectStatus {
   dir: string
   reference: boolean
+  /** Her small picture for the chat box: uploaded, and made from that. */
+  avatarSource: boolean
+  avatar: boolean
   parts: PartStatus[]
   /** Something can be imported: at least one part has its minimum (and a scene its frame). */
   importable: boolean
@@ -120,7 +125,7 @@ export function projectStatus(project: LookProject, dir: string): ProjectStatus 
     parts.push({ name: scene.name, folder, ...count(folder, scene.clips), photo, framed })
   }
   const reference = has(dir, REFERENCE_FILE)
-  return { dir, reference, parts, importable: parts.some(p => p.enough && p.framed !== false && (p.folder !== DESK_DIR || reference || has(join(dir, DESK_DIR), 'anchor_stand.png'))) }
+  return { dir, reference, avatarSource: AVATAR_SOURCES.some(file => has(dir, file)), avatar: has(dir, AVATAR_FILE), parts, importable: parts.some(p => p.enough && p.framed !== false && (p.folder !== DESK_DIR || reference || has(join(dir, DESK_DIR), 'anchor_stand.png'))) }
 }
 
 /**
@@ -147,6 +152,14 @@ export function saveProject(input: unknown, screen?: { width: number; height: nu
     `用文生图工具（豆包、即梦等）生成，存成 ${REFERENCE_FILE} 放在这个文件夹里。之后每个场景的照片都要把它当参考图，她才是同一个人。`,
     '',
     referencePrompt(project),
+    '',
+  ].join('\n'))
+  write(join(dir, '头像提示词.txt'), [
+    `${project.name} · 头像（她扒在对话框上的小图）`,
+    '',
+    `用文生图工具生成，把她的头像放进"参考图 / 保持人物一致"（参考图.png 穿得少可能被拒绝，裁到只剩头再传）。存成 头像原图.png 放在这个文件夹，或者在形象工坊里上传。`,
+    '',
+    avatarPrompt(project),
     '',
   ].join('\n'))
   write(join(dir, '生成清单.md'), clipList(project, dir))
@@ -203,6 +216,20 @@ export function removeStray(id: string, folder: string, file: string, root = MAT
   if (!straysIn(here, clips).includes(file)) throw new Error(`找不到 ${file}`)
   rmSync(join(here, file))
   return projectStatus(found.project, found.dir)
+}
+
+/** Her small picture for a look, when its project has one. */
+export function avatarOf(lookId: string, root = MATERIALS_DIR): { path: string; overhang: number } | undefined {
+  const found = findProject(lookId, root)
+  if (found === undefined || !has(found.dir, AVATAR_FILE)) return undefined
+  let overhang = 0
+  try {
+    const value = (JSON.parse(readFileSync(join(found.dir, AVATAR_INFO), 'utf8')) as { overhang?: unknown }).overhang
+    if (typeof value === 'number' && value >= 0 && value < 0.5) overhang = value
+  } catch {
+    // no table was cut: it stands on the edge
+  }
+  return { path: join(found.dir, AVATAR_FILE), overhang }
 }
 
 /** Before importing: the desk pet's anchor is the reference picture. */

@@ -12,7 +12,7 @@ import { pipeline } from 'node:stream/promises'
 
 const MAX_FILE_BYTES = 2 * 1024 ** 3
 /** What materials are made of: pictures, clips, sound, and the text files that go with them. */
-const ALLOWED = new Set(['.mp4', '.webm', '.mov', '.m4v', '.png', '.jpg', '.jpeg', '.wav', '.mp3', '.m4a', '.json', '.txt', '.md'])
+const ALLOWED = new Set(['.mp4', '.webm', '.mov', '.m4v', '.png', '.jpg', '.jpeg', '.webp', '.wav', '.mp3', '.m4a', '.json', '.txt', '.md'])
 
 /** Where a relative path lands under `root`; undefined when it leaves it or names something hidden. */
 export function uploadTarget(root: string, path: string): string | undefined {

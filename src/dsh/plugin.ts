@@ -32,7 +32,7 @@
 
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { basename, dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
@@ -46,7 +46,7 @@ import { bodyRunning, findDevBody, launchBody, type LaunchPlan } from './body-la
 import { compareVersions, desktopBodyExists, downloadFolder, install, installDownloaded, installedBody, installedPlan, latestRelease, manualInstall, type InstallState, type ManualInstall } from './body-install.ts'
 import { IDLE_IMPORT, type ImportStatus, type ReportLine } from './import-status.ts'
 import { DESK_DIR, newProject, sceneDir } from '../core/workshop.ts'
-import { assignClip, exampleFile, examples, exportProject, findProject, importProject, listProjects, prepareImport, projectStatus, removeStray, saveProject } from './workshop.ts'
+import { assignClip, avatarOf, exampleFile, examples, exportProject, findProject, importProject, listProjects, prepareImport, projectStatus, removeStray, saveProject } from './workshop.ts'
 import type { HerConfig } from './config.ts'
 import { HerSession, type DshServices, type ModelRoute } from './her-session.ts'
 import { heardText, SpeechQueue } from '../voice/speech-queue.ts'
@@ -55,6 +55,7 @@ import { saveUpload, uploadAllowed, uploadTarget } from './uploads.ts'
 import { importLook, type LookRequest } from '../pack/import-look.ts'
 import { importPack } from '../pack/import.ts'
 import { plateIn, saveFrame } from '../pack/frame.ts'
+import { makeAvatar } from '../pack/avatar.ts'
 import { ffmpegCommand, stillSize } from '../pack/media.ts'
 import { ensureFfmpeg, findFfmpeg } from './ffmpeg-fetch.ts'
 import { Voice } from '../voice/voice.ts'
@@ -662,6 +663,12 @@ export function apply(ctx: Context, config: HerConfig): void {
    * With no desktop body the brain imports by itself (it has the files and
    * ffmpeg). Progress and the report show the same way as from a body.
    */
+  /** Her small picture for the look she wears, with an address that changes when the picture does. */
+  const webAvatar = (): { url: string; overhang: number } | undefined => {
+    const active = webBody.activeId()
+    const avatar = active?.startsWith('look:') === true ? avatarOf(active.slice('look:'.length)) : undefined
+    return avatar === undefined ? undefined : { url: `/api/dsh-her/web/avatar?v=${Math.floor(statSync(avatar.path).mtimeMs).toString(36)}`, overhang: avatar.overhang }
+  }
   /** A full path only: a bare name means it is on the PATH the body has too. */
   const ffmpegForBody = () => (ffmpegCommand() === 'ffmpeg' ? {} : { ffmpeg: ffmpegCommand() })
   const importHere = async (work: (onProgress: (done: number, total: number, step: string) => void) => Promise<{ ok: boolean; lines: ReportLine[]; show?: string }>, cleanup?: () => void): Promise<void> => {
@@ -716,7 +723,7 @@ export function apply(ctx: Context, config: HerConfig): void {
           // With no desktop body the brain itself knows her packs (docs/网页身体设计.md).
           packs: body === undefined ? webBody.packList() : bodyPacks,
           ...((body === undefined ? webBody.activeId() : activePack) === undefined ? {} : { activePack: body === undefined ? webBody.activeId()! : activePack! }),
-          web: { mode: webBody.mode, connected: webBody.connected, show: webShown(), ...webBody.place() },
+          web: { mode: webBody.mode, connected: webBody.connected, show: webShown(), ...webBody.place(), ...(webAvatar() === undefined ? {} : { avatar: webAvatar()! }) },
           ...(bodyMode === undefined ? {} : { mode: bodyMode }),
           ...(bodyLook === undefined ? {} : { look: bodyLook }),
           ...(body === undefined ? {} : { screens: body.hello.caps.screens.map(({ w, h, scale }) => ({ w, h, scale })) }),
@@ -811,7 +818,8 @@ export function apply(ctx: Context, config: HerConfig): void {
     webStatus: (screen, remote) => {
       if (screen !== undefined) webScreen = screen
       const { place, scope } = webBody.place()
-      return { show: webShown(remote), mode: webBody.mode, place, scope }
+      const avatar = webAvatar()
+      return { show: webShown(remote), mode: webBody.mode, place, scope, ...(avatar === undefined ? {} : { avatar }) }
     },
     importBatch: async (batch, name) => {
       const dir = uploadTarget(uploadsDir, batch)
@@ -864,6 +872,13 @@ export function apply(ctx: Context, config: HerConfig): void {
       return saveProject(newProject(`p${Date.now().toString(36)}`, name), mainScreen())
     },
     workshopSave: project => saveProject(project, mainScreen()),
+    workshopAvatar: async id => {
+      const found = findProject(id)
+      if (found === undefined) throw new Error('找不到这个项目')
+      await ensureFfmpeg(paths.root, () => {})
+      await makeAvatar(found.dir)
+      return projectStatus(found.project, found.dir)
+    },
     workshopAssignClip: (id, folder, file, clip) => assignClip(id, folder, file, clip, mainScreen()),
     workshopRemoveStray: (id, folder, file) => removeStray(id, folder, file),
     workshopExport: async (id, media) => {
@@ -1180,6 +1195,11 @@ export function apply(ctx: Context, config: HerConfig): void {
     get('renderer.js', () => webBody.asset('renderer.js'))
     get('mic-worklet.js', () => webBody.asset('mic-worklet.js'))
     get('file', request => webBody.file(request))
+    get('avatar', request => {
+      const active = webBody.activeId()
+      const avatar = active?.startsWith('look:') === true ? avatarOf(active.slice('look:'.length)) : undefined
+      return avatar === undefined ? new Response('not found', { status: 404 }) : fileResponse(avatar.path, request, true)
+    })
     get('events', request => webBody.connect(request.signal, () => {
       webBody.send({ t: 'welcome', v: PROTOCOL_VERSION, sessionId: session?.sessionId ?? '', characters: [{ cid, name: character.name, mode: 'overlay' }], config: { mic: config.voice.mic, bargeIn: true } })
       refreshBodyPack()

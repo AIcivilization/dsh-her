@@ -259,6 +259,24 @@ export function referencePrompt(project: LookProject): string {
   ].join('。') + '。'
 }
 
+/**
+ * Her small picture on the chat box: the same person, from a picture of her head,
+ * with her hands on a table. The table makes the hands believable; it is cut away
+ * afterwards (pack/avatar.ts). The clothes are written here so that a revealing
+ * reference does not get the picture refused.
+ */
+export function avatarPrompt(project: LookProject): string {
+  const color = screenColor(project.card)
+  return [
+    '上传的图是这个人的头像。请画出同一个人的上半身：脸、五官、发型、发色、肤色都和头像完全一致，不要改脸',
+    `${styleWords(project.card)}。她是${/\d|十|成年/.test(project.card.age) && !/十[八九]|1[89]/.test(project.card.age) ? project.card.age : '二十多岁'}的成年人`,
+    '为她穿上衣服：白色圆领短袖 T 恤，外面穿一件浅蓝色牛仔外套，衣着得体，衣服完整地盖住肩膀和上身',
+    '她坐在一张白色桌子后面，身体正面朝向镜头，看着镜头温柔地微笑。双手放在身前，手指自然地搭在桌子的前沿上，像趴在桌边看着你。两只手完整、靠近画面中间，每只手五根手指，手指自然不变形',
+    '桌子只露出画面最底部一条很窄的水平白边，边缘笔直、完全水平，桌上没有任何物品，手指正好落在这条边上。人物左右居中，头顶留少量空白，肩膀不要超出画面',
+    `背景是完全均匀的${color.name}（${color.hex}），没有渐变、阴影和任何物体。正面柔和均匀的光，人物边缘清晰，头发丝分明。没有文字、水印、Logo。正方形构图，1024×1024`,
+  ].join('。') + '。'
+}
+
 /** A scene's full-screen photo, made with the reference picture so she stays the same person. */
 export function scenePhotoPrompt(project: LookProject, scene: ProjectScene, screen?: { width: number; height: number }): string {
   const size = screen === undefined ? '横版 16:10，2560 宽以上' : `横版，和屏幕一样的比例，${screen.width}×${screen.height}`
@@ -400,7 +418,7 @@ export function validateProject(value: unknown): LookProject {
 }
 
 /** The workshop's cards, in order. */
-export type WorkshopCard = 'look' | 'reference' | 'desk' | 'scene' | 'import'
+export type WorkshopCard = 'look' | 'reference' | 'avatar' | 'desk' | 'scene' | 'import'
 
 /**
  * Example pictures and clips each card shows, by file name under
@@ -411,6 +429,7 @@ export type WorkshopCard = 'look' | 'reference' | 'desk' | 'scene' | 'import'
 export const EXAMPLE_SLOTS: Record<WorkshopCard, ReadonlyArray<{ file: string; label: string }>> = {
   look: [{ file: 'look.png', label: '做好的她（角色卡这样填出来的样子）' }],
   reference: [{ file: 'reference.png', label: '参考图：纯色背景、全身、正面站立' }],
+  avatar: [],
   desk: [{ file: 'desk.mp4', label: '桌宠片段（绿幕原片）' }, { file: 'desk-keyed.png', label: '抠好后浮在桌面上' }],
   scene: [
     { file: 'scene-plate.png', label: '场景的全屏照片' },

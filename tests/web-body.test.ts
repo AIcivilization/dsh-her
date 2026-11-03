@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { fileResponse, frameFor, packFile, parseRange, WEB_BASE, WebBody, webShows } from '../src/dsh/web-body.ts'
 import { saveUpload, uploadAllowed, uploadTarget } from '../src/dsh/uploads.ts'
 import { isRemotePage } from '../src/core/where.ts'
+import { hasGreenScreen, keyAvatar, tableLine } from '../src/pack/avatar.ts'
 import { desktopBodyExists } from '../src/dsh/body-install.ts'
 import { importPack } from '../src/pack/import.ts'
 import { downloadFfmpeg, ffmpegInOutput } from '../src/dsh/ffmpeg-fetch.ts'
@@ -264,5 +265,36 @@ test('a background needs a scene, and the choice survives the other settings', (
   } finally {
     rmSync(home, { recursive: true, force: true })
   }
+})
+
+test('her small picture: the screen and the table go, her and her fingers on the table stay', () => {
+  const [SCREEN, TABLE, BLEND, DENIM, SKIN] = [[2, 196, 70], [240, 240, 245], [130, 188, 155], [90, 130, 190], [225, 170, 140]] as const
+  // Her in the middle column, the edges either side: 20 rows, the table from row 17.
+  const rows: Array<readonly (readonly number[])[]> = [
+    ...Array.from({ length: 16 }, () => [SCREEN, SCREEN, SCREEN, DENIM, SCREEN, SCREEN, SCREEN]),
+    [BLEND, BLEND, BLEND, SKIN, BLEND, BLEND, BLEND],
+    ...Array.from({ length: 3 }, () => [TABLE, TABLE, TABLE, SKIN, TABLE, TABLE, TABLE]),
+  ]
+  const rgba = Uint8Array.from(rows.flat().flatMap(pixel => [...pixel, 255]))
+  assert.ok(hasGreenScreen(rgba))
+  assert.equal(tableLine(rgba, 7, 20), 17)
+  keyAvatar(rgba, 7, 20, 17)
+  const alpha = (x: number, y: number) => rgba[(y * 7 + x) * 4 + 3]
+  assert.equal(alpha(0, 0), 0, 'the screen')
+  assert.equal(alpha(3, 3), 255, 'her jacket')
+  assert.equal(alpha(0, 16), 0, 'the blend at the edge')
+  assert.equal(alpha(0, 18), 0, 'the table')
+  assert.equal(alpha(3, 18), 255, 'her fingers on the table')
+  // Under what is gone, no green to bleed in when it is scaled.
+  assert.deepEqual([...rgba.subarray(0, 3)], [128, 128, 128])
+})
+
+test('a light background is not a table, and a picture on no screen keeps what it is', () => {
+  const white = Uint8Array.from(Array.from({ length: 49 }, () => [250, 250, 250, 255]).flat())
+  assert.equal(tableLine(white, 7, 7), 7)
+  const dark = Uint8Array.from(Array.from({ length: 49 }, () => [40, 40, 40, 255]).flat())
+  assert.equal(hasGreenScreen(dark), false)
+  keyAvatar(dark, 7, 7, tableLine(dark, 7, 7))
+  assert.equal(dark[3], 255)
 })
 

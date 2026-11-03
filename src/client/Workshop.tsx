@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import {
-  CARD_CHOICES, CARD_LABELS, clipPrompt, customClip, describe, DESK_DIR, GENERATORS, generatorInfo, MANUAL_LABEL, newScene, POSE_WORDS, referencePrompt, sceneDir, scenePhotoPrompt,
+  avatarPrompt, CARD_CHOICES, CARD_LABELS, clipPrompt, customClip, describe, DESK_DIR, GENERATORS, generatorInfo, MANUAL_LABEL, newScene, POSE_WORDS, referencePrompt, sceneDir, scenePhotoPrompt,
   type CharacterCard, type ClipPlan, type Generator, type LookProject, type Pose, type ProjectScene, type WorkshopCard,
 } from '../core/workshop.ts'
 import type { ProjectStatus } from '../dsh/workshop.ts'
@@ -91,6 +91,10 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
       return
     }
     report(await herApi.workshopFrame(draft!.id, scene.id), '已在桌面上打开"做场景"窗口：框好她的活动范围，点保存')
+  }
+  const makeAvatar = async () => {
+    report(await herApi.workshopAvatar(draft!.id), '头像处理好了')
+    await reload()
   }
   const frameWhole = async (scene: ProjectScene) => {
     if (dirty && !(await save())) return
@@ -248,6 +252,16 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
             </div>
           </>)}
 
+          {fold('avatar', '头像（可选）', status.avatar ? '✓ 已有' : status.avatarSource ? '上传了，还没处理' : '还没有', status.avatar, <>
+            <p>她扒在 dsh 对话框上的小图，点它可以和她说话。没有头像时显示一个"她"字。</p>
+            <p className="her-muted">用文生图工具，把她的头像放进"参考图 / 保持人物一致"，粘贴下面的提示词。参考图穿得少可能被拒绝，裁到只剩头再传。生成好不用改图，绿幕和桌子会自动去掉。</p>
+            <PromptBox text={avatarPrompt(draft)} />
+            <div className="her-row">
+              <ProjectUpload projectId={draft.id} named="头像原图" accept="image/png,image/jpeg,image/webp" label={status.avatarSource ? '换一张…' : '上传头像图…'} onDone={() => void makeAvatar()} />
+              {status.avatar && <img src={projectFileUrl(draft.id, '头像.png')} alt="头像" style={{ height: 72, background: 'rgba(127,127,127,.25)', borderRadius: 8 }} />}
+            </div>
+          </>)}
+
           {fold('desk', '3. 桌宠（浮在最上层时的她）', !draft.desk.on ? '不要桌宠' : desk === undefined ? '还没保存' : `${desk.made}/${desk.planned} 段${desk.enough ? '，够导入了' : ''}`, !draft.desk.on || desk?.enough === true, <>
             <label><input type="checkbox" checked={draft.desk.on} onChange={e => edit(p => { p.desk.on = e.target.checked })} /> 要桌宠：绿幕全身视频，导入时抠掉背景，她浮在所有窗口上面</label>
             {draft.desk.on && (
@@ -308,7 +322,7 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
   )
 }
 
-const CARDS: readonly WorkshopCard[] = ['look', 'reference', 'desk', 'scene', 'import']
+const CARDS: readonly WorkshopCard[] = ['look', 'reference', 'avatar', 'desk', 'scene', 'import']
 const FOLDS_KEY = 'dsh-her.workshop.open'
 
 type Example = { card: WorkshopCard; file: string; label: string; ready: boolean }

@@ -54,7 +54,7 @@ export interface StateView {
     /** The look on screen, with its scenes (when a look rather than a single pack is chosen). */
     look?: LookView
     /** The web body: she in DSH's own page (no desktop needed). */
-    web: { mode: WebMode; connected: boolean; show: boolean; place: WebPlace; scope: WebScope; canBackground: boolean }
+    web: { mode: WebMode; connected: boolean; show: boolean; place: WebPlace; scope: WebScope; canBackground: boolean; avatar?: { url: string; overhang: number } }
     /** The body's screens (logical size, scale), for advice on sizes. */
     screens?: Array<{ w: number; h: number; scale: number }>
   }
@@ -79,7 +79,7 @@ export interface ApiRuntime {
   bodyOpenFolder(): void
   /** The web body: whether to show, her config, a message from the page, the setting. */
   /** `remote`: the page is open on another device than the one running dsh. */
-  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; mode: WebMode; place: WebPlace; scope: WebScope }
+  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; mode: WebMode; place: WebPlace; scope: WebScope; avatar?: { url: string; overhang: number } }
   /** A new folder for files coming from the browser, and importing it as a pack (with no desktop body). */
   webNewBatch(): string
   importBatch(batch: string, name?: string): Promise<void>
@@ -124,6 +124,8 @@ export interface ApiRuntime {
   workshopExamples(): Array<{ card: WorkshopCard; file: string; label: string; ready: boolean }>
   workshopOpen(id: string): void
   workshopFrame(id: string, sceneId: string): void
+  /** Make her small picture from the uploaded one. */
+  workshopAvatar(id: string): Promise<ProjectStatus>
   /** A video in a part's folder is this clip; or it is not wanted. */
   workshopAssignClip(id: string, folder: string, file: string, clip: string): { project: LookProject; status: ProjectStatus }
   workshopRemoveStray(id: string, folder: string, file: string): ProjectStatus
@@ -336,6 +338,7 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
       rt.workshopFrame(str(body.id, '项目'), str(body.scene, '场景'))
       return {}
     },
+    '/workshop/avatar': async body => ({ status: await rt.workshopAvatar(str(body.id, '项目')) }),
     '/workshop/assign-clip': async body => rt.workshopAssignClip(str(body.id, '项目'), str(body.folder, '部分'), str(body.file, '文件'), str(body.clip, '片段')),
     '/workshop/remove-stray': async body => ({ status: rt.workshopRemoveStray(str(body.id, '项目'), str(body.folder, '部分'), str(body.file, '文件')) }),
     '/workshop/import': async body => {

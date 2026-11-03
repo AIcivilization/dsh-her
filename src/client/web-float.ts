@@ -28,6 +28,20 @@ type Place = 'pet' | 'background'
 type Scope = 'page' | 'chat'
 
 const CHAT_COLUMN = '[class*="_centerCol"]'
+const AVATAR_SIZE = 80
+/** As far in from the chat box's right edge as other apps' mascots sit. */
+const AVATAR_INSET = 42
+const PLACE_EVERY_MS = 400
+
+/** The chat box: the first rounded, painted card around the text being typed, whatever DSH calls it. */
+function chatBox(): Element | undefined {
+  const inSeat = document.querySelector('[class*="_composerSeat"] [contenteditable="true"], [class*="_composerSeat"] textarea')
+  for (let at = inSeat?.parentElement; at !== null && at !== undefined; at = at.parentElement) {
+    const style = getComputedStyle(at)
+    if (parseFloat(style.borderTopLeftRadius) >= 12 && style.backgroundColor !== 'rgba(0, 0, 0, 0)') return at
+  }
+  return undefined
+}
 
 const backgroundStyle = (scope: Scope) => `
 body { --her-base: var(--dsw-alias-bg-base); }
@@ -73,6 +87,8 @@ export function mountWebFloat(): () => void {
   let scope: Scope = 'page'
   let style: HTMLStyleElement | undefined
   let typing: HTMLFormElement | undefined
+  let avatar: { url: string; overhang: number } | undefined
+  let pillTimer: ReturnType<typeof setInterval> | undefined
   const background = () => wanted === 'background'
   const chatColumn = () => (scope === 'chat' ? document.querySelector(CHAT_COLUMN) ?? undefined : undefined)
 
@@ -136,6 +152,7 @@ export function mountWebFloat(): () => void {
     document.body.appendChild(shield)
   }
 
+  let menuFromPill = false
   const hostApi: FloatHost = {
     frame: next => {
       size = next
@@ -157,7 +174,9 @@ export function mountWebFloat(): () => void {
       closeMenu()
       const box = frame.getBoundingClientRect()
       menu = document.createElement('div')
-      const at = background() ? `right:18px;bottom:136px` : `left:${Math.max(8, box.left)}px;top:${Math.max(8, box.top + 40)}px`
+      const from = menuFromPill ? pill?.getBoundingClientRect() : undefined
+      menuFromPill = false
+      const at = from !== undefined ? `right:${Math.max(8, innerWidth - from.right)}px;bottom:${Math.max(8, innerHeight - from.top + 6)}px` : `left:${Math.max(8, box.left)}px;top:${Math.max(8, box.top + 40)}px`
       menu.style.cssText = `position:fixed;z-index:1002;${at};min-width:170px;padding:4px;border-radius:10px;font:13px system-ui,sans-serif;background:Canvas;color:CanvasText;border:1px solid rgba(127,127,127,.35);box-shadow:0 8px 28px rgba(0,0,0,.28)`
       const item = (label: string, action: () => void, disabled = false) => {
         const button = document.createElement('button')
@@ -174,7 +193,13 @@ export function mountWebFloat(): () => void {
       item('打字给她', () => (background() ? openTyping() : guest()?.showInput()))
       item(background() ? '暂时关掉背景' : '藏起来', () => hostApi.setHidden(true))
       document.body.appendChild(menu)
-      setTimeout(() => window.addEventListener('mousedown', closeMenu, { once: true }), 0)
+      // Pressing outside closes it; a press on an item must live to become its click.
+      const outside = (event: MouseEvent) => {
+        if (menu?.contains(event.target as Node) === true) return
+        window.removeEventListener('mousedown', outside)
+        closeMenu()
+      }
+      setTimeout(() => window.addEventListener('mousedown', outside), 0)
     },
     interactive: on => {
       if (frame === undefined || background()) return
@@ -290,19 +315,57 @@ export function mountWebFloat(): () => void {
     if (!on) {
       pill?.remove()
       pill = undefined
+      clearInterval(pillTimer)
       return
     }
-    if (pill !== undefined) return
-    pill = document.createElement('button')
-    pill.textContent = '她'
-    pill.title = '让她出来'
-    pill.style.cssText = 'position:fixed;z-index:1000;right:18px;bottom:96px;width:34px;height:34px;border-radius:50%;border:none;cursor:pointer;color:#fff;font:600 14px system-ui,sans-serif;background:#8b5cf6;box-shadow:0 4px 14px rgba(0,0,0,.25)'
-    pill.onclick = () => {
-      // As a background she takes no clicks: this is the way to her. Otherwise she is away, and this brings her back.
-      if (frame !== undefined && background()) hostApi.menu()
-      else hostApi.setHidden(false)
+    if (pill === undefined) {
+      pill = document.createElement('button')
+      pill.onclick = () => {
+        // The way to her: she may take no clicks herself, as a background. When she is away, this brings her back.
+        if (frame === undefined) return hostApi.setHidden(false)
+        menuFromPill = true
+        hostApi.menu()
+      }
+      document.body.appendChild(pill)
+      pillTimer = setInterval(placePill, PLACE_EVERY_MS)
     }
-    document.body.appendChild(pill)
+    drawPill()
+    placePill()
+  }
+
+  /** Her small picture when she has one, else a round button with her name. */
+  const drawPill = () => {
+    if (pill === undefined) return
+    const url = avatar?.url ?? ''
+    if (pill.dataset.url === url) return
+    pill.dataset.url = url
+    pill.textContent = ''
+    pill.title = '她'
+    pill.style.cssText = avatar === undefined
+      ? 'position:fixed;z-index:1000;width:34px;height:34px;border-radius:50%;border:none;cursor:pointer;color:#fff;font:600 14px system-ui,sans-serif;background:#8b5cf6;box-shadow:0 4px 14px rgba(0,0,0,.25)'
+      : `position:fixed;z-index:1000;width:${AVATAR_SIZE}px;height:${AVATAR_SIZE}px;padding:0;border:none;cursor:pointer;background:none`
+    if (avatar === undefined) {
+      pill.textContent = '她'
+      return
+    }
+    const image = document.createElement('img')
+    image.src = avatar.url
+    image.alt = '她'
+    image.draggable = false
+    image.style.cssText = 'display:block;width:100%;height:100%'
+    pill.appendChild(image)
+  }
+
+  /** On the chat box's top edge, as if it were a table; with no chat box on the page, on the window's bottom edge. */
+  const placePill = () => {
+    if (pill === undefined) return
+    const box = chatBox()?.getBoundingClientRect()
+    const size = avatar === undefined ? 34 : AVATAR_SIZE
+    const hang = avatar === undefined ? (box === undefined ? -96 : -6) : avatar.overhang * AVATAR_SIZE
+    pill.style.right = `${box === undefined ? 18 : Math.max(0, innerWidth - box.right + AVATAR_INSET)}px`
+    pill.style.top = `${(box?.top ?? innerHeight) - size + hang}px`
+    // Without a chat box it would stand in her way when she floats in the same corner.
+    pill.style.display = box === undefined && frame !== undefined && !background() ? 'none' : ''
   }
 
   const apply = () => {
@@ -316,7 +379,7 @@ export function mountWebFloat(): () => void {
       style?.remove()
       style = undefined
     }
-    showPill(shown && (!visible || background()))
+    showPill(shown)
     window.dispatchEvent(new Event('dsh-her:float'))
   }
 
@@ -324,9 +387,10 @@ export function mountWebFloat(): () => void {
     if (document.hidden) return
     try {
       const res = await fetch('/api/dsh-her/web/status', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ screen: { w: screen.width, h: screen.height, scale: devicePixelRatio }, remote: isRemotePage(location.protocol, location.hostname) }) })
-      const value = await res.json() as { ok: boolean; show?: boolean; place?: Place; scope?: Scope }
+      const value = await res.json() as { ok: boolean; show?: boolean; place?: Place; scope?: Scope; avatar?: { url: string; overhang: number } }
       if (value.ok) {
         shown = value.show === true
+        avatar = value.avatar
         wanted = value.place === 'background' ? 'background' : 'pet'
         scope = value.scope === 'chat' ? 'chat' : 'page'
       }
@@ -347,6 +411,7 @@ export function mountWebFloat(): () => void {
 
   return () => {
     clearInterval(timer)
+    clearInterval(pillTimer)
     column.disconnect()
     style?.remove()
     typing?.remove()
