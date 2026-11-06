@@ -183,6 +183,64 @@ function Presets({ state, apply }: { state: StateView; apply: Apply }) {
   )
 }
 
+const HOLD_KEY_TEXT = navigator.platform.startsWith('Mac') ? '右边的 Option' : '右边的 Alt'
+
+/**
+ * Her conversations: all kept in her workspace in dsh. Which one you are in,
+ * a new one, an earlier one; when a new one starts by itself (off by default).
+ */
+export function TalkCard({ state, apply }: { state: StateView; apply: Apply }) {
+  const { talk } = state
+  const open = (id: string) => window.__herOpenSession?.(id)
+  const canOpen = window.__herOpenSession !== undefined
+  const others = talk.segments.filter(s => s.id !== talk.current)
+  const { split } = talk
+  return (
+    <div>
+      <p className="her-muted">你在哪里和她说（桌面、网页、打字、说话），都存在 dsh 左侧的"她"工作区里，一段对话是一个会话。她记得的事每一段都能用上，新开一段不会让她忘了你。</p>
+      <p>现在这段：<b>{talk.segment?.title ?? '还没有'}</b>{talk.size === undefined ? '' : `（${talk.size}）`}</p>
+      <div className="her-row">
+        <button className="her-btn" onClick={() => void apply(herApi.talkNew())}>新开一段</button>
+        {canOpen && talk.current !== null && <button className="her-btn" onClick={() => open(talk.current!)}>在 dsh 里看完整对话</button>}
+      </div>
+      {others.length > 0 && (
+        <>
+          <label className="her-label">之前的对话（点"接着这段"，之后说的话就进那一段）</label>
+          {others.slice(0, 8).map(s => (
+            <div key={s.id} className="her-row" style={{ margin: '2px 0' }}>
+              <span style={{ flex: 1, minWidth: 0 }}>{s.title}</span>
+              <button className="her-btn small" onClick={() => void apply(herApi.talkResume(s.id))}>接着这段</button>
+              {canOpen && <button className="her-btn small" onClick={() => open(s.id)}>看</button>}
+            </div>
+          ))}
+        </>
+      )}
+      <label className="her-label">自动新开一段（默认都关着；满足任何一条就新开）</label>
+      <div className="her-row">
+        <span>隔了</span>
+        <select className="her-select" style={{ width: 120 }} value={split.idleHours ?? ''} onChange={e => void apply(herApi.talkSplit({ idleHours: e.target.value === '' ? null : Number(e.target.value) }))}>
+          <option value="">不按时间</option>
+          {[2, 6, 12, 24].map(h => <option key={h} value={h}>{h} 小时</option>)}
+        </select>
+        <span>没说话</span>
+      </div>
+      <div className="her-row">
+        <span>这一段长到</span>
+        <select className="her-select" style={{ width: 120 }} value={split.maxTokens ?? ''} onChange={e => void apply(herApi.talkSplit({ maxTokens: e.target.value === '' ? null : Number(e.target.value) }))}>
+          <option value="">不按长度</option>
+          {[30_000, 60_000, 100_000].map(n => <option key={n} value={n}>约 {n / 10_000} 万字</option>)}
+        </select>
+        <span className="her-muted">越长每次回答越慢、越贵</span>
+      </div>
+      <div className="her-row">
+        <label><input type="checkbox" checked={split.daily} onChange={e => void apply(herApi.talkSplit({ daily: e.target.checked }))} /> 每天第一次说话时新开一段</label>
+      </div>
+      <label className="her-label">在哪儿都能叫出她</label>
+      <p className="her-muted">桌面上按 {navigator.platform.startsWith('Mac') ? '⌃⌥↩' : 'Ctrl+Alt+Enter'}、双击她，或点 dsh 对话框上她的小头像，就会弹出对话小条：可以打字，也可以按住 🎙 说话。想在任何程序里（包括全屏游戏）按住{HOLD_KEY_TEXT}说话，在她的右键菜单或托盘菜单里勾选（Mac 要在系统设置里允许一次）。</p>
+    </div>
+  )
+}
+
 const QUIET_CHOICES: Array<[string, number, number]> = [['23:30 到 8:30', 1410, 510], ['22:00 到 9:00', 1320, 540], ['一直可以', 0, 0]]
 
 /** Her speaking first: whether, how often, when not; focus; why she is quiet right now; a try. */

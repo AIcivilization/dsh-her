@@ -48,6 +48,14 @@ export function apply(ctx: ClientContext): void {
     return () => { style.remove() }
   }, 'dsh-her: styles')
 
+  // "完整对话": open her conversation in dsh's own view, when this dsh offers that (uiWorkspace.openSession).
+  const withService = ctx as unknown as { inject?: (deps: string[], fn: (c: { effect(fn: () => () => void): void; uiWorkspace?: { openSession?(id: string): void } }) => void) => void }
+  withService.inject?.(['uiWorkspace'], c => c.effect(() => {
+    if (typeof c.uiWorkspace?.openSession !== 'function') return () => {}
+    window.__herOpenSession = id => c.uiWorkspace?.openSession?.(id)
+    return () => { delete window.__herOpenSession }
+  }))
+
   const t = ctx.locale.bind(NS)
   ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL_ID, locale: NS }, HerPage))
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({

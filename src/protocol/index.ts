@@ -107,6 +107,11 @@ export type BodyMessage =
   | { t: 'presence'; state: 'active' | 'idle' | 'away'; fullscreen: boolean; locked: boolean }
   /** The body's menu: she should (not) speak first for a while. */
   | { t: 'focus.set'; on: boolean }
+  /** The talk bar (docs/对话入口设计.md): its lines, a new conversation, an earlier one, the whole conversation in dsh. */
+  | { t: 'talk.get' }
+  | { t: 'talk.new' }
+  | { t: 'talk.resume'; id: string }
+  | { t: 'talk.open' }
   | { t: 'posture'; cid: string; anchor: string }
   | { t: 'mode.changed'; cid: string; mode: WindowMode; pos?: { x: number; y: number; screen?: number } }
   | { t: 'pack.progress'; id: string; done: number; total: number; step: string }
@@ -148,8 +153,21 @@ export interface PanelMemory {
   diary: string[]
 }
 
+/** What the talk bar shows: the last lines, the conversation they are in, and the earlier ones. */
+export interface TalkView {
+  /** Her name, for her lines. */
+  name: string
+  lines: Array<{ who: 'you' | 'her'; text: string }>
+  segment?: { id: string; title: string }
+  /** Newest first. */
+  segments: Array<{ id: string; title: string; createdAt: string }>
+  /** How big the conversation is, in plain words. */
+  size?: string
+}
+
 export type BrainMessage =
   | Welcome
+  | ({ t: 'talk' } & TalkView)
   | { t: 'reject'; reason: 'version' | 'token'; message: string }
   | { t: 'pong'; at: number }
   | { t: 'character.load'; cid: string; name: string; packId?: string; mode: WindowMode; subtitle?: { color?: string } }

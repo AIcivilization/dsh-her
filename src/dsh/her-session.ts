@@ -83,7 +83,12 @@ export interface DshServices {
     }): Promise<AgentHandleLike>
   }
   agentDefaultModel?: { currentSelection(): { provider: string; model: string } | undefined }
-  workspaceRegistry?: { create(path: string, title?: string): Promise<{ attachSession(id: string): Promise<void> }> }
+  workspaceRegistry?: {
+    create(path: string, title?: string): Promise<{ id?: string; attachSession(id: string): Promise<void> }>
+    list?(): Array<{ id: string }>
+    /** Move a workspace in the sidebar's order, before another. */
+    insertBefore?(id: string, beforeId: string): Promise<unknown>
+  }
   sessionTitle?: { rename(session: unknown, title: string): void }
   sessionQuery?: { readSession(id: string): Promise<{ events: Array<{ seq: number; type: string; data: unknown }> }> }
 }
@@ -115,6 +120,22 @@ export interface HerSessionDeps {
   services: () => DshServices | undefined
   logger: { info(message: string): void; warn(message: string): void }
   events: ReplyEvents
+}
+
+/** One conversation of hers: a session in her workspace. */
+export interface Segment {
+  id: string
+  title: string
+  createdAt: string
+}
+
+interface SessionRecord {
+  sessionId?: string
+  previous?: string | null
+  createdAt?: string
+  segments?: Segment[]
+  /** Her workspace was put first in the sidebar once; after that the user's order stands. */
+  movedToTop?: boolean
 }
 
 export class HerSession {
@@ -184,13 +205,57 @@ export class HerSession {
     return join(this.deps.dir, 'session.json')
   }
 
-  private recorded(): string | undefined {
+  private record(): SessionRecord {
     try {
-      const value = JSON.parse(readFileSync(this.recordFile(), 'utf8')) as { sessionId?: unknown }
-      return typeof value.sessionId === 'string' ? value.sessionId : undefined
+      return JSON.parse(readFileSync(this.recordFile(), 'utf8')) as SessionRecord
     } catch {
-      return undefined
+      return {}
     }
+  }
+
+  private saveRecord(change: SessionRecord): void {
+    writeFileSync(this.recordFile(), JSON.stringify({ ...this.record(), ...change }, null, 2))
+  }
+
+  private recorded(): string | undefined {
+    const { sessionId } = this.record()
+    return typeof sessionId === 'string' ? sessionId : undefined
+  }
+
+  /** Her conversations, newest last; the first one (from before there were several) included. */
+  segments(): Segment[] {
+    const record = this.record()
+    const list = Array.isArray(record.segments) ? record.segments.filter(s => typeof s?.id === 'string') : []
+    const current = record.sessionId
+    if (current !== undefined && !list.some(s => s.id === current)) list.unshift({ id: current, title: this.title, createdAt: record.createdAt ?? new Date(0).toISOString() })
+    return list
+  }
+
+  /** Start a new conversation in her workspace; the old one stays there. Her memory is shared. */
+  async startNew(): Promise<Segment> {
+    await this.dispose()
+    this.opening = undefined
+    const handle = await this.create(this.titleFor(new Date()))
+    this.handle = handle
+    return this.segments().at(-1)!
+  }
+
+  /** Go on with an earlier conversation: what you say from now on goes there. */
+  async resume(id: string): Promise<void> {
+    if (!this.segments().some(s => s.id === id)) throw new Error('没有这段对话')
+    if (this.sessionId === id && this.handle !== undefined) return
+    await this.dispose()
+    this.opening = undefined
+    this.saveRecord({ sessionId: id })
+    await this.ensure()
+  }
+
+  /** "她 · 小禾 · 11月6日", numbered when there is already one that day. */
+  private titleFor(now: Date): string {
+    const day = `${now.getMonth() + 1}月${now.getDate()}日`
+    const base = `${this.title} · ${day}`
+    const taken = this.segments().filter(s => s.title === base || s.title.startsWith(`${base} `)).length
+    return taken === 0 ? base : `${base} ${taken + 1}`
   }
 
   private async open(): Promise<AgentHandleLike> {
@@ -208,6 +273,18 @@ export class HerSession {
         logger.warn(`dsh-her: could not resume ${recorded} (${(error as Error).message}); creating a new session`)
       }
     }
+    this.handle = await this.create(this.title)
+    return this.handle
+  }
+
+  /** A new session in her workspace, recorded as her current conversation. */
+  private async create(title: string): Promise<AgentHandleLike> {
+    const services = this.deps.services()
+    if (services === undefined) throw new Error('DSH 的 agents 服务还不可用')
+    const { logger, route } = this.deps
+    const setup = (agentCtx: ScopedContext) => this.composeScope(agentCtx)
+    const recorded = this.recorded()
+    const before = this.segments()
     const sessionId = `dsh-her-${this.deps.cid}-${randomUUID()}`
     const room = join(this.deps.dir, 'room')
     mkdirSync(room, { recursive: true })
@@ -215,14 +292,30 @@ export class HerSession {
     const handle = await services.agents.create({ sessionId, meta: { cwd: room }, agentOptions: route, setup })
     try {
       await workspace?.attachSession(sessionId)
-      services.sessionTitle?.rename(handle.agent.session, this.title)
+      services.sessionTitle?.rename(handle.agent.session, title)
     } catch (error) {
       logger.warn(`dsh-her: session created but not attached/titled (${(error as Error).message})`)
     }
-    writeFileSync(this.recordFile(), JSON.stringify({ sessionId, previous: recorded ?? null, createdAt: new Date().toISOString() }, null, 2))
-    logger.info(`dsh-her: created ${this.title} (${sessionId})`)
-    this.handle = handle
+    const createdAt = new Date().toISOString()
+    this.saveRecord({ sessionId, previous: recorded ?? null, createdAt, segments: [...before, { id: sessionId, title, createdAt }].slice(-50) })
+    logger.info(`dsh-her: created ${title} (${sessionId})`)
     return handle
+  }
+
+  /**
+   * Her workspace goes first in the sidebar once, when she is set up (or
+   * updated to a version that does this); after that the user's order stands.
+   */
+  async moveToTopOnce(): Promise<void> {
+    if (this.record().movedToTop === true) return
+    const registry = this.deps.services()?.workspaceRegistry
+    if (registry?.list === undefined || registry.insertBefore === undefined) return
+    const room = join(this.deps.dir, 'room')
+    mkdirSync(room, { recursive: true })
+    const workspace = await registry.create(room, this.title)
+    const first = registry.list()[0]
+    if (workspace.id !== undefined && first !== undefined && first.id !== workspace.id) await registry.insertBefore(workspace.id, first.id)
+    this.saveRecord({ movedToTop: true })
   }
 
   private async composeScope(agentCtx: ScopedContext): Promise<void> {

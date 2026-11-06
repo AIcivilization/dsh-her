@@ -58,6 +58,9 @@ export const herApi = {
   tryPersona: (input: { name: string; persona: string; callYou: string; pronoun: string; history: Array<{ who: 'you' | 'her'; text: string }>; message: string }) =>
     post<{ reply: string }>('/persona/try', input),
   personaCard: (text: string) => post<{ card: { name: string; persona: string; callYou: string } }>('/persona/card', { text }),
+  talkNew: () => post<WithState>('/talk/new'),
+  talkResume: (id: string) => post<WithState>('/talk/resume', { id }),
+  talkSplit: (change: { idleHours?: number | null; maxTokens?: number | null; daily?: boolean }) => post<WithState>('/talk/split', change),
   initiativeSet: (change: { on?: boolean; perDay?: number; quietFrom?: number; quietTo?: number; focus?: 'off' | 'span' | 'always' }) => post<WithState>('/initiative/set', change),
   initiativeTry: () => post<WithState & { said: string }>('/initiative/try'),
   presetsList: () => post<WithState & { presets: StateView['presets']['list'] }>('/presets/list'),

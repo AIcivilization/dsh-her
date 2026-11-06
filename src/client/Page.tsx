@@ -12,7 +12,7 @@ import { UpdateBar } from './UpdateBar.tsx'
 import { Workshop } from './Workshop.tsx'
 import { Fold, useFolds } from './fold.tsx'
 import { SERVICE_SHORT, voiceLabel } from './choice.tsx'
-import { BodyStatus, Dot, InitiativeCard, KeyHelp, MemoryView, MicCheck, ModelPicker, MODE_TEXT, ModePicker, PackPicker, PersonaEditor, platformName, ScenePicker, VoicePicker, WebModePicker, WebPlaceCard, type Apply } from './parts.tsx'
+import { BodyStatus, Dot, InitiativeCard, KeyHelp, TalkCard, MemoryView, MicCheck, ModelPicker, MODE_TEXT, ModePicker, PackPicker, PersonaEditor, platformName, ScenePicker, VoicePicker, WebModePicker, WebPlaceCard, type Apply } from './parts.tsx'
 
 const POLL_MS = 2000
 
@@ -209,7 +209,7 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
   )
 }
 
-type Section = 'persona' | 'voice' | 'look' | 'model' | 'place' | 'initiative'
+type Section = 'persona' | 'voice' | 'look' | 'model' | 'place' | 'initiative' | 'talk'
 
 /** What she is set to right now, each with a way to change it. */
 function NowCard({ state, onChange }: { state: StateView; onChange: (section: Section) => void }) {
@@ -236,6 +236,7 @@ function NowCard({ state, onChange }: { state: StateView; onChange: (section: Se
       {row('声音', `${voiceLabel(state, c.voice.id)} · ${SERVICE_SHORT[serviceOf(c.voice.id)]}${c.voice.speed === 1 ? '' : ` · 语速 ${c.voice.speed}`}`, 'voice')}
       {row('模型', state.model === null ? '没有可用的模型' : `${state.model.provider} / ${state.model.model}`, 'model')}
       {row('主动说话', initiativeText(state), 'initiative')}
+      {row('对话', `${state.talk.segment?.title ?? '还没有'}${state.talk.size === undefined ? '' : ` · ${state.talk.size}`}`, 'talk')}
     </div>
   )
 }
@@ -246,7 +247,7 @@ function initiativeText(state: StateView): string {
   return focus.on ? '专注中' : `每天最多 ${settings.perDay} 次`
 }
 
-const SETTINGS_FOLDS: Record<Section, boolean> = { persona: false, voice: false, look: false, model: false, place: false, initiative: false }
+const SETTINGS_FOLDS: Record<Section, boolean> = { persona: false, voice: false, look: false, model: false, place: false, initiative: false, talk: false }
 
 /**
  * Everything she can be set to, one folded card each. Folded, a card is one
@@ -275,6 +276,7 @@ function Settings({ state, apply, jump, onJumped }: { state: StateView; apply: A
         <VoicePicker state={state} apply={apply} saveLabel="用这个声音" />)}
       {card('look', '外形', body.connected || body.web.connected ? `${pack?.name ?? '还没有外形'}${body.look === undefined ? '' : ` · ${body.look.scenes.length} 个场景`}` : '身体没连上', body.connected || body.web.connected ? (pack === undefined ? 'warn' : 'ok') : 'off',
         <><PackPicker state={state} apply={apply} /><ScenePicker state={state} apply={apply} /></>)}
+      {card('talk', '对话', `${state.talk.segment?.title ?? '还没有'}${state.talk.size === undefined ? '' : ` · ${state.talk.size}`}`, 'ok', <TalkCard state={state} apply={apply} />)}
       {card('initiative', '主动说话', initiativeText(state), state.initiative.settings.on ? 'ok' : 'off', <InitiativeCard state={state} apply={apply} />)}
       {card('model', '模型', state.model === null ? '没有可用的模型' : `${state.model.provider} / ${state.model.model}${state.model.chosen ? '' : '（dsh 默认）'}${state.problem === undefined ? '' : ' · 上一次回答失败了'}`,
         state.model === null || state.problem !== undefined ? 'bad' : 'ok', <ModelPicker state={state} apply={apply} />)}

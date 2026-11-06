@@ -58,4 +58,12 @@ export interface HerBridge {
   onMicMode(listener: (mode: MicMode) => void): void
   /** She is moving to another scene: fade out (the next scene loads after). */
   onFadeOut(listener: () => void): void
+  /** Open the talk bar (docs/对话入口设计.md). */
+  openBar(): void
+  /** The talk bar: you hold (true) or let go of (false) the talk button or key. */
+  hold(on: boolean): void
+  /** Her window: listen while held. */
+  onHold(listener: (on: boolean) => void): void
+  /** Bring dsh to the front (its page then opens her conversation). */
+  openDsh(): void
 }

@@ -36,10 +36,10 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, 
 import { fileURLToPath } from 'node:url'
 import { basename, dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { buildSystemPrompt, cardText, DEFAULT_VOICE, extractCues, extractSounds, FALLBACK_LINES, herPaths, initiativePrompt, invalidCharacter, judgeBargeIn, loadCharacter, memoryContext, OWN_PREFIX, parseOpening, parsePersonaCard, parseTouchLines, performanceSection, personaCardPrompt, readingMs, saveCharacter, SentenceSplitter, serviceOf, SOUND_SECTION, speakable, touchClip, touchLinesPrompt, TouchTracker, withSounds, type Character, type Moment, type TouchLines } from '../core/index.ts'
+import { buildSystemPrompt, cardText, DEFAULT_VOICE, extractCues, extractSounds, FALLBACK_LINES, herPaths, initiativePrompt, invalidCharacter, judgeBargeIn, loadCharacter, memoryContext, OWN_PREFIX, parseOpening, parsePersonaCard, parseTouchLines, performanceSection, personaCardPrompt, readingMs, saveCharacter, SentenceSplitter, serviceOf, SOUND_SECTION, speakable, touchClip, touchLinesPrompt, TouchTracker, withSounds, cleanSplit, lastLines, sizeText, splitReason, type Character, type Moment, type SplitSettings, type TalkLine, type TouchLines } from '../core/index.ts'
 import { digestPrompt, notePrompt, parseDigest, transcriptOf } from '../memory/digest.ts'
 import { dayOf, FileMemory } from '../memory/store.ts'
-import { PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type LookView, type PackSummary, type WindowMode } from '../protocol/index.ts'
+import { PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type LookView, type PackSummary, type TalkView, type WindowMode } from '../protocol/index.ts'
 import { BrainServer } from '../server/brain-server.ts'
 import { type AvatarView, API_BASE, apiHandlers, handle, type ApiRuntime } from './api.ts'
 import { bodyRunning, findDevBody, launchBody, type LaunchPlan } from './body-launcher.ts'
@@ -348,6 +348,8 @@ export function apply(ctx: Context, config: HerConfig): void {
     const uid = `own-${Date.now().toString(36)}-${nextOwn++}`
     ownLine = { uid, note }
     addNote(note)
+    ownLines = [...ownLines, { who: 'her' as const, text, time: Date.now(), conversation: session?.sessionId ?? '' }].slice(-20)
+    broadcastTalk()
     broadcast({ t: 'speak.begin', cid, uid })
     const splitter = new SentenceSplitter()
     const sentences = [...splitter.push(text), ...splitter.flush()]
@@ -434,6 +436,80 @@ export function apply(ctx: Context, config: HerConfig): void {
     if (line === undefined) return
     log({ event: 'touch', part, kind, line })
     sayOwnLine(line, `（备注：对方刚才${where}，你说了"${line}"。）`)
+  }
+
+  /**
+   * Her conversations (docs/对话入口设计.md): the talk bar's last lines, from her
+   * session and what she said by herself (openings and touch lines are not in
+   * it); when a new conversation starts by itself; the size of this one.
+   */
+  const talkFile = join(dir, 'talk.json')
+  let talk: { split: SplitSettings; lastAt: number; tokens: Record<string, number> } = { split: cleanSplit(undefined), lastAt: 0, tokens: {} }
+  try {
+    const saved = JSON.parse(readFileSync(talkFile, 'utf8')) as { split?: unknown; lastAt?: unknown; tokens?: unknown }
+    talk = { split: cleanSplit(saved.split), lastAt: typeof saved.lastAt === 'number' ? saved.lastAt : 0, tokens: typeof saved.tokens === 'object' && saved.tokens !== null ? saved.tokens as Record<string, number> : {} }
+  } catch {
+    // first run
+  }
+  const saveTalk = () => {
+    try {
+      writeFileSync(talkFile, `${JSON.stringify(talk, null, 2)}\n`)
+    } catch (error) {
+      ctx.logger.warn(`dsh-her: talk.json not written (${(error as Error).message})`)
+    }
+  }
+  let sessionLines: TalkLine[] = []
+  let ownLines: Array<TalkLine & { conversation: string }> = []
+  /** "完整对话" asked for: the dsh page that sees it first opens this session. */
+  let openRequest: { sessionId: string; at: number } | undefined
+  const talkView = (): TalkView => {
+    const id = session?.sessionId
+    const segments = session?.segments() ?? []
+    const current = segments.find(s => s.id === id)
+    const tokens = id === undefined ? 0 : talk.tokens[id] ?? 0
+    return {
+      name: character.name,
+      lines: lastLines(sessionLines, ownLines.filter(l => l.conversation === id), 6).map(({ who, text }) => ({ who, text })),
+      ...(current === undefined ? {} : { segment: { id: current.id, title: current.title } }),
+      segments: [...segments].reverse().slice(0, 12).map(({ id, title, createdAt }) => ({ id, title, createdAt })),
+      ...(tokens > 0 ? { size: sizeText(tokens) } : {}),
+    }
+  }
+  const broadcastTalk = () => broadcast({ t: 'talk', ...talkView() })
+  /** Read this conversation back: its last lines, and how big her last request was. */
+  const refreshTalk = async (): Promise<void> => {
+    const id = session?.sessionId
+    const query = services?.sessionQuery
+    if (id === undefined || query === undefined) return
+    const events = (await query.readSession(id)).events as Array<{ type: string; time?: number; data: unknown }>
+    sessionLines = transcriptOf(events, 0, Date.now() + 1000).slice(-12)
+    const usage = events.findLast(e => e.type === 'assistant/message' && (e.data as { usage?: unknown }).usage !== undefined)?.data as { usage?: { totalTokens?: number } } | undefined
+    if (typeof usage?.usage?.totalTokens === 'number') {
+      talk.tokens = { ...talk.tokens, [id]: usage.usage.totalTokens }
+      saveTalk()
+    }
+    broadcastTalk()
+  }
+  const refreshTalkSoon = () => void refreshTalk().catch((error: Error) => ctx.logger.warn(`dsh-her: talk lines not read (${error.message})`))
+  /** A new conversation in her workspace (the old one stays there; her memory is shared). */
+  const newConversation = async (why?: string): Promise<void> => {
+    if (session === undefined) throw new Error('她的会话还没准备好')
+    cut()
+    const segment = await session.startNew()
+    sessionLines = []
+    log({ event: 'conversation', action: 'new', id: segment.id, why: why ?? 'asked' })
+    broadcastTalk()
+  }
+  const resumeConversation = async (id: string): Promise<void> => {
+    if (session === undefined) throw new Error('她的会话还没准备好')
+    cut()
+    await session.resume(id)
+    log({ event: 'conversation', action: 'resume', id })
+    await refreshTalk()
+  }
+  const openConversation = () => {
+    const id = session?.sessionId
+    if (id !== undefined) openRequest = { sessionId: id, at: Date.now() }
   }
 
   /** Ready-made looks offered on the release, and the one being fetched. */
@@ -637,7 +713,10 @@ export function apply(ctx: Context, config: HerConfig): void {
   }
 
   const open = () => {
-    session?.ensure().catch(error => ctx.logger.warn(`dsh-her: her session not ready (${(error as Error).message})`))
+    session?.ensure()
+      .then(() => session?.moveToTopOnce())
+      .then(() => refreshTalk())
+      .catch(error => ctx.logger.warn(`dsh-her: her session not ready (${(error as Error).message})`))
   }
 
   /** Stop her current reply: generation, synthesis and every body's playback. */
@@ -679,7 +758,17 @@ export function apply(ctx: Context, config: HerConfig): void {
     const note = [...notes, ...(cutNote === undefined ? [] : [cutNote])].join('\n')
     cutNote = undefined
     notes = []
-    ;(note === '' ? Promise.resolve() : her.note(note))
+    const reason = her.sessionId === undefined ? undefined : splitReason(talk.split, { lastAt: talk.lastAt, tokens: talk.tokens[her.sessionId] ?? 0, now: new Date(), dayOf })
+    talk.lastAt = sentAt
+    saveTalk()
+    ;(reason === undefined ? Promise.resolve() : newConversation(reason).then(() => {
+      broadcast({ t: 'bubble', cid, text: `（新开了一段对话：${reason}）`, ttlMs: 4000 })
+    }))
+      .then(() => {
+        sessionLines = [...sessionLines, { who: 'you' as const, text, time: Date.now() }].slice(-12)
+        broadcastTalk()
+      })
+      .then(() => (note === '' ? undefined : her.note(note)))
       .then(() => her.say(text, via))
       .catch((error: Error) => {
         awaitingReply = false
@@ -717,6 +806,18 @@ export function apply(ctx: Context, config: HerConfig): void {
         break
       case 'focus.set':
         initiative.setFocus(message.on ? 'span' : 'off')
+        break
+      case 'talk.get':
+        broadcastTalk()
+        break
+      case 'talk.new':
+        void newConversation().catch((error: Error) => broadcast({ t: 'bubble', cid, text: `（没能新开一段：${error.message}）`, ttlMs: 6000 }))
+        break
+      case 'talk.resume':
+        void resumeConversation(message.id).catch((error: Error) => broadcast({ t: 'bubble', cid, text: `（没能接上那段：${error.message}）`, ttlMs: 6000 }))
+        break
+      case 'talk.open':
+        openConversation()
         break
       case 'user.text': {
         voice?.warm()
@@ -900,6 +1001,7 @@ export function apply(ctx: Context, config: HerConfig): void {
         ...(lastHeard === undefined ? {} : { heard: lastHeard }),
         ...(problem === undefined ? {} : { problem }),
         initiative: initiative.view(),
+        talk: { ...talkView(), split: talk.split, current: session?.sessionId ?? null },
         presets: { list: presetList, ...(presetState === undefined ? {} : { active: presetState }) },
         memory: { facts, episodes, diary, lastDigestDay: memory.lastDigestDay() ?? null },
       }
@@ -950,6 +1052,13 @@ export function apply(ctx: Context, config: HerConfig): void {
       if (parsed === 'refused') throw new Error('这张卡不能用：它把未成年人写成了恋爱或性的对象')
       if (parsed === undefined) throw new Error('模型没能读懂这张卡，再试一次，或者把主要内容直接贴进人设里')
       return parsed
+    },
+    talkNew: () => newConversation(),
+    talkResume: id => resumeConversation(id),
+    talkOpen: () => openConversation(),
+    talkSplit: change => {
+      talk = { ...talk, split: cleanSplit({ ...talk.split, ...change }) }
+      saveTalk()
     },
     initiativeSet: change => initiative.setSettings(change),
     initiativeFocus: choice => initiative.setFocus(choice),
@@ -1034,7 +1143,10 @@ export function apply(ctx: Context, config: HerConfig): void {
       if (screen !== undefined) webScreen = screen
       const { place, scope } = webBody.place()
       const avatar = webAvatar()
-      return { show: webShown(remote), mode: webBody.mode, place, scope, focus: initiative.focused, ...(avatar === undefined ? {} : { avatar }) }
+      // "完整对话" from a body: the first dsh page that asks after it opens her conversation.
+      const open = openRequest !== undefined && Date.now() - openRequest.at < 30_000 ? openRequest.sessionId : undefined
+      if (open !== undefined) openRequest = undefined
+      return { show: webShown(remote), mode: webBody.mode, place, scope, focus: initiative.focused, ...(open === undefined ? {} : { open }), ...(avatar === undefined ? {} : { avatar }) }
     },
     importBatch: async (batch, name) => {
       const dir = uploadTarget(uploadsDir, batch)
@@ -1290,6 +1402,7 @@ export function apply(ctx: Context, config: HerConfig): void {
           }
           speech?.end(attemptId)
           current = undefined
+          refreshTalkSoon()
         },
       },
     } as ConstructorParameters<typeof HerSession>[0])
@@ -1325,6 +1438,8 @@ export function apply(ctx: Context, config: HerConfig): void {
       logger: ctx.logger,
       welcome: client => {
         bodyPack = client.hello.packs[0] ?? bodyPack
+        // The talk bar's lines follow the welcome.
+        setTimeout(refreshTalkSoon, 0)
         return {
           t: 'welcome',
           v: PROTOCOL_VERSION,
@@ -1436,6 +1551,7 @@ export function apply(ctx: Context, config: HerConfig): void {
     get('events', request => webBody.connect(request.signal, () => {
       webBody.send({ t: 'welcome', v: PROTOCOL_VERSION, sessionId: session?.sessionId ?? '', characters: [{ cid, name: character.name, mode: 'overlay' }], config: { mic: config.voice.mic, bargeIn: true, focus: initiative.focused } })
       refreshBodyPack()
+      refreshTalkSoon()
       log({ event: 'web-body', state: 'connected' })
     }, () => {
       refreshBodyPack()

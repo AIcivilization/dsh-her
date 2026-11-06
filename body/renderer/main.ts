@@ -51,8 +51,6 @@ const FALSE_BARGE_WINDOW_MS = 30_000
 const stage = document.getElementById('stage') as HTMLDivElement
 const bubble = new Bubble(document.getElementById('bubble')!)
 const micDot = document.getElementById('mic') as HTMLDivElement
-const ask = document.getElementById('ask') as HTMLFormElement
-const askInput = document.getElementById('ask-input') as HTMLInputElement
 let player: Player | undefined
 let speech: SpeechPlayer | undefined
 let linkStatus: LinkStatus = 'connecting'
@@ -212,17 +210,10 @@ function makeHitTest(layout: PackLayout): (x: number, y: number) => boolean {
   }
 }
 
+/** Typing to her: the talk bar, in its own window (desktop) or on the page (web). */
 function openInput(): void {
-  ask.classList.add('show')
-  window.her.interactive(true)
   player?.touch()
-  askInput.focus()
-}
-
-function closeInput(): void {
-  ask.classList.remove('show')
-  askInput.value = ''
-  window.her.interactive(false)
+  window.her.openBar()
 }
 
 /** The talk shortcut: cut her off if she is talking, then listen for one utterance. */
@@ -235,24 +226,6 @@ function talk(): void {
   }
   player?.setState('listen')
   mic.listenOnce().catch(error => bubble.note(`（打不开麦克风：${(error as Error).message}）`, 6000))
-}
-
-function wireInput(): void {
-  ask.addEventListener('submit', event => {
-    event.preventDefault()
-    const text = askInput.value.trim()
-    closeInput()
-    if (text === '') return
-    const at = speech?.cut()
-    if (at !== undefined) void window.her.send({ t: 'interrupt', cid: '', ...at })
-    window.her.say(text).then(sent => {
-      if (!sent) bubble.note(linkStatus === 'rejected' ? '（dsh 不认我了，得重新配对）' : '（我现在连不上 dsh，等它开起来再说吧）')
-    }, console.error)
-  })
-  askInput.addEventListener('keydown', event => {
-    if (event.key === 'Escape') closeInput()
-  })
-  askInput.addEventListener('blur', () => { if (askInput.value.trim() === '') closeInput() })
 }
 
 /** A soft sound of being touched, made here: no file to ship. */
@@ -318,7 +291,7 @@ function wireTouch(config: BodyConfig, hitTest: (x: number, y: number) => boolea
     press = undefined
   }
   window.addEventListener('mousedown', event => {
-    if (event.button !== 0 || ask.contains(event.target as Node) || !hitTest(event.clientX, event.clientY)) return
+    if (event.button !== 0 || !hitTest(event.clientX, event.clientY)) return
     end()
     const { clientX: x, clientY: y } = event
     const timer = window.setTimeout(() => {
@@ -357,7 +330,7 @@ function wireOverlay(config: BodyConfig): void {
     if (value === onHer) return
     onHer = value
     // While the input box is open the window keeps the mouse.
-    if (!ask.classList.contains('show')) window.her.hit(value)
+    window.her.hit(value)
     document.body.style.cursor = value ? 'grab' : 'default'
   }
   window.addEventListener('mousemove', event => {
@@ -375,7 +348,7 @@ function wireOverlay(config: BodyConfig): void {
   })
   window.addEventListener('mouseleave', () => { if (drag === undefined) setOnHer(false) })
   window.addEventListener('mousedown', event => {
-    if (event.button === 0 && onHer && !ask.contains(event.target as Node)) {
+    if (event.button === 0 && onHer) {
       drag = { x: event.screenX, y: event.screenY, moved: false }
       player?.touch()
     }
@@ -386,6 +359,22 @@ function wireOverlay(config: BodyConfig): void {
     event.preventDefault()
     if (onHer) window.her.menu()
   })
+}
+
+/** Holding the talk button or key: cut her off, listen until let go, send it all. */
+function holdStart(): void {
+  player?.touch()
+  const at = speech?.cut()
+  if (at !== undefined) {
+    void window.her.send({ t: 'interrupt', cid: '', ...at })
+    bubble.cancel(at.uid)
+  }
+  player?.setState('listen')
+  mic.holdStart().catch(error => bubble.note(`（打不开麦克风：${(error as Error).message}）`, 6000))
+}
+
+function holdEnd(): void {
+  mic.holdEnd()
 }
 
 function setMicMode(mode: MicMode): void {
@@ -529,6 +518,7 @@ function installDebugHooks(): void {
 
 // Listeners first: the shortcut may fire while the config loads.
 window.her.onShowInput(openInput)
+window.her.onHold(on => { if (on) holdStart(); else holdEnd() })
 window.her.onTalk(talk)
 window.her.onMicMode(setMicMode)
 window.her.onBrain(onBrain)
@@ -599,7 +589,6 @@ async function main(): Promise<void> {
   window.her.onFadeOut(() => document.body.classList.add('leaving'))
   if (config.debug) installDebugHooks()
   await player?.start()
-  wireInput()
   if (config.mode === 'overlay') wireOverlay(config)
   else {
     window.addEventListener('contextmenu', () => window.her.menu())

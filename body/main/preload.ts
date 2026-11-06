@@ -22,6 +22,10 @@ const bridge: HerBridge = {
   onTalk: listener => { ipcRenderer.on('talk', () => listener()) },
   onMicMode: listener => { ipcRenderer.on('mic-mode', (_event, mode) => listener(mode)) },
   onFadeOut: listener => { ipcRenderer.on('fade-out', () => listener()) },
+  openBar: () => ipcRenderer.send('bar'),
+  hold: on => ipcRenderer.send('hold', on),
+  onHold: listener => { ipcRenderer.on('hold', (_event, on: boolean) => listener(on)) },
+  openDsh: () => ipcRenderer.send('open-dsh'),
 }
 
 contextBridge.exposeInMainWorld('her', bridge)

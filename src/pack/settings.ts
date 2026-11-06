@@ -19,6 +19,8 @@ export interface BodySettings {
   /** Per look: the scene she is in and how scenes switch. */
   looks?: Record<string, LookPrefs>
   mode?: Mode
+  /** Hold the right Option / Alt key in any program to talk (docs/对话入口设计.md); needs a system permission on macOS. */
+  holdKey?: boolean
 }
 
 export function loadSettings(home: string): BodySettings {

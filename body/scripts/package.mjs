@@ -72,6 +72,12 @@ const putApp = (resources) => {
   const appDir = join(resources, 'app')
   mkdirSync(appDir, { recursive: true })
   cpSync(join(bodyDir, 'dist'), join(appDir, 'dist'), { recursive: true })
+  // The keyboard hook for holding a key to talk (main.cjs keeps it external); its prebuilt binaries cover every platform.
+  for (const dep of ['uiohook-napi', 'node-gyp-build']) {
+    const from = join(bodyDir, 'node_modules', dep)
+    if (!existsSync(from)) throw new Error(`缺少 ${dep}（运行 npm ci）`)
+    cpSync(from, join(appDir, 'node_modules', dep), { recursive: true })
+  }
   writeFileSync(join(appDir, 'package.json'), `${JSON.stringify({ name: pkg.name, productName: 'dsh-her', version, main: pkg.main, license: pkg.license }, null, 2)}\n`)
   return appDir
 }

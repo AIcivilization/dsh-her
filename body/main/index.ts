@@ -20,7 +20,7 @@
  *   npm start -- --mode overlay --pack ~/dsh-her-dev-assets/bg2-stacked [--home ~/.dsh-her-dev] [--her-debug] [--her-mute]
  */
 
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerMonitor, screen, session, systemPreferences, Tray } from 'electron'
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerMonitor, screen, session, shell, systemPreferences, Tray } from 'electron'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
@@ -40,6 +40,11 @@ import { attachToWallpaper } from './wallpaper-win.ts'
 
 /** ⌃⌥Space / Ctrl+Alt+Space: talk to her. Alt+Space alone is taken by Windows' window menu. */
 const TALK_SHORTCUT = 'Control+Alt+Space'
+/** ⌃⌥↩ / Ctrl+Alt+Enter: the talk bar. */
+const BAR_SHORTCUT = 'Control+Alt+Enter'
+/** The right Option (macOS) / right Alt key, in uiohook's codes: hold it anywhere to talk. */
+const HOLD_KEYCODE = 3640
+const HOLD_KEY_NAME = process.platform === 'darwin' ? '右边的 Option' : '右边的 Alt'
 /** Room above her for the bubble, as a share of her height. */
 const BUBBLE_ROOM = 0.38
 /** A scene change fades out this long before the next scene comes in. */
@@ -437,7 +442,8 @@ function menuTemplate(): Electron.MenuItemConstructorOptions[] {
     ...(look === undefined ? [] : [sceneMenu(look)]),
     { type: 'separator' },
     { label: `和她说话（${process.platform === 'darwin' ? '⌃⌥空格' : 'Ctrl+Alt+空格'}）`, click: talk },
-    { label: '打字和她说', click: showInput },
+    { label: `和她说话：打字或按住说（${process.platform === 'darwin' ? '⌃⌥↩' : 'Ctrl+Alt+Enter'}）`, click: showInput },
+    { label: `任何程序里按住${HOLD_KEY_NAME}说话`, type: 'checkbox', checked: settings.holdKey === true, click: item => setHoldKey(item.checked) },
     { label: '人设…', click: () => openPanel('persona') },
     { label: '她记得的事…', click: () => openPanel('memory') },
     { label: '画面编排…', click: () => openPanel('clips') },
@@ -481,33 +487,117 @@ function refreshTray(): void {
   tray.setToolTip(`dsh-her · ${statusLabel()}`)
 }
 
-let typingWindow: BrowserWindow | undefined
+let barWindow: BrowserWindow | undefined
+const BAR_SIZE = { width: 470, height: 250 }
 
-/** A wallpaper window takes no keys: typing gets a small window of its own, and she stays where she is. */
-function openTyping(): void {
-  if (process.platform === 'darwin') app.focus({ steal: true })
-  if (typingWindow !== undefined && !typingWindow.isDestroyed()) {
-    typingWindow.show()
-    typingWindow.focus()
-    return
+/** Where the talk bar goes: beside her when she floats, else at the bottom of the screen you are on. */
+function barBounds(): Electron.Rectangle {
+  const { width, height } = BAR_SIZE
+  const her = mode === 'overlay' && win !== undefined && !win.isDestroyed() ? win.getBounds() : undefined
+  const area = (her === undefined ? screen.getDisplayNearestPoint(screen.getCursorScreenPoint()) : screen.getDisplayMatching(her)).workArea
+  let x = her === undefined ? area.x + (area.width - width) / 2 : her.x - width + 40
+  if (her !== undefined && x < area.x) x = her.x + her.width - 40
+  const y = her === undefined ? area.y + area.height - height - 24 : her.y + her.height - height - 12
+  return {
+    x: Math.round(Math.max(area.x, Math.min(x, area.x + area.width - width))),
+    y: Math.round(Math.max(area.y, Math.min(y, area.y + area.height - height))),
+    width, height,
   }
-  const area = screen.getPrimaryDisplay().workArea
-  const size = { width: 480, height: 96 }
-  typingWindow = new BrowserWindow({
-    ...size, x: Math.round(area.x + (area.width - size.width) / 2), y: area.y + area.height - size.height - 40,
-    frame: false, transparent: true, hasShadow: false, resizable: false, skipTaskbar: true, alwaysOnTop: true, show: false, backgroundColor: '#00000000',
-    webPreferences: { preload: join(__dirname, 'preload.cjs') },
-  })
-  typingWindow.setAlwaysOnTop(true, 'floating')
-  typingWindow.once('ready-to-show', () => typingWindow?.show())
-  typingWindow.on('closed', () => { typingWindow = undefined })
-  void typingWindow.loadFile(join(__dirname, 'input.html'))
 }
 
-/** Send to her page, except typing to her in the wallpaper. */
-function toHer(channel: 'show-input' | 'talk'): void {
-  if (mode === 'wallpaper' && channel === 'show-input') openTyping()
-  else win?.webContents.send(channel)
+/**
+ * The talk bar (docs/对话入口设计.md), wherever she is, even over a full-screen
+ * app: a window you called is allowed there; her own figure is not.
+ */
+function openBar(): void {
+  if (process.platform === 'darwin') app.focus({ steal: true })
+  if (barWindow !== undefined && !barWindow.isDestroyed()) {
+    barWindow.setBounds(barBounds())
+    barWindow.show()
+    barWindow.focus()
+    return
+  }
+  barWindow = new BrowserWindow({
+    ...barBounds(),
+    frame: false, transparent: true, hasShadow: false, resizable: false, skipTaskbar: true, alwaysOnTop: true, show: false, backgroundColor: '#00000000',
+    fullscreenable: false,
+    webPreferences: { preload: join(__dirname, 'preload.cjs') },
+  })
+  barWindow.setAlwaysOnTop(true, 'screen-saver')
+  barWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  barWindow.once('ready-to-show', () => {
+    barWindow?.show()
+    barWindow?.focus()
+  })
+  barWindow.on('closed', () => {
+    barWindow = undefined
+    // A held button whose window went away is let go.
+    win?.webContents.send('hold', false)
+  })
+  void barWindow.loadFile(join(__dirname, 'bar.html'))
+}
+
+function toHer(channel: 'talk'): void {
+  win?.webContents.send(channel)
+}
+
+/** Holding the key anywhere, through a keyboard hook (uiohook); off until asked for. */
+let holdHook: { stop(): void } | undefined
+let trustTimer: NodeJS.Timeout | undefined
+function setHoldKey(on: boolean): void {
+  settings = { ...settings, holdKey: on }
+  saveSettings(expand(home), settings)
+  if (on) startHoldHook()
+  else stopHoldHook()
+  refreshTray()
+}
+
+function startHoldHook(): void {
+  if (holdHook !== undefined) return
+  // macOS lets a program see keys pressed in other programs only once it is allowed (辅助功能).
+  if (process.platform === 'darwin' && !systemPreferences.isTrustedAccessibilityClient(false)) {
+    systemPreferences.isTrustedAccessibilityClient(true)
+    toPage('brain', { t: 'bubble', cid: '', text: `（在"系统设置 → 隐私与安全性 → 辅助功能"里打开 dsh-her，就能在任何程序里按住${HOLD_KEY_NAME}说话。我只听这一个键。）`, ttlMs: 15_000 })
+    clearInterval(trustTimer)
+    let tries = 0
+    trustTimer = setInterval(() => {
+      if (systemPreferences.isTrustedAccessibilityClient(false)) {
+        clearInterval(trustTimer)
+        startHoldHook()
+      } else if (++tries > 100 || settings.holdKey !== true) clearInterval(trustTimer)
+    }, 3000)
+    return
+  }
+  try {
+    const { uIOhook } = require('uiohook-napi') as typeof import('uiohook-napi')
+    let down = false
+    uIOhook.on('keydown', event => {
+      if (event.keycode !== HOLD_KEYCODE || down) return
+      down = true
+      win?.webContents.send('hold', true)
+    })
+    uIOhook.on('keyup', event => {
+      if (event.keycode !== HOLD_KEYCODE || !down) return
+      down = false
+      win?.webContents.send('hold', false)
+    })
+    uIOhook.start()
+    holdHook = {
+      stop: () => {
+        uIOhook.removeAllListeners()
+        uIOhook.stop()
+      },
+    }
+  } catch (error) {
+    console.warn(`keyboard hook failed (${(error as Error).message})`)
+    toPage('brain', { t: 'bubble', cid: '', text: `（按住${HOLD_KEY_NAME}说话打不开：${(error as Error).message}）`, ttlMs: 10_000 })
+  }
+}
+
+function stopHoldHook(): void {
+  clearInterval(trustTimer)
+  holdHook?.stop()
+  holdHook = undefined
 }
 
 let panelWindow: BrowserWindow | undefined
@@ -532,7 +622,7 @@ function openPanel(tab: 'persona' | 'memory' | 'clips' | 'scene', extra: Record<
 }
 
 function showInput(): void {
-  toHer('show-input')
+  openBar()
 }
 if (debug) Object.assign(globalThis, { herShowInput: showInput })
 
@@ -601,6 +691,10 @@ ipcMain.on('drag', (event, delta: { dx: number; dy: number }) => {
   target.setPosition(Math.round(x + delta.dx), Math.round(y + delta.dy))
   overlayPos = { x: x + delta.dx, y: y + delta.dy }
 })
+ipcMain.on('bar', () => openBar())
+ipcMain.on('hold', (_event, on: boolean) => { win?.webContents.send('hold', on === true) })
+// dsh's desktop app comes to the front; its page then opens her conversation (the brain told it which).
+ipcMain.on('open-dsh', () => { void shell.openExternal('dsh://open').catch(() => {}) })
 ipcMain.on('menu', (event) => {
   const target = BrowserWindow.fromWebContents(event.sender)
   if (target !== null) Menu.buildFromTemplate(menuTemplate()).popup({ window: target })
@@ -651,6 +745,8 @@ if (!app.requestSingleInstanceLock()) {
       })
     }
     globalShortcut.register(TALK_SHORTCUT, talk)
+    globalShortcut.register(BAR_SHORTCUT, openBar)
+    if (settings.holdKey === true) startHoldHook()
     setInterval(lookTick, 60_000)
     setInterval(reportPresence, PRESENCE_EVERY_MS)
     powerMonitor.on('lock-screen', reportPresence)
@@ -738,6 +834,7 @@ if (!app.requestSingleInstanceLock()) {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
+  stopHoldHook()
   link?.stop()
 })
 app.on('window-all-closed', () => app.quit())

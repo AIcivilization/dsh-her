@@ -80,11 +80,7 @@
     #bubble.thinking p::after { content: '…'; display: inline-block; animation: dots 1.2s steps(4, end) infinite; width: 1.4em; overflow: hidden; vertical-align: bottom; }
     @keyframes dots { from { width: 0; } to { width: 1.4em; } }
 
-    #ask { position: absolute; left: 50%; bottom: 14px; width: min(86%, 300px); transform: translateX(-50%); display: none; }
-    #ask.show { display: block; }
-    #ask input { width: 100%; box-sizing: border-box; padding: 9px 12px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.25);
       background: rgba(28, 26, 34, 0.9); color: #fff; font: inherit; font-size: 14px; outline: none; user-select: text; }
-    #ask input:focus { border-color: #b69cff; }
   </style>
 </head>
 <body>
@@ -94,7 +90,6 @@
   <div id="empty"><div class="face">她</div><p>还没有外形：去 dsh 的「她」页面导入一个，或者在形象工坊里做一个</p></div>
   <div id="bubble"><p></p></div>
   <div id="mic"></div>
-  <form id="ask"><input id="ask-input" autocomplete="off" placeholder="想和她说点什么…（回车发送，Esc 关闭）"></form>
   <script src="renderer.js"></script>
 </body>
 </html>

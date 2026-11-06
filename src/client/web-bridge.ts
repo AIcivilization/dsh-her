@@ -25,6 +25,8 @@ export interface FloatHost {
   needsGesture(): void
   /** Another tab took her over. */
   replaced(): void
+  /** Open the talk bar (double-clicking her). */
+  openBar(): void
   /** The "她" page: is she shown here, show or hide her, look at the brain's choices again. */
   hidden(): boolean
   setHidden(hidden: boolean): void
@@ -42,6 +44,8 @@ export interface FloatGuest {
   audioStates(): string[]
   /** A finger on a phone, at a point in her window. */
   tap(x: number, y: number): void
+  /** The talk bar's button or key: listen while held. */
+  hold(on: boolean): void
 }
 
 declare global {
@@ -49,6 +53,8 @@ declare global {
     __herFloat?: FloatHost
     __herGuest?: FloatGuest
     __herTap?: (x: number, y: number) => void
+    /** Open one of her conversations in dsh (set by the client plugin when dsh lets it). */
+    __herOpenSession?: (sessionId: string) => void
   }
 }
 
@@ -84,6 +90,7 @@ const brainListeners: Array<(message: BrainMessage, audio?: Uint8Array) => void>
 const statusListeners: Array<(status: LinkStatus, detail?: string) => void> = []
 const talkListeners: Array<() => void> = []
 const inputListeners: Array<() => void> = []
+const holdListeners: Array<(on: boolean) => void> = []
 let events: EventSource | undefined
 
 function decodeBase64(text: string): Uint8Array {
@@ -164,6 +171,14 @@ window.her = {
   },
   onMicMode: (_listener: (mode: MicMode) => void) => {},
   onFadeOut: () => {},
+  openBar: () => host()?.openBar(),
+  // Held from the bar on the page outside: it calls `__herGuest.hold`, which lands in onHold.
+  hold: () => {},
+  onHold: listener => {
+    holdListeners.push(listener)
+  },
+  // The page is dsh already.
+  openDsh: () => {},
 } satisfies HerBridge
 
 window.addEventListener('mouseup', () => host()?.dragEnd())
@@ -183,4 +198,7 @@ window.__herGuest = {
   },
   audioStates: () => audioContexts.map(context => context.state),
   tap: (x, y) => window.__herTap?.(x, y),
+  hold: on => {
+    for (const listener of holdListeners) listener(on)
+  },
 }

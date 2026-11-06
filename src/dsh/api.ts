@@ -9,7 +9,7 @@
  */
 
 import type { Character } from '../core/index.ts'
-import type { BodyMessage, LookView, PackSummary, WindowMode } from '../protocol/index.ts'
+import type { BodyMessage, LookView, PackSummary, TalkView, WindowMode } from '../protocol/index.ts'
 import type { WebConfig, WebMode, WebPlace, WebScope } from './web-body.ts'
 
 /** Her small picture in the page, and its moving version when she has one. */
@@ -27,7 +27,7 @@ import type { InstallState, ManualInstall } from './body-install.ts'
 import type { MingStatus } from '../voice/ming.ts'
 import type { MingSettings, OwnVoice } from '../voice/ming-voices.ts'
 
-import type { InitiativeSettings, PersonaFromCard } from '../core/index.ts'
+import type { InitiativeSettings, PersonaFromCard, SplitSettings } from '../core/index.ts'
 import type { FocusChoice, InitiativeView } from './initiative.ts'
 import type { Preset } from './presets.ts'
 
@@ -72,6 +72,8 @@ export interface StateView {
   }
   import: { state: 'idle' | 'picking' | 'running' | 'done' | 'failed'; done: number; total: number; step: string; lines: ReportLine[] }
   heard?: { text: string; at: number }
+  /** Her conversations: the bar's lines, this one and the earlier ones, when a new one starts by itself. */
+  talk: TalkView & { split: SplitSettings; current: string | null }
   /** Her speaking first: settings, focus, and why she is quiet right now. */
   initiative: InitiativeView
   /** Ready-made looks offered on the release, and the one being fetched. */
@@ -88,6 +90,11 @@ export interface ApiRuntime {
   tryPersona(input: { name: string; persona: string; callYou: string; pronoun: string; history: Array<{ who: 'you' | 'her'; text: string }>; message: string }): Promise<string>
   /** A persona card someone has, written up as her name and persona (not saved). */
   personaFromCard(text: string): Promise<PersonaFromCard>
+  talkNew(): Promise<void>
+  talkResume(id: string): Promise<void>
+  /** Ask a dsh page to open this conversation (the next one that checks in). */
+  talkOpen(): void
+  talkSplit(change: Partial<SplitSettings>): void
   initiativeSet(change: Partial<InitiativeSettings>): void
   initiativeFocus(choice: FocusChoice): void
   /** Have her say something now; what she said. */
@@ -106,7 +113,7 @@ export interface ApiRuntime {
   bodyOpenFolder(): void
   /** The web body: whether to show, her config, a message from the page, the setting. */
   /** `remote`: the page is open on another device than the one running dsh. */
-  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; mode: WebMode; place: WebPlace; scope: WebScope; focus: boolean; avatar?: AvatarView }
+  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; mode: WebMode; place: WebPlace; scope: WebScope; focus: boolean; open?: string; avatar?: AvatarView }
   /** A new folder for files coming from the browser, and importing it as a pack (with no desktop body). */
   webNewBatch(): string
   importBatch(batch: string, name?: string): Promise<void>
@@ -225,6 +232,25 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
         if (focus !== 'off' && focus !== 'span' && focus !== 'always') throw new ApiError('专注的选项不对')
         rt.initiativeFocus(focus)
       }
+      return withState()
+    },
+    '/talk/state': async () => ({ talk: rt.state().talk }),
+    '/talk/new': async () => {
+      await rt.talkNew()
+      return withState()
+    },
+    '/talk/resume': async body => {
+      await rt.talkResume(str(body.id, '对话'))
+      return withState()
+    },
+    '/talk/open': async () => {
+      rt.talkOpen()
+      return withState()
+    },
+    '/talk/split': async body => {
+      const hours = body.idleHours === null ? null : body.idleHours === undefined ? undefined : num(body.idleHours, '时间')
+      const tokens = body.maxTokens === null ? null : body.maxTokens === undefined ? undefined : num(body.maxTokens, '长度')
+      rt.talkSplit({ ...(hours === undefined ? {} : { idleHours: hours }), ...(tokens === undefined ? {} : { maxTokens: tokens }), ...(body.daily === undefined ? {} : { daily: body.daily === true }) })
       return withState()
     },
     '/initiative/try': async () => ({ said: await rt.initiativeTry(), state: rt.state() }),

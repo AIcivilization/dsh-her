@@ -19,6 +19,8 @@ import { isRemotePage } from '../core/where.ts'
 import { StackedView } from '../../body/renderer/stacked.ts'
 import type { AvatarView } from '../dsh/api.ts'
 import type { FloatHost } from './web-bridge.ts'
+import { TalkBar } from '../../body/renderer/talk-bar.ts'
+import type { TalkView } from '../protocol/index.ts'
 
 const STATUS_EVERY_MS = 5000
 const POS_KEY = 'dsh-her.web.pos'
@@ -34,6 +36,8 @@ const AVATAR_SIZE = 80
 /** As far in from the chat box's right edge as other apps' mascots sit. */
 const AVATAR_INSET = 42
 const PLACE_EVERY_MS = 400
+/** The talk bar reads her last lines this often while it is open. */
+const BAR_EVERY_MS = 2000
 /** How often the page says whether you are here, and when still means idle or away. */
 const PRESENCE_EVERY_MS = 30_000
 const IDLE_AFTER_MS = 2 * 60_000
@@ -92,7 +96,6 @@ export function mountWebFloat(): () => void {
   let wanted: Place = 'pet'
   let scope: Scope = 'page'
   let style: HTMLStyleElement | undefined
-  let typing: HTMLFormElement | undefined
   let avatar: AvatarView | undefined
   let avatarVideo: HTMLVideoElement | undefined
   let pillTimer: ReturnType<typeof setInterval> | undefined
@@ -212,7 +215,7 @@ export function mountWebFloat(): () => void {
         menu!.appendChild(button)
       }
       item(window.isSecureContext ? '和她说话（Ctrl+Alt+空格）' : '和她说话（要 HTTPS 才能用麦克风）', () => guest()?.talk(), !window.isSecureContext)
-      item('打字给她', () => (background() ? openTyping() : guest()?.showInput()))
+      item('打字给她', () => openTyping())
       item(focus ? '结束专注（她可以主动说话了）' : '专注一会儿（2 小时不主动说话）', () => {
         focus = !focus
         void post('/web/send', { message: { t: 'focus.set', on: focus } }).catch(() => {})
@@ -254,33 +257,74 @@ export function mountWebFloat(): () => void {
       void sync()
     },
     refresh: () => void sync(),
+    openBar: () => openTyping(),
   }
 
-  /** Typing to her as a background: her window is behind the page, so the box is out here. */
+  /**
+   * The talk bar (docs/对话入口设计.md), over the page: above her small picture
+   * when it is there, else at the bottom. It sends through the brain directly,
+   * so it works whether or not her window is on this page; holding to talk
+   * needs her window (the microphone is in it).
+   */
+  let bar: { element: HTMLElement; view?: TalkView; timer: ReturnType<typeof setInterval>; outside: (event: MouseEvent) => void } | undefined
+  const closeBar = () => {
+    if (bar === undefined) return
+    if (frame !== undefined) guest()?.hold(false)
+    clearInterval(bar.timer)
+    window.removeEventListener('mousedown', bar.outside, true)
+    bar.element.remove()
+    bar = undefined
+  }
   const openTyping = () => {
-    if (typing !== undefined) return typing.querySelector('input')?.focus()
-    const form = document.createElement('form')
-    form.style.cssText = 'position:fixed;z-index:1002;left:50%;bottom:28px;width:min(90vw,460px);transform:translateX(-50%)'
-    const input = document.createElement('input')
-    input.placeholder = '想和她说点什么…（回车发送，Esc 关闭）'
-    input.style.cssText = 'width:100%;box-sizing:border-box;padding:11px 14px;border-radius:12px;border:1px solid #b69cff;background:rgba(28,26,34,.96);color:#fff;font:14px system-ui,sans-serif;outline:none'
-    const close = () => {
-      form.remove()
-      typing = undefined
+    if (bar !== undefined) return (bar.element.querySelector('input') as HTMLInputElement | null)?.focus()
+    const holder = document.createElement('div')
+    const ui: TalkBar = new TalkBar({
+      say: async text => (await post('/web/send', { message: { t: 'user.text', text } }).then(r => r.ok, () => false)),
+      newConversation: () => void post('/talk/new', {}).then(refreshBar),
+      resume: id => void post('/talk/resume', { id }).then(refreshBar),
+      openFull: () => {
+        const id = bar?.view?.segment?.id
+        if (id !== undefined && window.__herOpenSession !== undefined) {
+          window.__herOpenSession(id)
+          closeBar()
+        } else ui.showNote('在左侧的"她"工作区里点开这段对话')
+      },
+      ...(frame === undefined ? {} : { hold: (on: boolean) => guest()?.hold(on) }),
+      close: closeBar,
+      more: () => {
+        if (frame === undefined) return hostApi.setHidden(false)
+        menuFromPill = true
+        hostApi.menu()
+      },
+    })
+    holder.append(ui.element)
+    const anchor = pill?.getBoundingClientRect()
+    const width = Math.min(440, innerWidth - 24)
+    const at = anchor !== undefined && anchor.width > 0
+      ? `right:${Math.max(12, innerWidth - anchor.right)}px;bottom:${Math.max(12, innerHeight - anchor.top + 8)}px`
+      : `left:${Math.round((innerWidth - width) / 2)}px;bottom:24px`
+    holder.style.cssText = `position:fixed;z-index:1003;width:${width}px;${at}`
+    document.body.appendChild(holder)
+    const refreshBar = async () => {
+      try {
+        const value = await (await post('/talk/state', {})).json() as { ok: boolean; talk?: TalkView }
+        if (value.ok && value.talk !== undefined && bar !== undefined) {
+          bar.view = value.talk
+          ui.show(value.talk)
+        }
+      } catch {
+        // the brain is restarting
+      }
     }
-    form.onsubmit = event => {
-      event.preventDefault()
-      const text = input.value.trim()
-      close()
-      if (text !== '') void guest()?.say(text)
+    // A press outside puts it away, unless something is typed or held.
+    const outside = (event: MouseEvent) => {
+      if (holder.contains(event.target as Node) || menu?.contains(event.target as Node) === true || pill?.contains(event.target as Node) === true) return
+      if (ui.idle) closeBar()
     }
-    input.onkeydown = event => {
-      if (event.key === 'Escape') close()
-    }
-    form.appendChild(input)
-    document.body.appendChild(form)
-    typing = form
-    input.focus()
+    window.addEventListener('mousedown', outside, true)
+    bar = { element: holder, timer: setInterval(() => void refreshBar(), BAR_EVERY_MS), outside }
+    void refreshBar()
+    ui.focus()
   }
 
   /** Follow the chat column when DSH's layout moves it (the sidebar folded, say). */
@@ -353,11 +397,11 @@ export function mountWebFloat(): () => void {
     }
     if (pill === undefined) {
       pill = document.createElement('button')
+      // The way to her: the talk bar (as a background she takes no clicks herself). When she is away, this brings her back too.
       pill.onclick = () => {
-        // The way to her: she may take no clicks herself, as a background. When she is away, this brings her back.
-        if (frame === undefined) return hostApi.setHidden(false)
-        menuFromPill = true
-        hostApi.menu()
+        if (frame === undefined && hidden) hostApi.setHidden(false)
+        if (bar === undefined) openTyping()
+        else closeBar()
       }
       document.body.appendChild(pill)
       pillTimer = setInterval(placePill, PLACE_EVERY_MS)
@@ -455,9 +499,11 @@ export function mountWebFloat(): () => void {
     if (document.hidden) return
     try {
       const res = await fetch('/api/dsh-her/web/status', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ screen: { w: screen.width, h: screen.height, scale: devicePixelRatio }, remote: isRemotePage(location.protocol, location.hostname) }) })
-      const value = await res.json() as { ok: boolean; show?: boolean; place?: Place; scope?: Scope; avatar?: AvatarView; focus?: boolean }
+      const value = await res.json() as { ok: boolean; show?: boolean; place?: Place; scope?: Scope; avatar?: AvatarView; focus?: boolean; open?: string }
       if (value.ok) {
         focus = value.focus === true
+        // "完整对话" from the desktop's talk bar: this page opens her conversation.
+        if (value.open !== undefined) window.__herOpenSession?.(value.open)
         shown = value.show === true
         avatar = value.avatar
         wanted = value.place === 'background' ? 'background' : 'pet'
@@ -489,7 +535,7 @@ export function mountWebFloat(): () => void {
     window.removeEventListener('wheel', noteInput)
     column.disconnect()
     style?.remove()
-    typing?.remove()
+    closeBar()
     window.removeEventListener('mousemove', forwardMove)
     window.removeEventListener('keydown', onKey)
     window.removeEventListener('pointerdown', onGesture)
