@@ -7,14 +7,14 @@ VPS 上她住在 dsh 的网页里：大脑在 VPS 上，你用任何设备（电
 ## 1. 装
 
 ```bash
-npm i -g pnpm @deepseek-ai/dsh
+npm i -g pnpm @deepseek-ai/dsh@latest
 ```
 
 ```bash
 dsh plugin --profile web add dsh-her
 ```
 
-需要 Node.js 22.18 或更新；dsh 用 pnpm 安装插件，所以要一起装上。这个 profile 要带 dsh 的网页界面（`@deepseek-ai/dsh-web-app`，`web` profile 默认带）。
+`@latest` 不能省：dsh 现在只发预发布版，只写包名时 npm 会说找不到。需要 Node.js 22.18 或更新；dsh 用 pnpm 安装插件，所以要一起装上。这个 profile 要带 dsh 的网页界面（`@deepseek-ai/dsh-web-app`，`web` profile 默认带）。
 
 ## 2. 打开网页：三种办法
 
