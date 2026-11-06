@@ -36,7 +36,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, 
 import { fileURLToPath } from 'node:url'
 import { basename, dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { buildSystemPrompt, DEFAULT_VOICE, extractCues, extractSounds, herPaths, invalidCharacter, judgeBargeIn, loadCharacter, memoryContext, OWN_PREFIX, performanceSection, readingMs, saveCharacter, serviceOf, SOUND_SECTION, speakable, withSounds, type Character } from '../core/index.ts'
+import { buildSystemPrompt, cardText, DEFAULT_VOICE, extractCues, extractSounds, FALLBACK_LINES, herPaths, initiativePrompt, invalidCharacter, judgeBargeIn, loadCharacter, memoryContext, OWN_PREFIX, parseOpening, parsePersonaCard, parseTouchLines, performanceSection, personaCardPrompt, readingMs, saveCharacter, SentenceSplitter, serviceOf, SOUND_SECTION, speakable, touchClip, touchLinesPrompt, TouchTracker, withSounds, type Character, type Moment, type TouchLines } from '../core/index.ts'
 import { digestPrompt, notePrompt, parseDigest, transcriptOf } from '../memory/digest.ts'
 import { dayOf, FileMemory } from '../memory/store.ts'
 import { PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type LookView, type PackSummary, type WindowMode } from '../protocol/index.ts'
@@ -46,12 +46,14 @@ import { bodyRunning, findDevBody, launchBody, type LaunchPlan } from './body-la
 import { compareVersions, desktopBodyExists, downloadFolder, install, installDownloaded, installedBody, installedPlan, latestRelease, manualInstall, type InstallState, type ManualInstall } from './body-install.ts'
 import { IDLE_IMPORT, type ImportStatus, type ReportLine } from './import-status.ts'
 import { DESK_DIR, newProject, sceneDir } from '../core/workshop.ts'
-import { assignClip, avatarOf, exampleFile, examples, exportProject, findProject, importProject, listProjects, prepareImport, projectStatus, removeStray, saveProject } from './workshop.ts'
+import { assignClip, avatarIn, avatarOf, exampleFile, examples, exportProject, findProject, importProject, listProjects, prepareImport, projectStatus, removeStray, saveProject } from './workshop.ts'
 import type { HerConfig } from './config.ts'
 import { HerSession, type DshServices, type ModelRoute } from './her-session.ts'
 import { heardText, SpeechQueue } from '../voice/speech-queue.ts'
 import { webShows, fileResponse, packFile, WEB_BASE, WebBody, type WebMode } from './web-body.ts'
 import { saveUpload, uploadAllowed, uploadTarget } from './uploads.ts'
+import { Initiative } from './initiative.ts'
+import { cachePreview, fetchPresets, installPreset, previewPath, type Preset } from './presets.ts'
 import { importLook, type LookRequest } from '../pack/import-look.ts'
 import { importPack } from '../pack/import.ts'
 import { plateIn, saveFrame } from '../pack/frame.ts'
@@ -135,6 +137,14 @@ const STOP_WORDS = new Set(['停', '停下', 'stop'])
 const MEMORY_WORDS = new Set(['记忆', 'memory'])
 const INTERRUPT_CHECK = '测打断'
 const DIAGNOSE = '诊断'
+const OPEN_WORD = '开口'
+
+/** How often she looks whether to speak first. */
+const INITIATIVE_CHECK_MS = 60_000
+/** What she told herself about her own lines and your touches waits for your next words; only the latest few matter. */
+const MAX_NOTES = 4
+/** After her touch lines could not be written, not again before this. */
+const TOUCH_LINES_RETRY_MS = 10 * 60_000
 
 /** How long after DSH starts to wait for a running body before starting one. */
 const LAUNCH_AFTER_MS = 3000
@@ -309,6 +319,128 @@ export function apply(ctx: Context, config: HerConfig): void {
     const now = new Date()
     return memoryContext({ profile: memory.profile(), recent: memory.recent(now), due: memory.due(now) })
   }
+  /** What she said first and how you touched her, told to her session before your next words. */
+  let notes: string[] = []
+  const addNote = (note: string) => {
+    notes = [...notes, note].slice(-MAX_NOTES)
+  }
+  /** Her own line in progress (an opening, a touch line), outside her session. */
+  let ownLine: { uid: string; note: string } | undefined
+  let nextOwn = 1
+  /** Waiting for a reply to start, and until when her voice is still playing. */
+  let awaitingReply = false
+  let speakingUntil = 0
+  const herBusy = () => current !== undefined || awaitingReply || Date.now() < speakingUntil
+
+  /** Say one sentence of hers: her sound marks and performance tags are taken out, the rest goes to the voice. */
+  const saySentence = (uid: string, seq: number, text: string) => {
+    // Ming can sigh and laugh: those tags become its sound markers, out of the subtitle.
+    const sounds = usesMing() ? extractSounds(text) : undefined
+    const performed = extractCues(sounds?.text ?? text, bodyPack)
+    const spoken = sounds !== undefined && sounds.before.length + sounds.after.length > 0 ? withSounds(performed.text, sounds) : undefined
+    if (performed.text !== '' || performed.cues.length > 0) speech?.say(uid, seq, performed.text, performed.cues, spoken)
+  }
+
+  /** She says something by herself, not as a reply: the session hears of it before your next words. */
+  const sayOwnLine = (text: string, note: string) => {
+    if (speech === undefined) return
+    voice?.warm()
+    const uid = `own-${Date.now().toString(36)}-${nextOwn++}`
+    ownLine = { uid, note }
+    addNote(note)
+    broadcast({ t: 'speak.begin', cid, uid })
+    const splitter = new SentenceSplitter()
+    const sentences = [...splitter.push(text), ...splitter.flush()]
+    sentences.forEach((sentence, seq) => saySentence(uid, seq, sentence))
+    speech.end(uid)
+    speakingUntil = Math.max(speakingUntil, Date.now() + readingMs(text))
+  }
+
+  /** The last few lines you two said, for her opening. */
+  const lastTalk = async (): Promise<string[]> => {
+    const id = session?.sessionId
+    const query = services?.sessionQuery
+    if (id === undefined || query === undefined) return []
+    const now = Date.now()
+    const lines = transcriptOf((await query.readSession(id)).events as Array<{ type: string; time?: number; data: unknown }>, now - 3 * 86_400_000, now + 1000)
+    return lines.slice(-6).map(line => `${line.who === 'you' ? '对方' : '你'}：${line.text}`)
+  }
+  const herSystem = () => buildSystemPrompt({
+    name: character.name, persona: character.persona, you: { call: character.callYou, pronoun: character.pronoun },
+    performance: performanceSection(bodyPack), aboutYou: aboutYou(), now: new Date(),
+  })
+
+  const initiative = new Initiative({
+    file: join(dir, 'initiative.json'),
+    dayOf,
+    ready: () => character.onboarded,
+    bodyHere: () => desktopConnected() || webBody.connected,
+    busy: herBusy,
+    due: now => memory.due(now),
+    compose: async (moment: Moment | undefined, recent: string[]) => {
+      const user = initiativePrompt(moment ?? { kind: 'company' }, recent, await lastTalk().catch(() => []))
+      return parseOpening(await complete(herSystem(), user, 600))
+    },
+    speak: text => sayOwnLine(text, `（备注：刚才是你主动对对方说的："${text}"。）`),
+    log: entry => log(entry),
+    focusChanged: focus => server?.broadcast({ t: 'config', focus }),
+  })
+
+  /** Her lines for being touched, written once for this persona and kept. */
+  const touchFile = join(dir, 'touch-lines.json')
+  const tracker = new TouchTracker()
+  let touchLines: { hash: string; lines: TouchLines } | undefined
+  try {
+    touchLines = JSON.parse(readFileSync(touchFile, 'utf8')) as typeof touchLines
+  } catch {
+    // not written yet
+  }
+  let writingLines = false
+  let touchLinesRetryAt = 0
+  const personaHash = () => createHash('sha1').update(`${character.name}\n${character.persona}`).digest('hex').slice(0, 12)
+  const ensureTouchLines = () => {
+    if (writingLines || !character.onboarded || touchLines?.hash === personaHash() || Date.now() < touchLinesRetryAt) return
+    writingLines = true
+    const hash = personaHash()
+    void complete(herSystem(), touchLinesPrompt(), 800).then(answer => {
+      const lines = parseTouchLines(answer)
+      if (lines === undefined) {
+        log({ event: 'touch-lines', unparsable: answer.slice(0, 400) })
+        throw new Error('模型没有给出能读懂的结果')
+      }
+      touchLines = { hash, lines }
+      writeFileSync(touchFile, `${JSON.stringify(touchLines, null, 2)}\n`)
+      log({ event: 'touch-lines', hash })
+    }).catch((error: Error) => {
+      touchLinesRetryAt = Date.now() + TOUCH_LINES_RETRY_MS
+      log({ event: 'touch-lines', error: error.message })
+    }).finally(() => { writingLines = false })
+  }
+  const linesNow = (): TouchLines => (touchLines?.hash === personaHash() ? touchLines.lines : FALLBACK_LINES)
+
+  /** You touched her: the body has already moved; a clip she has for it, and now and then a word. */
+  const touched = (message: Extract<BodyMessage, { t: 'touch' }>) => {
+    const part = message.part === 'head' ? 'head' : 'body'
+    const kind = message.kind === 'long' ? 'long' : 'tap'
+    initiative.heardYou()
+    ensureTouchLines()
+    const where = kind === 'long' ? '摸了摸你的头' : part === 'head' ? '点了点你的头' : '戳了你一下'
+    if (herBusy()) return
+    const clip = touchClip(bodyPack, part)
+    if (clip !== undefined && 'act' in clip) void playAction(clip.act)
+    else if (clip !== undefined) broadcast({ t: 'emotion', cid, emotion: clip.emotion })
+    const mood = tracker.next(part, kind, Date.now())
+    const line = mood === undefined ? undefined : tracker.pick(linesNow()[mood])
+    if (line === undefined) return
+    log({ event: 'touch', part, kind, line })
+    sayOwnLine(line, `（备注：对方刚才${where}，你说了"${line}"。）`)
+  }
+
+  /** Ready-made looks offered on the release, and the one being fetched. */
+  let presetList: Preset[] = []
+  let presetState: { id: string; state: 'downloading' | 'failed'; done: number; total: number; error?: string } | undefined
+  let presetDownload: AbortController | undefined
+
   /** The last barge-in, to check the utterance that follows it for echo. */
   let lastCut: { uid: string; at: number } | undefined
   /** The pack of the most recently connected body: what she can perform. */
@@ -510,6 +642,12 @@ export function apply(ctx: Context, config: HerConfig): void {
 
   /** Stop her current reply: generation, synthesis and every body's playback. */
   const cut = () => {
+    if (ownLine !== undefined) {
+      speech?.cancel(ownLine.uid)
+      broadcast({ t: 'speak.cancel', cid, uid: ownLine.uid })
+      ownLine = undefined
+      speakingUntil = 0
+    }
     if (current === undefined) return
     session?.interrupt()
     speech?.cancel(current.attemptId)
@@ -522,23 +660,29 @@ export function apply(ctx: Context, config: HerConfig): void {
     cut()
     sentAt = Date.now()
     lastTalkAt = sentAt
+    awaitingReply = true
+    speakingUntil = 0
+    initiative.heardYou(sentAt)
     // A voice that has to start up (Ming after a quiet while) starts while she thinks.
     voice?.warm()
     broadcast({ t: 'state', cid, state: 'think' })
     clearTimeout(stuckTimer)
     stuckTimer = setTimeout(() => {
       log({ event: 'stuck', text, waitedMs: STUCK_AFTER_MS })
+      awaitingReply = false
       void logQuietTurn()
       broadcast({ t: 'state', cid, state: 'idle' })
       broadcast({ t: 'bubble', cid, text: '（我好像卡住了，没能开始回答。看看 dsh 里她的会话和模型设置？）', ttlMs: 8000 })
     }, STUCK_AFTER_MS)
     stuckTimer.unref()
     const her = session
-    const note = cutNote
+    const note = [...notes, ...(cutNote === undefined ? [] : [cutNote])].join('\n')
     cutNote = undefined
-    ;(note === undefined ? Promise.resolve() : her.note(note))
+    notes = []
+    ;(note === '' ? Promise.resolve() : her.note(note))
       .then(() => her.say(text, via))
       .catch((error: Error) => {
+        awaitingReply = false
         broadcast({ t: 'state', cid, state: 'idle' })
         broadcast({ t: 'bubble', cid, text: `（我还没准备好：${error.message}）`, ttlMs: 6000 })
       })
@@ -552,12 +696,28 @@ export function apply(ctx: Context, config: HerConfig): void {
       : `（备注：你上一段话只说到"${heard}"就被对方打断了，后面的部分对方没有听到。）`
     log({ event: 'interrupted', uid, seq, playedMs, heard })
     lastCut = { uid, at: Date.now() }
+    if (ownLine?.uid === uid) {
+      // What she said by herself was cut: the note above says how far she got, not the whole line.
+      const whole = ownLine.note
+      notes = notes.filter(n => n !== whole)
+      ownLine = undefined
+      speakingUntil = 0
+    }
     if (current?.attemptId === uid) session?.interrupt()
     speech?.cancel(uid)
   }
 
-  const onBodyMessage = (message: BodyMessage, audio: Uint8Array | undefined) => {
+  const onBodyMessage = (message: BodyMessage, audio: Uint8Array | undefined, source: 'desktop' | 'web' = 'desktop') => {
     switch (message.t) {
+      case 'presence':
+        if (message.state === 'active' || message.state === 'idle' || message.state === 'away') initiative.report(source, message.state)
+        break
+      case 'touch':
+        touched(message)
+        break
+      case 'focus.set':
+        initiative.setFocus(message.on ? 'span' : 'off')
+        break
       case 'user.text': {
         voice?.warm()
         const text = message.text.trim()
@@ -663,10 +823,12 @@ export function apply(ctx: Context, config: HerConfig): void {
    * With no desktop body the brain imports by itself (it has the files and
    * ffmpeg). Progress and the report show the same way as from a body.
    */
+  /** Her small picture: from the 形象工坊 project she was made in, or kept with a ready-made look. */
+  const lookAvatar = (lookId: string) => avatarOf(lookId) ?? (/^[\w-]+$/.test(lookId) ? avatarIn(join(paths.root, 'looks', lookId)) : undefined)
   /** Her small picture for the look she wears, with an address that changes when the picture does. */
   const webAvatar = (): AvatarView | undefined => {
     const active = webBody.activeId()
-    const avatar = active?.startsWith('look:') === true ? avatarOf(active.slice('look:'.length)) : undefined
+    const avatar = active?.startsWith('look:') === true ? lookAvatar(active.slice('look:'.length)) : undefined
     if (avatar === undefined) return undefined
     const version = (path: string) => Math.floor(statSync(path).mtimeMs).toString(36)
     return {
@@ -737,6 +899,8 @@ export function apply(ctx: Context, config: HerConfig): void {
         import: importStatus,
         ...(lastHeard === undefined ? {} : { heard: lastHeard }),
         ...(problem === undefined ? {} : { problem }),
+        initiative: initiative.view(),
+        presets: { list: presetList, ...(presetState === undefined ? {} : { active: presetState }) },
         memory: { facts, episodes, diary, lastDigestDay: memory.lastDigestDay() ?? null },
       }
     },
@@ -773,6 +937,51 @@ export function apply(ctx: Context, config: HerConfig): void {
       [...history.map(h => `${h.who === 'you' ? '对方' : '你'}：${h.text}`), `对方：${message}`, '（只回复你接下来说的话，不要带"你："前缀。）'].join('\n'),
       300,
     ),
+    personaFromCard: async raw => {
+      const text = cardText(raw)
+      if (text === '') throw new Error('先把人设卡的内容贴进来')
+      // A model now and then answers around the JSON: once more before asking you to do anything.
+      let parsed: ReturnType<typeof parsePersonaCard>
+      for (let tries = 0; tries < 2 && parsed === undefined; tries++) {
+        const answer = await complete(personaCardPrompt(), `人设卡：\n${text}`, 1600)
+        parsed = parsePersonaCard(answer)
+        if (parsed === undefined) log({ event: 'persona-card', unparsable: answer.slice(0, 400) })
+      }
+      if (parsed === 'refused') throw new Error('这张卡不能用：它把未成年人写成了恋爱或性的对象')
+      if (parsed === undefined) throw new Error('模型没能读懂这张卡，再试一次，或者把主要内容直接贴进人设里')
+      return parsed
+    },
+    initiativeSet: change => initiative.setSettings(change),
+    initiativeFocus: choice => initiative.setFocus(choice),
+    initiativeTry: () => initiative.tryNow(),
+    presetsRefresh: async () => {
+      const base = config.body.releases
+      presetList = await fetchPresets(base)
+      await Promise.all(presetList.map(preset => cachePreview(paths.root, base, preset)))
+      return presetList
+    },
+    presetUse: id => {
+      const preset = presetList.find(p => p.id === id)
+      if (preset === undefined) throw new Error('没有这个预设')
+      if (presetState?.state === 'downloading') throw new Error('已经有一个在下载了，等它做完')
+      presetState = { id, state: 'downloading', done: 0, total: preset.size }
+      presetDownload = new AbortController()
+      void installPreset(paths.root, config.body.releases, preset, (done, total) => {
+        presetState = { id, state: 'downloading', done, total }
+      }, presetDownload.signal).then(() => {
+        presetState = undefined
+        log({ event: 'preset', id })
+        const packId = preset.kind === 'look' ? `look:${id}` : id
+        if (desktopConnected()) broadcast({ t: 'pack.use', packId })
+        else {
+          webBody.use(packId)
+          refreshBodyPack()
+        }
+      }, (error: Error) => {
+        presetState = presetDownload?.signal.aborted === true ? undefined : { id, state: 'failed', done: 0, total: preset.size, error: error.message }
+      }).finally(() => { presetDownload = undefined })
+    },
+    presetCancel: () => presetDownload?.abort(),
     previewVoice: async (id, speed, text) => {
       if (voice === undefined) throw new Error('她的声音还没准备好')
       const audio = await voice.preview(text, id, speed)
@@ -825,7 +1034,7 @@ export function apply(ctx: Context, config: HerConfig): void {
       if (screen !== undefined) webScreen = screen
       const { place, scope } = webBody.place()
       const avatar = webAvatar()
-      return { show: webShown(remote), mode: webBody.mode, place, scope, ...(avatar === undefined ? {} : { avatar }) }
+      return { show: webShown(remote), mode: webBody.mode, place, scope, focus: initiative.focused, ...(avatar === undefined ? {} : { avatar }) }
     },
     importBatch: async (batch, name) => {
       const dir = uploadTarget(uploadsDir, batch)
@@ -864,7 +1073,7 @@ export function apply(ctx: Context, config: HerConfig): void {
     },
     // Beside a desktop body she keeps quiet, unless that desktop is on another computer than this page.
     webConfig: remote => webBody.config(desktopConnected() && !remote),
-    webSend: message => onBodyMessage(withCid(message), undefined),
+    webSend: message => onBodyMessage(withCid(message), undefined, 'web'),
     webSetMode: (mode: WebMode) => {
       webBody.mode = mode
     },
@@ -1041,6 +1250,9 @@ export function apply(ctx: Context, config: HerConfig): void {
       events: {
         start(attemptId) {
           clearTimeout(stuckTimer)
+          awaitingReply = false
+          // A reply means someone is talking to her, wherever from (dsh's own page, `/her`).
+          initiative.heardYou()
           current = { attemptId, startedAt: Date.now(), sentences: [] }
           log({ event: 'start', attemptId, sinceSendMs: sentAt === undefined ? null : current.startedAt - sentAt })
           broadcast({ t: 'speak.begin', cid, uid: attemptId })
@@ -1057,11 +1269,7 @@ export function apply(ctx: Context, config: HerConfig): void {
           onFirstSentence = undefined
           problem = undefined
           log({ event: 'sentence', attemptId, text, sinceSendMs: sentAt === undefined ? null : now - sentAt })
-          // Ming can sigh and laugh: those tags become its sound markers, out of the subtitle.
-          const sounds = usesMing() ? extractSounds(text) : undefined
-          const performed = extractCues(sounds?.text ?? text, bodyPack)
-          const spoken = sounds !== undefined && sounds.before.length + sounds.after.length > 0 ? withSounds(performed.text, sounds) : undefined
-          if (performed.text !== '' || performed.cues.length > 0) speech?.say(attemptId, seq, performed.text, performed.cues, spoken)
+          saySentence(attemptId, seq, text)
         },
         end(attemptId, outcome) {
           log({ event: 'end', attemptId, outcome, sinceSendMs: sentAt === undefined ? null : Date.now() - sentAt })
@@ -1094,6 +1302,7 @@ export function apply(ctx: Context, config: HerConfig): void {
     speech = new SpeechQueue((text, cues) => herVoice.synthesize(speakable(text), cues), {
       sentence(uid, seq, text, audio, cues) {
         const withCues = cues.length === 0 ? {} : { cues }
+        speakingUntil = Math.max(speakingUntil, Date.now()) + (audio?.durationMs ?? readingMs(text))
         if (audio === undefined) {
           broadcast({ t: 'speak.seg', cid, uid, seq, text, durationMs: text === '' ? 300 : readingMs(text), ...withCues })
           return
@@ -1121,7 +1330,7 @@ export function apply(ctx: Context, config: HerConfig): void {
           v: PROTOCOL_VERSION,
           sessionId: session?.sessionId ?? '',
           characters: [{ cid, name: character.name, mode: 'overlay' }],
-          config: { mic: config.voice.mic, bargeIn: true },
+          config: { mic: config.voice.mic, bargeIn: true, focus: initiative.focused },
         }
       },
       message: (_client, message, audio) => onBodyMessage(message, audio),
@@ -1160,6 +1369,11 @@ export function apply(ctx: Context, config: HerConfig): void {
     updateTimer.unref()
     const digestTimer = setInterval(digestTick, DIGEST_CHECK_MS)
     const noteTimer = setInterval(noteTick, NOTE_CHECK_MS)
+    const initiativeTimer = setInterval(() => {
+      initiative.tick()
+      ensureTouchLines()
+    }, INITIATIVE_CHECK_MS)
+    initiativeTimer.unref()
     noteTimer.unref()
     digestTimer.unref()
 
@@ -1169,6 +1383,7 @@ export function apply(ctx: Context, config: HerConfig): void {
       clearInterval(updateTimer)
       clearInterval(digestTimer)
       clearInterval(noteTimer)
+      clearInterval(initiativeTimer)
       clearTimeout(stuckTimer)
       herVoice.stop()
       voice = undefined
@@ -1210,12 +1425,16 @@ export function apply(ctx: Context, config: HerConfig): void {
     get('file', request => webBody.file(request))
     get('avatar', request => {
       const active = webBody.activeId()
-      const avatar = active?.startsWith('look:') === true ? avatarOf(active.slice('look:'.length)) : undefined
+      const avatar = active?.startsWith('look:') === true ? lookAvatar(active.slice('look:'.length)) : undefined
       const path = new URL(request.url).searchParams.has('clip') ? avatar?.clip : avatar?.path
       return path === undefined ? new Response('not found', { status: 404 }) : fileResponse(path, request, true)
     })
+    get('preset-preview', request => {
+      const path = previewPath(paths.root, new URL(request.url).searchParams.get('id') ?? '')
+      return path === undefined ? new Response('not found', { status: 404 }) : new Response(readFileSync(path), { headers: { 'content-type': 'image/png', 'cache-control': 'private, no-cache' } })
+    })
     get('events', request => webBody.connect(request.signal, () => {
-      webBody.send({ t: 'welcome', v: PROTOCOL_VERSION, sessionId: session?.sessionId ?? '', characters: [{ cid, name: character.name, mode: 'overlay' }], config: { mic: config.voice.mic, bargeIn: true } })
+      webBody.send({ t: 'welcome', v: PROTOCOL_VERSION, sessionId: session?.sessionId ?? '', characters: [{ cid, name: character.name, mode: 'overlay' }], config: { mic: config.voice.mic, bargeIn: true, focus: initiative.focused } })
       refreshBodyPack()
       log({ event: 'web-body', state: 'connected' })
     }, () => {
@@ -1390,6 +1609,9 @@ export function apply(ctx: Context, config: HerConfig): void {
         }
         if (text.startsWith(INTERRUPT_CHECK)) return checkInterrupt(session, text.slice(INTERRUPT_CHECK.length).trim() || '给我讲一个很长很长的睡前故事，至少讲十句。')
         if (text === DIAGNOSE) return diagnose(session)
+        if (text === OPEN_WORD) {
+          return initiative.tryNow().then(said => ({ kind: 'success' as const, text: `她说：${said}` }), (error: Error) => ({ kind: 'error' as const, text: error.message }))
+        }
         const memoryReply = memoryCommand(text)
         if (memoryReply !== undefined) return memoryReply
         sentAt = Date.now()

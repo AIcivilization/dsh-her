@@ -34,6 +34,10 @@ const AVATAR_SIZE = 80
 /** As far in from the chat box's right edge as other apps' mascots sit. */
 const AVATAR_INSET = 42
 const PLACE_EVERY_MS = 400
+/** How often the page says whether you are here, and when still means idle or away. */
+const PRESENCE_EVERY_MS = 30_000
+const IDLE_AFTER_MS = 2 * 60_000
+const AWAY_AFTER_MS = 10 * 60_000
 
 /** The chat box: the first rounded, painted card around the text being typed, whatever DSH calls it. */
 function chatBox(): Element | undefined {
@@ -92,6 +96,21 @@ export function mountWebFloat(): () => void {
   let avatar: AvatarView | undefined
   let avatarVideo: HTMLVideoElement | undefined
   let pillTimer: ReturnType<typeof setInterval> | undefined
+  let focus = false
+  let lastInput = Date.now()
+  const post = (path: string, body: unknown) => fetch(`/api/dsh-her${path}`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  /** Whether you are here, for her speaking first: this tab showing, and how long since you last moved in it. */
+  const reportPresence = () => {
+    if (frame === undefined) return
+    const still = Date.now() - lastInput
+    const state = document.hidden || still >= AWAY_AFTER_MS ? 'away' : still >= IDLE_AFTER_MS ? 'idle' : 'active'
+    void post('/web/send', { message: { t: 'presence', state, fullscreen: false, locked: false } }).catch(() => {})
+  }
+  const noteInput = () => {
+    const wasStill = Date.now() - lastInput >= IDLE_AFTER_MS
+    lastInput = Date.now()
+    if (wasStill) reportPresence()
+  }
   const background = () => wanted === 'background'
   const chatColumn = () => (scope === 'chat' ? document.querySelector(CHAT_COLUMN) ?? undefined : undefined)
 
@@ -194,6 +213,10 @@ export function mountWebFloat(): () => void {
       }
       item(window.isSecureContext ? '和她说话（Ctrl+Alt+空格）' : '和她说话（要 HTTPS 才能用麦克风）', () => guest()?.talk(), !window.isSecureContext)
       item('打字给她', () => (background() ? openTyping() : guest()?.showInput()))
+      item(focus ? '结束专注（她可以主动说话了）' : '专注一会儿（2 小时不主动说话）', () => {
+        focus = !focus
+        void post('/web/send', { message: { t: 'focus.set', on: focus } }).catch(() => {})
+      })
       item(background() ? '暂时关掉背景' : '藏起来', () => hostApi.setHidden(true))
       document.body.appendChild(menu)
       // Pressing outside closes it; a press on an item must live to become its click.
@@ -272,15 +295,22 @@ export function mountWebFloat(): () => void {
   }
 
   const onKey = (event: KeyboardEvent) => {
+    noteInput()
     guest()?.unlockAudio()
     if (event.ctrlKey && event.altKey && event.code === 'Space' && window.isSecureContext) {
       event.preventDefault()
       guest()?.talk()
     }
   }
-  const onGesture = () => {
+  const onGesture = (event: PointerEvent) => {
+    noteInput()
     guest()?.unlockAudio()
     clearSoundHint()
+    // A finger has no hover to hand the iframe the mouse first, so she hears of it from out here.
+    if (event.pointerType !== 'touch' || frame === undefined || background() || frame.style.pointerEvents !== 'none') return
+    const box = frame.getBoundingClientRect()
+    if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) return
+    guest()?.tap(event.clientX - box.left, event.clientY - box.top)
   }
 
   const showFrame = () => {
@@ -391,6 +421,7 @@ export function mountWebFloat(): () => void {
     if (document.hidden) avatarVideo?.pause()
     else void avatarVideo?.play().catch(() => {})
     void sync()
+    reportPresence()
   }
 
   /** On the chat box's top edge, as if it were a table; with no chat box on the page, on the window's bottom edge. */
@@ -424,8 +455,9 @@ export function mountWebFloat(): () => void {
     if (document.hidden) return
     try {
       const res = await fetch('/api/dsh-her/web/status', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ screen: { w: screen.width, h: screen.height, scale: devicePixelRatio }, remote: isRemotePage(location.protocol, location.hostname) }) })
-      const value = await res.json() as { ok: boolean; show?: boolean; place?: Place; scope?: Scope; avatar?: AvatarView }
+      const value = await res.json() as { ok: boolean; show?: boolean; place?: Place; scope?: Scope; avatar?: AvatarView; focus?: boolean }
       if (value.ok) {
+        focus = value.focus === true
         shown = value.show === true
         avatar = value.avatar
         wanted = value.place === 'background' ? 'background' : 'pet'
@@ -439,16 +471,22 @@ export function mountWebFloat(): () => void {
 
   window.__herFloat = hostApi
   window.addEventListener('mousemove', forwardMove, { passive: true })
+  window.addEventListener('mousemove', noteInput, { passive: true })
+  window.addEventListener('wheel', noteInput, { passive: true })
   window.addEventListener('keydown', onKey)
   window.addEventListener('pointerdown', onGesture, { passive: true })
   window.addEventListener('resize', place)
   document.addEventListener('visibilitychange', onVisibility)
   const timer = setInterval(() => void sync(), STATUS_EVERY_MS)
+  const presenceTimer = setInterval(reportPresence, PRESENCE_EVERY_MS)
   void sync()
 
   return () => {
     clearInterval(timer)
+    clearInterval(presenceTimer)
     clearInterval(pillTimer)
+    window.removeEventListener('mousemove', noteInput)
+    window.removeEventListener('wheel', noteInput)
     column.disconnect()
     style?.remove()
     typing?.remove()

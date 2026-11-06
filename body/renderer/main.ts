@@ -27,6 +27,7 @@
 import type { BrainMessage, Cue } from '../../src/protocol/index.ts'
 import type { BodyConfig, HerBridge, LinkStatus, MicMode, PackClipInfo, PackLayout, SceneLayout } from '../shared/types.ts'
 import { fitScene } from '../../src/pack/fit.ts'
+import { touchPart, type TouchKind, type TouchPart } from '../../src/core/touch.ts'
 import { Bubble } from './bubble.ts'
 import { Mic } from './mic.ts'
 import { Player } from './player.ts'
@@ -37,6 +38,7 @@ declare global {
   interface Window {
     her: HerBridge
     __her?: unknown
+    __herTap?: (x: number, y: number) => void
   }
 }
 
@@ -114,14 +116,19 @@ function noteFalseBarge(): void {
 
 const masks = new Map<string, Uint8Array | 'loading'>()
 
+function loadMask(clip: PackClipInfo): void {
+  if (clip.mask === undefined || masks.has(clip.id)) return
+  masks.set(clip.id, 'loading')
+  fetch(clip.mask.url).then(r => r.arrayBuffer()).then(b => masks.set(clip.id, new Uint8Array(b)), () => masks.delete(clip.id))
+}
+
 /** The current clip's mask value (0–255) at a point given as fractions of the frame, if its mask is loaded. */
 function maskAt(clip: PackClipInfo | undefined, time: number, fx: number, fy: number): number | undefined {
   const mask = clip?.mask
   if (clip === undefined || mask === undefined) return undefined
   const data = masks.get(clip.id)
   if (data === undefined) {
-    masks.set(clip.id, 'loading')
-    fetch(mask.url).then(r => r.arrayBuffer()).then(b => masks.set(clip.id, new Uint8Array(b)), () => masks.delete(clip.id))
+    loadMask(clip)
     return undefined
   }
   if (data === 'loading') return undefined
@@ -129,6 +136,48 @@ function maskAt(clip: PackClipInfo | undefined, time: number, fx: number, fy: nu
   const px = Math.min(mask.width - 1, Math.floor(fx * mask.width))
   const py = Math.min(mask.height - 1, Math.floor(fy * mask.height))
   return data[index * mask.width * mask.height + py * mask.width + px]
+}
+
+/** Where her picture is in the window: how big a clip's frame shows, and where. */
+function frameBox(layout: PackLayout): { left: number; top: number; w: number; h: number } | undefined {
+  const video = player?.current.video
+  if (video === undefined || video.videoWidth === 0) return undefined
+  const frameW = video.videoWidth
+  const frameH = layout === 'stacked' ? video.videoHeight / 2 : video.videoHeight
+  const box = stage.getBoundingClientRect()
+  const scale = Math.min(box.width / frameW, box.height / frameH)
+  const w = frameW * scale
+  const h = frameH * scale
+  return { left: box.left + (box.width - w) / 2, top: box.top + (box.height - h) / 2, w, h }
+}
+
+/** Her figure's top and bottom in the current frame, as fractions of it, from the click mask. */
+function figureExtent(clip: PackClipInfo | undefined, time: number): { top: number; bottom: number } {
+  const mask = clip?.mask
+  const data = clip === undefined ? undefined : masks.get(clip.id)
+  if (mask === undefined || data === undefined || data === 'loading') return { top: 0, bottom: 1 }
+  const index = Math.min(mask.frames - 1, Math.floor(time * mask.fps))
+  const start = index * mask.width * mask.height
+  let top = -1
+  let bottom = -1
+  for (let y = 0; y < mask.height; y++) {
+    for (let x = 0; x < mask.width; x++) {
+      if (data[start + y * mask.width + x]! <= HIT_ALPHA) continue
+      if (top === -1) top = y
+      bottom = y
+      break
+    }
+  }
+  return top === -1 ? { top: 0, bottom: 1 } : { top: top / mask.height, bottom: (bottom + 1) / mask.height }
+}
+
+/** Which part of her a window point is on. */
+function partAt(layout: PackLayout, x: number, y: number): TouchPart {
+  const box = frameBox(layout)
+  if (box === undefined) return 'body'
+  const { top, bottom } = figureExtent(player?.current.clip, player?.current.video.currentTime ?? 0)
+  const fy = (y - box.top) / box.h
+  return touchPart(Math.max(0, Math.min(1, (fy - top) / Math.max(0.01, bottom - top))))
 }
 
 /** Whether a window point is on her: inside the shown frame and not transparent there. */
@@ -142,15 +191,11 @@ function makeHitTest(layout: PackLayout): (x: number, y: number) => boolean {
       return box !== undefined && x >= box.left && x < box.right && y >= box.top && y < box.bottom
     }
     const video = player?.current.video
-    if (video === undefined || video.videoWidth === 0) return false
+    const shownBox = frameBox(layout)
+    if (video === undefined || shownBox === undefined) return false
     const frameW = video.videoWidth
     const frameH = layout === 'stacked' ? video.videoHeight / 2 : video.videoHeight
-    const box = stage.getBoundingClientRect()
-    const scale = Math.min(box.width / frameW, box.height / frameH)
-    const w = frameW * scale
-    const h = frameH * scale
-    const left = box.left + (box.width - w) / 2
-    const top = box.top + (box.height - h) / 2
+    const { left, top, w, h } = shownBox
     if (x < left || x >= left + w || y < top || y >= top + h) return false
     if (layout === 'opaque') return true
     const fromMask = maskAt(player?.current.clip, video.currentTime, (x - left) / w, (y - top) / h)
@@ -210,11 +255,104 @@ function wireInput(): void {
   askInput.addEventListener('blur', () => { if (askInput.value.trim() === '') closeInput() })
 }
 
+/** A soft sound of being touched, made here: no file to ship. */
+let touchAudio: AudioContext | undefined
+function touchSound(part: TouchPart, kind: TouchKind): void {
+  if (muted) return
+  try {
+    touchAudio ??= new AudioContext()
+    void touchAudio.resume()
+    const now = touchAudio.currentTime
+    const notes = kind === 'long' ? [520, 620, 720] : part === 'head' ? [660, 880] : [440]
+    notes.forEach((frequency, i) => {
+      const oscillator = touchAudio!.createOscillator()
+      const gain = touchAudio!.createGain()
+      const start = now + i * 0.07
+      oscillator.type = 'sine'
+      oscillator.frequency.value = frequency
+      gain.gain.setValueAtTime(0, start)
+      gain.gain.linearRampToValueAtTime(0.05, start + 0.012)
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.16)
+      oscillator.connect(gain).connect(touchAudio!.destination)
+      oscillator.start(start)
+      oscillator.stop(start + 0.18)
+    })
+  } catch {
+    // no sound here: the movement is enough
+  }
+}
+
+/** She moves at once, whatever else is going on; a clip of hers can follow. */
+function touchMove(part: TouchPart, kind: TouchKind): void {
+  const name = kind === 'long' ? 'touch-long' : part === 'head' ? 'touch-head' : 'touch-body'
+  stage.classList.remove('touch-head', 'touch-body', 'touch-long')
+  // Restart the animation when she is touched again before it ends.
+  void stage.offsetWidth
+  stage.classList.add(name)
+}
+stage.addEventListener('animationend', event => {
+  if (event.animationName.startsWith('touch-')) stage.classList.remove('touch-head', 'touch-body', 'touch-long')
+})
+
+/** A second press this soon makes it a double click (which opens the input box): she does not speak for the first. */
+const TAP_WAIT_MS = 260
+const LONG_PRESS_MS = 700
+const MOVE_LIMIT_PX = 4
+let tapTimer: number | undefined
+
+function reactToTouch(layout: PackLayout, x: number, y: number, kind: TouchKind): void {
+  const part = partAt(layout, x, y)
+  touchMove(part, kind)
+  touchSound(part, kind)
+  player?.touch()
+  window.clearTimeout(tapTimer)
+  tapTimer = window.setTimeout(() => { void window.her.send({ t: 'touch', cid: '', part, kind }) }, kind === 'long' ? 0 : TAP_WAIT_MS)
+}
+
+/** A press on her that does not become a drag is a touch: short, or held. */
+function wireTouch(config: BodyConfig, hitTest: (x: number, y: number) => boolean): void {
+  const { layout } = config.pack
+  let press: { x: number; y: number; at: number; timer: number; held: boolean } | undefined
+  const end = () => {
+    if (press !== undefined) window.clearTimeout(press.timer)
+    press = undefined
+  }
+  window.addEventListener('mousedown', event => {
+    if (event.button !== 0 || ask.contains(event.target as Node) || !hitTest(event.clientX, event.clientY)) return
+    end()
+    const { clientX: x, clientY: y } = event
+    const timer = window.setTimeout(() => {
+      if (press === undefined) return
+      press.held = true
+      reactToTouch(layout, x, y, 'long')
+    }, LONG_PRESS_MS)
+    press = { x, y, at: performance.now(), timer, held: false }
+  })
+  window.addEventListener('mousemove', event => {
+    if (press !== undefined && Math.hypot(event.clientX - press.x, event.clientY - press.y) > MOVE_LIMIT_PX) end()
+  })
+  window.addEventListener('mouseup', event => {
+    if (press === undefined) return
+    const { held, x, y } = press
+    end()
+    if (!held && event.button === 0) reactToTouch(layout, x, y, 'tap')
+  })
+  window.addEventListener('dblclick', () => {
+    window.clearTimeout(tapTimer)
+    end()
+  })
+  // A finger on a phone: the page outside has no mouse to hand over, so it asks here.
+  window.__herTap = (x: number, y: number) => {
+    if (hitTest(x, y)) reactToTouch(layout, x, y, 'tap')
+  }
+}
+
 function wireOverlay(config: BodyConfig): void {
   const hitTest = makeHitTest(config.pack.layout)
+  wireTouch(config, hitTest)
   let onHer = false
   let lastCheck = 0
-  let drag: { x: number; y: number } | undefined
+  let drag: { x: number; y: number; moved: boolean } | undefined
   const setOnHer = (value: boolean) => {
     if (value === onHer) return
     onHer = value
@@ -224,8 +362,10 @@ function wireOverlay(config: BodyConfig): void {
   }
   window.addEventListener('mousemove', event => {
     if (drag !== undefined) {
+      // A hand is never still: a press only becomes a drag once it has really moved.
+      if (!drag.moved && Math.hypot(event.screenX - drag.x, event.screenY - drag.y) <= MOVE_LIMIT_PX) return
       window.her.drag(event.screenX - drag.x, event.screenY - drag.y)
-      drag = { x: event.screenX, y: event.screenY }
+      drag = { x: event.screenX, y: event.screenY, moved: true }
       return
     }
     const now = performance.now()
@@ -236,7 +376,7 @@ function wireOverlay(config: BodyConfig): void {
   window.addEventListener('mouseleave', () => { if (drag === undefined) setOnHer(false) })
   window.addEventListener('mousedown', event => {
     if (event.button === 0 && onHer && !ask.contains(event.target as Node)) {
-      drag = { x: event.screenX, y: event.screenY }
+      drag = { x: event.screenX, y: event.screenY, moved: false }
       player?.touch()
     }
   })
@@ -268,6 +408,8 @@ let muted = false
 /** Clips as they came on screen, with when (for tests and tuning). */
 const played: Array<{ id: string; at: number }> = []
 function clipStarted(clip: PackClipInfo): void {
+  // Ready before the first touch: a finger has no hover to fetch it on the way.
+  loadMask(clip)
   played.push({ id: clip.id, at: Math.round(performance.now()) })
   if (played.length > 200) played.shift()
   if (clip.role === 'line') {
@@ -459,7 +601,10 @@ async function main(): Promise<void> {
   await player?.start()
   wireInput()
   if (config.mode === 'overlay') wireOverlay(config)
-  else window.addEventListener('contextmenu', () => window.her.menu())
+  else {
+    window.addEventListener('contextmenu', () => window.her.menu())
+    if (config.mode === 'window') wireTouch(config, makeHitTest(config.pack.layout))
+  }
 }
 
 main().catch(error => console.error(error))

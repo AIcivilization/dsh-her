@@ -27,6 +27,10 @@ import type { InstallState, ManualInstall } from './body-install.ts'
 import type { MingStatus } from '../voice/ming.ts'
 import type { MingSettings, OwnVoice } from '../voice/ming-voices.ts'
 
+import type { InitiativeSettings, PersonaFromCard } from '../core/index.ts'
+import type { FocusChoice, InitiativeView } from './initiative.ts'
+import type { Preset } from './presets.ts'
+
 export const API_BASE = '/api/dsh-her'
 
 export interface StateView {
@@ -68,6 +72,10 @@ export interface StateView {
   }
   import: { state: 'idle' | 'picking' | 'running' | 'done' | 'failed'; done: number; total: number; step: string; lines: ReportLine[] }
   heard?: { text: string; at: number }
+  /** Her speaking first: settings, focus, and why she is quiet right now. */
+  initiative: InitiativeView
+  /** Ready-made looks offered on the release, and the one being fetched. */
+  presets: { list: Preset[]; active?: { id: string; state: 'downloading' | 'failed'; done: number; total: number; error?: string } }
   /** Her last reply failed with no words (the model had no key, no quota …): why, and what to do. */
   problem?: { text: string; at: number }
   memory: { facts: Fact[]; episodes: Episode[]; diary: string[]; lastDigestDay: string | null }
@@ -78,6 +86,17 @@ export interface ApiRuntime {
   saveCharacter(patch: Partial<Character>): Character
   expandPersona(input: { name: string; idea: string; callYou: string; pronoun: string }): Promise<string>
   tryPersona(input: { name: string; persona: string; callYou: string; pronoun: string; history: Array<{ who: 'you' | 'her'; text: string }>; message: string }): Promise<string>
+  /** A persona card someone has, written up as her name and persona (not saved). */
+  personaFromCard(text: string): Promise<PersonaFromCard>
+  initiativeSet(change: Partial<InitiativeSettings>): void
+  initiativeFocus(choice: FocusChoice): void
+  /** Have her say something now; what she said. */
+  initiativeTry(): Promise<string>
+  /** Read the list of ready-made looks, with their pictures. */
+  presetsRefresh(): Promise<Preset[]>
+  /** Download a ready-made look and show it (progress in the state). */
+  presetUse(id: string): void
+  presetCancel(): void
   previewVoice(id: string, speed: number, text: string): Promise<{ audio: string; format: 'wav' | 'mp3'; durationMs: number }>
   /** Downloading the body by hand: the links, where the file goes, whether it is there yet. */
   bodyManual(): Promise<ManualInstall>
@@ -87,7 +106,7 @@ export interface ApiRuntime {
   bodyOpenFolder(): void
   /** The web body: whether to show, her config, a message from the page, the setting. */
   /** `remote`: the page is open on another device than the one running dsh. */
-  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; mode: WebMode; place: WebPlace; scope: WebScope; avatar?: AvatarView }
+  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; mode: WebMode; place: WebPlace; scope: WebScope; focus: boolean; avatar?: AvatarView }
   /** A new folder for files coming from the browser, and importing it as a pack (with no desktop body). */
   webNewBatch(): string
   importBatch(batch: string, name?: string): Promise<void>
@@ -191,6 +210,31 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
         }
       }
       rt.saveCharacter(patch)
+      return withState()
+    },
+    '/persona/card': async body => ({ card: await rt.personaFromCard(str(body.text, '人设卡')) }),
+    '/initiative/set': async body => {
+      const change: Partial<InitiativeSettings> = {}
+      if (body.on !== undefined) change.on = body.on === true
+      if (body.perDay !== undefined) change.perDay = num(body.perDay, '次数')
+      if (body.quietFrom !== undefined) change.quietFrom = num(body.quietFrom, '安静时段')
+      if (body.quietTo !== undefined) change.quietTo = num(body.quietTo, '安静时段')
+      rt.initiativeSet(change)
+      if (body.focus !== undefined) {
+        const focus = str(body.focus, '专注')
+        if (focus !== 'off' && focus !== 'span' && focus !== 'always') throw new ApiError('专注的选项不对')
+        rt.initiativeFocus(focus)
+      }
+      return withState()
+    },
+    '/initiative/try': async () => ({ said: await rt.initiativeTry(), state: rt.state() }),
+    '/presets/list': async () => ({ presets: await rt.presetsRefresh(), state: rt.state() }),
+    '/presets/use': async body => {
+      rt.presetUse(str(body.id, '预设'))
+      return withState()
+    },
+    '/presets/cancel': async () => {
+      rt.presetCancel()
       return withState()
     },
     '/persona/expand': async body => ({

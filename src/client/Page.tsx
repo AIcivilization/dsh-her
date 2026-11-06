@@ -12,7 +12,7 @@ import { UpdateBar } from './UpdateBar.tsx'
 import { Workshop } from './Workshop.tsx'
 import { Fold, useFolds } from './fold.tsx'
 import { SERVICE_SHORT, voiceLabel } from './choice.tsx'
-import { BodyStatus, Dot, KeyHelp, MemoryView, MicCheck, ModelPicker, MODE_TEXT, ModePicker, PackPicker, PersonaEditor, platformName, ScenePicker, VoicePicker, WebModePicker, WebPlaceCard, type Apply } from './parts.tsx'
+import { BodyStatus, Dot, InitiativeCard, KeyHelp, MemoryView, MicCheck, ModelPicker, MODE_TEXT, ModePicker, PackPicker, PersonaEditor, platformName, ScenePicker, VoicePicker, WebModePicker, WebPlaceCard, type Apply } from './parts.tsx'
 
 const POLL_MS = 2000
 
@@ -209,7 +209,7 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
   )
 }
 
-type Section = 'persona' | 'voice' | 'look' | 'model' | 'place'
+type Section = 'persona' | 'voice' | 'look' | 'model' | 'place' | 'initiative'
 
 /** What she is set to right now, each with a way to change it. */
 function NowCard({ state, onChange }: { state: StateView; onChange: (section: Section) => void }) {
@@ -235,11 +235,18 @@ function NowCard({ state, onChange }: { state: StateView; onChange: (section: Se
       {row('放在哪里', desktopHere(body) ? (body.mode === undefined ? '—' : MODE_TEXT[body.mode]?.title ?? body.mode) : body.web.connected ? `dsh 网页里 · ${body.web.place === 'pet' ? '桌宠' : body.web.scope === 'page' ? '整个页面的背景' : '对话窗口的背景'}` : '身体没连上', 'place')}
       {row('声音', `${voiceLabel(state, c.voice.id)} · ${SERVICE_SHORT[serviceOf(c.voice.id)]}${c.voice.speed === 1 ? '' : ` · 语速 ${c.voice.speed}`}`, 'voice')}
       {row('模型', state.model === null ? '没有可用的模型' : `${state.model.provider} / ${state.model.model}`, 'model')}
+      {row('主动说话', initiativeText(state), 'initiative')}
     </div>
   )
 }
 
-const SETTINGS_FOLDS: Record<Section, boolean> = { persona: false, voice: false, look: false, model: false, place: false }
+function initiativeText(state: StateView): string {
+  const { settings, focus } = state.initiative
+  if (!settings.on) return '关着'
+  return focus.on ? '专注中' : `每天最多 ${settings.perDay} 次`
+}
+
+const SETTINGS_FOLDS: Record<Section, boolean> = { persona: false, voice: false, look: false, model: false, place: false, initiative: false }
 
 /**
  * Everything she can be set to, one folded card each. Folded, a card is one
@@ -268,6 +275,7 @@ function Settings({ state, apply, jump, onJumped }: { state: StateView; apply: A
         <VoicePicker state={state} apply={apply} saveLabel="用这个声音" />)}
       {card('look', '外形', body.connected || body.web.connected ? `${pack?.name ?? '还没有外形'}${body.look === undefined ? '' : ` · ${body.look.scenes.length} 个场景`}` : '身体没连上', body.connected || body.web.connected ? (pack === undefined ? 'warn' : 'ok') : 'off',
         <><PackPicker state={state} apply={apply} /><ScenePicker state={state} apply={apply} /></>)}
+      {card('initiative', '主动说话', initiativeText(state), state.initiative.settings.on ? 'ok' : 'off', <InitiativeCard state={state} apply={apply} />)}
       {card('model', '模型', state.model === null ? '没有可用的模型' : `${state.model.provider} / ${state.model.model}${state.model.chosen ? '' : '（dsh 默认）'}${state.problem === undefined ? '' : ' · 上一次回答失败了'}`,
         state.model === null || state.problem !== undefined ? 'bad' : 'ok', <ModelPicker state={state} apply={apply} />)}
       {card('place', '放在哪里', desktopHere(body) ? (body.mode === undefined ? '—' : MODE_TEXT[body.mode]?.title ?? body.mode) : body.web.connected ? 'dsh 网页里' : '身体没连上', body.connected || body.web.connected ? 'ok' : 'off', <>{desktopOffered(body) && <ModePicker state={state} apply={apply} />}<WebModePicker state={state} apply={apply} /></>)}

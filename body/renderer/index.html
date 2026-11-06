@@ -35,6 +35,14 @@
       -webkit-mask-composite: source-in; mask-composite: intersect; }
     body.region video, body.region canvas { object-fit: cover; }
     body.region.scene #bubble { right: auto; width: 30vw; justify-content: flex-start; }
+    /* Being touched: separate translate/rotate/scale, so whatever transform places her in the window stays. */
+    #stage.touch-head { animation: touch-head 0.42s ease-out; transform-origin: 50% 100%; }
+    #stage.touch-body { animation: touch-body 0.4s ease-out; transform-origin: 50% 100%; }
+    #stage.touch-long { animation: touch-long 1.4s ease-in-out; transform-origin: 50% 100%; }
+    @keyframes touch-head { 30% { translate: 0 1.6%; scale: 1.015 0.985; } 65% { translate: 0 -0.8%; } }
+    @keyframes touch-body { 25% { rotate: -1.6deg; } 55% { rotate: 1.2deg; } 80% { rotate: -0.4deg; } }
+    @keyframes touch-long { 30% { rotate: -1.4deg; translate: 0 0.6%; } 70% { rotate: 1.4deg; translate: 0 0.6%; } }
+    @media (prefers-reduced-motion: reduce) { #stage.touch-head, #stage.touch-body, #stage.touch-long { animation: none; } }
     video, canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 0.3s linear; pointer-events: none; }
     video.on, canvas.on { opacity: 1; }
     /* A hard cut: the anchor frames match, so the swap must not blend. */

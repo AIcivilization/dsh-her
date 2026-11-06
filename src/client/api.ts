@@ -57,6 +57,12 @@ export const herApi = {
   expandPersona: (input: { name: string; idea: string; callYou: string; pronoun: string }) => post<{ persona: string }>('/persona/expand', input),
   tryPersona: (input: { name: string; persona: string; callYou: string; pronoun: string; history: Array<{ who: 'you' | 'her'; text: string }>; message: string }) =>
     post<{ reply: string }>('/persona/try', input),
+  personaCard: (text: string) => post<{ card: { name: string; persona: string; callYou: string } }>('/persona/card', { text }),
+  initiativeSet: (change: { on?: boolean; perDay?: number; quietFrom?: number; quietTo?: number; focus?: 'off' | 'span' | 'always' }) => post<WithState>('/initiative/set', change),
+  initiativeTry: () => post<WithState & { said: string }>('/initiative/try'),
+  presetsList: () => post<WithState & { presets: StateView['presets']['list'] }>('/presets/list'),
+  presetUse: (id: string) => post<WithState>('/presets/use', { id }),
+  presetCancel: () => post<WithState>('/presets/cancel'),
   previewVoice: (voice: string, speed: number, text?: string) => post<{ audio: string; format: 'wav' | 'mp3'; durationMs: number }>('/voice/preview', { voice, speed, ...(text === undefined ? {} : { text }) }),
   bodyManual: () => post<{ manual: ManualInstall }>('/body/manual'),
   bodyInstallDownloaded: () => post<WithState>('/body/install-downloaded'),

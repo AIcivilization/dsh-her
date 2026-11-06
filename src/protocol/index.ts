@@ -105,6 +105,8 @@ export type BodyMessage =
   | { t: 'touch'; cid: string; part: string; kind: 'tap' | 'double' | 'long' }
   | { t: 'drag'; cid: string; phase: 'start' | 'end'; pos: { x: number; y: number } }
   | { t: 'presence'; state: 'active' | 'idle' | 'away'; fullscreen: boolean; locked: boolean }
+  /** The body's menu: she should (not) speak first for a while. */
+  | { t: 'focus.set'; on: boolean }
   | { t: 'posture'; cid: string; anchor: string }
   | { t: 'mode.changed'; cid: string; mode: WindowMode; pos?: { x: number; y: number; screen?: number } }
   | { t: 'pack.progress'; id: string; done: number; total: number; step: string }
@@ -128,7 +130,8 @@ export interface Welcome {
   v: number
   sessionId: string
   characters: CharacterView[]
-  config: { mic: 'push-to-talk' | 'always'; bargeIn: boolean }
+  /** `focus`: she is not speaking first, for the body's menu. */
+  config: { mic: 'push-to-talk' | 'always'; bargeIn: boolean; focus?: boolean }
 }
 
 /** What the body's settings window can show and change about her. */
@@ -167,7 +170,7 @@ export type BrainMessage =
   | { t: 'heard'; cid: string; uttId: string; text: string; ignored?: 'echo' | 'filler' }
   | { t: 'ask'; cid: string; id: string; question: string; options: string[] }
   | { t: 'mode'; cid: string; mode: WindowMode; screen?: number; pos?: { x: number; y: number }; scale?: number }
-  | { t: 'config'; mic?: 'push-to-talk' | 'always'; bargeIn?: boolean }
+  | { t: 'config'; mic?: 'push-to-talk' | 'always'; bargeIn?: boolean; focus?: boolean }
   /** Let the user choose a folder on the body's computer and import it (progress and report follow). */
   | { t: 'pack.pick'; id: string; ffmpeg?: string }
   | { t: 'pack.import'; id: string; dir: string }

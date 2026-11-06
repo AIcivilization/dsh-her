@@ -223,7 +223,13 @@ export function removeStray(id: string, folder: string, file: string, root = MAT
 /** Her small picture for a look, when its project has one. */
 export function avatarOf(lookId: string, root = MATERIALS_DIR): { path: string; overhang: number; clip?: string } | undefined {
   const found = findProject(lookId, root)
-  if (found === undefined || !has(found.dir, AVATAR_FILE)) return undefined
+  return found === undefined ? undefined : avatarIn(found.dir)
+}
+
+/** Her small picture in a folder: a 形象工坊 project, or a ready-made look's own folder. */
+export function avatarIn(dir: string): { path: string; overhang: number; clip?: string } | undefined {
+  const found = { dir }
+  if (!has(found.dir, AVATAR_FILE)) return undefined
   const fit = (value: unknown) => (typeof value === 'number' && value >= 0 && value < 0.5 ? value : 0)
   let info: { overhang?: unknown; clipOverhang?: unknown } = {}
   try {

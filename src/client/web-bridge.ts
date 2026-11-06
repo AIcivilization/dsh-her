@@ -40,12 +40,15 @@ export interface FloatGuest {
   /** A user gesture in the page: let her sound start (browsers keep audio off until one). */
   unlockAudio(): void
   audioStates(): string[]
+  /** A finger on a phone, at a point in her window. */
+  tap(x: number, y: number): void
 }
 
 declare global {
   interface Window {
     __herFloat?: FloatHost
     __herGuest?: FloatGuest
+    __herTap?: (x: number, y: number) => void
   }
 }
 
@@ -179,4 +182,5 @@ window.__herGuest = {
     }
   },
   audioStates: () => audioContexts.map(context => context.state),
+  tap: (x, y) => window.__herTap?.(x, y),
 }

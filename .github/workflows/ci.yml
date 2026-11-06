@@ -38,6 +38,16 @@ jobs:
           tar -cjf t/a.tar.bz2 -C t src
           "$SYSTEMROOT/System32/tar.exe" -xjf "$(cygpath -w t/a.tar.bz2)" -C "$(cygpath -w t/out)"
           test "$(cat t/out/src/a.txt)" = hi
+      # Ready-made looks are .tar.gz, read and listed by the same tar (src/dsh/presets.ts).
+      - name: Windows tar reads .tar.gz
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p g/packs/x g/out && echo hi > g/packs/x/a.txt
+          tar -czf g/a.tar.gz -C g packs
+          "$SYSTEMROOT/System32/tar.exe" -tzf "$(cygpath -w g/a.tar.gz)" | grep -q 'packs/x/a.txt'
+          "$SYSTEMROOT/System32/tar.exe" -xzf "$(cygpath -w g/a.tar.gz)" -C "$(cygpath -w g/out)"
+          test "$(cat g/out/packs/x/a.txt)" = hi
 
   # A computer with no desktop: a real dsh and a real browser (docs/VPS部署.md).
   headless:

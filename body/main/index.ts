@@ -109,6 +109,8 @@ function loadOrNothing(dir: string, aspect?: number): PackInfo {
 let packPath = look === undefined ? packDir : join(packsDir, lookPack(look, chosenMode() ?? 'wallpaper'))
 let pack = loadOrNothing(packPath)
 let mode: Mode = chosenMode() ?? (look === undefined ? layerMode(pack) : 'wallpaper')
+/** She is not speaking first for a while (from the brain; the menu can change it). */
+let focus = false
 /** When either of you last said something: no scene changes mid-conversation. */
 let lastTalkAt = 0
 let win: BrowserWindow | undefined
@@ -398,6 +400,22 @@ async function importLookHere(request: Extract<BrainMessage, { t: 'look.import' 
   else useLook(request.id)
 }
 
+/**
+ * Whether you are at the computer, for her speaking first. Only how long the
+ * keyboard and mouse have been still, and whether the screen is locked: nothing
+ * about what is on the screen. Electron cannot see another app being full
+ * screen, so `fullscreen` stays false; focus mode covers meetings and games.
+ */
+const PRESENCE_EVERY_MS = 30_000
+const IDLE_AFTER_S = 120
+const AWAY_AFTER_S = 600
+function reportPresence(): void {
+  const locked = powerMonitor.getSystemIdleState(IDLE_AFTER_S) === 'locked'
+  const idle = powerMonitor.getSystemIdleTime()
+  const state = locked || idle >= AWAY_AFTER_S ? 'away' : idle >= IDLE_AFTER_S ? 'idle' : 'active'
+  link?.send({ t: 'presence', state, fullscreen: false, locked })
+}
+
 function statusLabel(): string {
   switch (status.status) {
     case 'connected': return '已连上 dsh'
@@ -424,6 +442,7 @@ function menuTemplate(): Electron.MenuItemConstructorOptions[] {
     { label: '她记得的事…', click: () => openPanel('memory') },
     { label: '画面编排…', click: () => openPanel('clips') },
     { label: '做场景…', click: () => openPanel('scene') },
+    { label: '专注一会儿（2 小时不主动说话）', type: 'checkbox', checked: focus, click: item => { link?.send({ t: 'focus.set', on: item.checked }) } },
     {
       label: '一直在听', type: 'checkbox', checked: micMode === 'always',
       click: item => {
@@ -633,6 +652,11 @@ if (!app.requestSingleInstanceLock()) {
     }
     globalShortcut.register(TALK_SHORTCUT, talk)
     setInterval(lookTick, 60_000)
+    setInterval(reportPresence, PRESENCE_EVERY_MS)
+    powerMonitor.on('lock-screen', reportPresence)
+    powerMonitor.on('unlock-screen', reportPresence)
+    powerMonitor.on('suspend', () => { link?.send({ t: 'presence', state: 'away', fullscreen: false, locked: true }) })
+    powerMonitor.on('resume', reportPresence)
     link = new BrainLink({
       home,
       hello: () => ({
@@ -651,10 +675,18 @@ if (!app.requestSingleInstanceLock()) {
         if (message.t === 'welcome') {
           cid = message.characters[0]?.cid
           micMode = message.config.mic
+          focus = message.config.focus === true
           refreshTray()
           reportPacks()
           reportMode()
           reportLook()
+          reportPresence()
+        } else if (message.t === 'config') {
+          if (message.focus !== undefined) {
+            focus = message.focus
+            refreshTray()
+          }
+          return
         } else if (message.t === 'mode') {
           switchMode(message.mode)
           return

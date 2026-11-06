@@ -3,6 +3,7 @@
   "version": "0.4.3",
   "description": "A desktop companion for DeepSeek Harness (dsh): she lives on your real desktop (on top of your windows or inside the wallpaper), talks with you by voice and remembers you. · DSH 桌面女友：住在你真正的桌面上，能语音聊天、记得你。",
   "type": "module",
+  "icon": "./lib/icon.png",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
   "license": "MIT",
@@ -34,7 +35,7 @@
     "test": "node --test --disable-warning=ExperimentalWarning \"tests/*.test.ts\"",
     "voice:models": "node --disable-warning=ExperimentalWarning scripts/fetch-voice-models.ts",
     "voice:bench": "node --disable-warning=ExperimentalWarning scripts/voice-bench.ts",
-    "prepack": "npm run build && node scripts/embed-body-release.mjs"
+    "prepack": "npm run build && node --disable-warning=ExperimentalWarning scripts/make-icon.mjs && node scripts/embed-body-release.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",

@@ -11,6 +11,7 @@ import { desktopHere, desktopOffered, herApi, modelCatalog, playAudio, remotePag
 import { BodyManual } from './BodyManual.tsx'
 import { MingSection } from './MingVoice.tsx'
 import { insideFolder, uploadFiles, worthSending, type UploadProgress } from './upload.ts'
+import { cardFromPng } from '../core/persona-card.ts'
 
 export type Apply = (call: Promise<Result<{ state: StateView }>>) => Promise<boolean>
 
@@ -116,6 +117,7 @@ export function PackPicker({ state, apply }: { state: StateView; apply: Apply })
   if (!body.connected && !body.web.connected) return <p className="her-muted">身体连上之后才能选外形。</p>
   return (
     <div>
+      <Presets state={state} apply={apply} />
       <div className="her-grid">
         {body.packs.map(pack => (
           <button key={pack.packId} className={`her-choice ${pack.packId === body.activePack ? 'on' : ''}`} onClick={() => void apply(herApi.usePack(pack.packId))}>
@@ -123,7 +125,7 @@ export function PackPicker({ state, apply }: { state: StateView; apply: Apply })
             <small>{choiceNote(pack.packId, body.activePack ?? '', `${pack.packId.startsWith('look:') ? '多场景形象' : pack.layer === 'scene' ? '壁纸场景' : '桌宠'} · ${pack.actions.filter(a => !a.id.startsWith('scene_')).length} 个动作${pack.emotions.length > 0 ? ` · ${pack.emotions.length} 种情绪` : ''}`)}</small>
           </button>
         ))}
-        {body.packs.length === 0 && <p className="her-muted">还没有导入过外形包。</p>}
+        {body.packs.length === 0 && state.presets.list.length === 0 && <p className="her-muted">还没有导入过外形包。</p>}
       </div>
       <div className="her-row">
         {desktopHere(body)
@@ -143,6 +145,92 @@ export function PackPicker({ state, apply }: { state: StateView; apply: Apply })
           {imp.lines.map((line, i) => <li key={i} className={line.level === 'error' ? 'her-danger' : line.level === 'warn' ? 'her-warn' : ''}>{line.level === 'ok' ? '✅' : line.level === 'warn' ? '⚠️' : '❌'} {line.text}</li>)}
         </ul>
       )}
+    </div>
+  )
+}
+
+/**
+ * Ready-made looks from the release: nothing is shown until one is offered, so
+ * the way in stays making her from your own pictures and clips.
+ */
+function Presets({ state, apply }: { state: StateView; apply: Apply }) {
+  const { list, active } = state.presets
+  const [error, setError] = useState<string>()
+  useEffect(() => {
+    void herApi.presetsList().then(result => { if (!result.ok) setError(result.message) })
+  }, [])
+  if (list.length === 0) return error === undefined ? null : <p className="her-faint">现成的形象暂时读不到：{error}</p>
+  const here = (id: string, kind: string) => state.body.packs.some(p => p.packId === (kind === 'look' ? `look:${id}` : id))
+  return (
+    <div>
+      <label className="her-label">现成的形象（点一下就用，不用自己做）</label>
+      <div className="her-grid">
+        {list.map(preset => {
+          const installed = here(preset.id, preset.kind)
+          const fetching = active?.id === preset.id && active.state === 'downloading'
+          return (
+            <button key={preset.id} className="her-choice" disabled={active?.state === 'downloading'} onClick={() => void apply(installed ? herApi.usePack(preset.kind === 'look' ? `look:${preset.id}` : preset.id) : herApi.presetUse(preset.id))}>
+              {preset.preview !== undefined && <img src={`/api/dsh-her/web/preset-preview?id=${preset.id}`} alt="" style={{ display: 'block', width: '100%', borderRadius: 6, marginBottom: 6 }} />}
+              {preset.name}
+              <small>{fetching ? `正在下载 ${Math.round((active.done / Math.max(1, active.total)) * 100)}%` : installed ? '已经有了，点一下换上' : `${preset.desc ?? ''}（${Math.max(1, Math.round(preset.size / 1e6))} MB）`}</small>
+            </button>
+          )
+        })}
+      </div>
+      {active?.state === 'downloading' && <button className="her-btn small" onClick={() => void apply(herApi.presetCancel())}>取消下载</button>}
+      {active?.state === 'failed' && <p className="her-error">没能下载：{active.error}</p>}
+    </div>
+  )
+}
+
+const QUIET_CHOICES: Array<[string, number, number]> = [['23:30 到 8:30', 1410, 510], ['22:00 到 9:00', 1320, 540], ['一直可以', 0, 0]]
+
+/** Her speaking first: whether, how often, when not; focus; why she is quiet right now; a try. */
+export function InitiativeCard({ state, apply }: { state: StateView; apply: Apply }) {
+  const { settings, focus, why, today, last } = state.initiative
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string>()
+  const here = state.body.connected || state.body.web.connected
+  const tryNow = async () => {
+    setBusy(true)
+    setError(undefined)
+    const result = await herApi.initiativeTry()
+    setBusy(false)
+    if (!result.ok) setError(result.message)
+  }
+  return (
+    <div>
+      <p className="her-muted">她会在你回到电脑前、有日子的事快到了、或者你们很久没说话时，自己开口说一句。你连着几次没回，她就会慢慢少说，直到你先开口。</p>
+      <div className="her-row">
+        <label><input type="checkbox" checked={settings.on} onChange={e => void apply(herApi.initiativeSet({ on: e.target.checked }))} /> 让她主动说话</label>
+      </div>
+      {settings.on && (
+        <>
+          <div className="her-row">
+            <span className="her-label" style={{ margin: 0 }}>每天最多</span>
+            <select className="her-select" style={{ width: 90 }} value={settings.perDay} onChange={e => void apply(herApi.initiativeSet({ perDay: Number(e.target.value) }))}>
+              {[1, 2, 3, 5, 8].map(n => <option key={n} value={n}>{n} 次</option>)}
+            </select>
+            <span className="her-label" style={{ margin: 0 }}>安静时段</span>
+            <select className="her-select" style={{ width: 150 }} value={`${settings.quietFrom}-${settings.quietTo}`} onChange={e => { const [from, to] = e.target.value.split('-').map(Number); void apply(herApi.initiativeSet({ quietFrom: from!, quietTo: to! })) }}>
+              {QUIET_CHOICES.map(([label, from, to]) => <option key={label} value={`${from}-${to}`}>{label}</option>)}
+              {!QUIET_CHOICES.some(([, from, to]) => from === settings.quietFrom && to === settings.quietTo) && <option value={`${settings.quietFrom}-${settings.quietTo}`}>自定义</option>}
+            </select>
+          </div>
+          <div className="her-row">
+            {focus.on
+              ? <><span>{focus.until === -1 ? '专注中，到你关掉为止' : `专注中，到 ${new Date(focus.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}</span><button className="her-btn small" onClick={() => void apply(herApi.initiativeSet({ focus: 'off' }))}>结束专注</button></>
+              : <><button className="her-btn small" onClick={() => void apply(herApi.initiativeSet({ focus: 'span' }))}>专注 2 小时</button><button className="her-btn small" onClick={() => void apply(herApi.initiativeSet({ focus: 'always' }))}>专注到我关掉</button><span className="her-muted">开会、打游戏时用；你找她说话不受影响。</span></>}
+          </div>
+        </>
+      )}
+      <p className="her-faint">今天主动说了 {today} 次。{why === undefined ? '她现在可以开口。' : `现在不会开口：${why}。`}</p>
+      {last !== undefined && <p className="her-faint">最近一次：「{last.text}」</p>}
+      <div className="her-row">
+        <button className="her-btn" disabled={busy || !here} onClick={() => void tryNow()}>{busy ? '她在想…' : '现在让她说一句'}</button>
+        {!here && <span className="her-muted">身体连上之后才能试。</span>}
+      </div>
+      {error !== undefined && <p className="her-error">{error}</p>}
     </div>
   )
 }
@@ -187,11 +275,34 @@ export function PersonaEditor({ state, apply, onSaved, saveLabel = '保存' }: {
   const [pronoun, setPronoun] = useState<string>(c.pronoun)
   const [persona, setPersona] = useState(c.persona)
   const [idea, setIdea] = useState('')
-  const [busy, setBusy] = useState<'expand' | 'try' | 'save'>()
+  const [busy, setBusy] = useState<'expand' | 'try' | 'save' | 'card'>()
   const [error, setError] = useState<string>()
   const [chat, setChat] = useState<Array<{ who: 'you' | 'her'; text: string }>>([])
   const [line, setLine] = useState('')
   const dirty = name !== c.name || callYou !== c.callYou || pronoun !== c.pronoun || persona !== c.persona
+
+  const [card, setCard] = useState('')
+  const readCard = async () => {
+    setBusy('card')
+    setError(undefined)
+    const result = await herApi.personaCard(card)
+    setBusy(undefined)
+    if (!result.ok) return setError(result.message)
+    setName(result.card.name)
+    setPersona(result.card.persona)
+    if (result.card.callYou !== '') setCallYou(result.card.callYou)
+    setCard('')
+  }
+  /** A card as a file: text or JSON as it is, a card PNG for the character inside. */
+  const cardFile = async (file: File) => {
+    setError(undefined)
+    if (/\.png$/i.test(file.name)) {
+      const inside = cardFromPng(new Uint8Array(await file.arrayBuffer()))
+      if (inside === undefined) return setError('这张图片里没有人设卡的内容')
+      return setCard(inside)
+    }
+    setCard(await file.text())
+  }
 
   const expand = async () => {
     setBusy('expand')
@@ -235,6 +346,12 @@ export function PersonaEditor({ state, apply, onSaved, saveLabel = '保存' }: {
       <div className="her-row">
         <input className="her-input" style={{ flex: 1 }} value={idea} placeholder="比如：二十五岁的编剧，爱吐槽，喜欢猫和火锅" onChange={e => setIdea(e.target.value)} />
         <button className="her-btn" disabled={busy !== undefined || idea.trim() === ''} onClick={() => void expand()}>{busy === 'expand' ? '正在写…' : '帮我写'}</button>
+      </div>
+      <label className="her-label">已经有人设卡？贴进来或选文件（文字、JSON、带卡的 PNG），模型会拆成名字和人设，你看过再保存</label>
+      <textarea className="her-textarea" style={{ minHeight: 64 }} value={card} placeholder="把人设卡的内容贴在这里" onChange={e => setCard(e.target.value)} />
+      <div className="her-row">
+        <button className="her-btn" disabled={busy !== undefined || card.trim() === ''} onClick={() => void readCard()}>{busy === 'card' ? '正在拆…' : '拆成人设'}</button>
+        <label className="her-btn">选文件<input type="file" accept=".txt,.md,.json,.png" style={{ display: 'none' }} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file !== undefined) void cardFile(file) }} /></label>
       </div>
       <label className="her-label">人设（可以直接改）</label>
       <textarea className="her-textarea" value={persona} onChange={e => setPersona(e.target.value)} />
