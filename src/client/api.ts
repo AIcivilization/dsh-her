@@ -5,6 +5,7 @@ import type { ManualInstall } from '../dsh/body-install.ts'
 import { isRemotePage } from '../core/where.ts'
 import type { LookProject, WorkshopCard } from '../core/workshop.ts'
 import type { ProjectStatus } from '../dsh/workshop.ts'
+import type { ClipUse, ClipsView } from '../pack/types.ts'
 
 export type { StateView }
 
@@ -103,7 +104,8 @@ export const herApi = {
   workshopImportProject: () => post<{ project: LookProject; status: ProjectStatus } | { cancelled: true }>('/workshop/import-project'),
   workshopExamples: () => post<{ examples: Array<{ card: WorkshopCard; file: string; label: string; ready: boolean }> }>('/workshop/examples'),
   workshopOpen: (id: string) => post<Record<string, never>>('/workshop/open', { id }),
-  workshopFrame: (id: string, scene: string) => post<Record<string, never>>('/workshop/frame', { id, scene }),
+  lookClips: (pack?: string) => post<{ packs: Array<{ id: string; name: string }>; view?: ClipsView }>('/look/clips', pack === undefined ? {} : { pack }),
+  lookClipsSave: (pack: string, changes: Array<{ id: string; use: ClipUse; desc: string }>) => post<Record<string, never>>('/look/clips/save', { pack, changes }),
   workshopImport: (id: string) => post<WithState>('/workshop/import', { id }),
   setLook: (change: { auto?: boolean; locked?: boolean; go?: string; on?: Record<string, boolean> }) => post<WithState>('/look/set', change),
   memoryRemove: (ids: string[]) => post<WithState & { removed: number }>('/memory/remove', { ids }),

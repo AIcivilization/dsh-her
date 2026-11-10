@@ -114,4 +114,12 @@ export const STYLES = `
 .her-progress{height:6px;background:${LAYER2};border-radius:3px;overflow:hidden;margin:6px 0}
 .her-progress div{height:100%;background:${ACCENT};transition:width .3s}
 .her-error{color:${DANGER};margin:6px 0}
+.her-intro{margin:0 0 12px;color:${MUTED}}
+.her-nested .her-card{border:none;padding:0;margin:0 0 14px;background:none;box-shadow:none}
+.her-sub{margin:20px 2px 8px;font-size:13px;font-weight:600;color:${MUTED}}
+.her-clips{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-top:8px}
+.her-clip{display:flex;flex-direction:column;gap:4px;min-width:0}
+.her-clip video{width:100%;aspect-ratio:9/16;object-fit:contain;background:${LAYER2};border-radius:8px}
+.her-clip.off video{opacity:.35}
+.her-clip .her-input{width:100%;box-sizing:border-box}
 `

@@ -20,11 +20,11 @@ import { extname, join, resolve, sep } from 'node:path'
 import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import type { BrainMessage, PackSummary } from '../protocol/index.ts'
-import { loadPack, summarize } from '../pack/load.ts'
+import { clipsView, loadPack, summarize, type PackUrl } from '../pack/load.ts'
 import { listLooks, lookPackId, lookSummary, idleLookSummary } from '../pack/looks.ts'
 import type { Look } from '../pack/look.ts'
 import { listPacks, loadSettings, saveSettings } from '../pack/settings.ts'
-import type { BodyConfig, PackInfo } from '../pack/types.ts'
+import type { BodyConfig, ClipsView, PackInfo } from '../pack/types.ts'
 
 export type WebMode = 'auto' | 'on' | 'off'
 /** A figure floating on the page, or the scene behind the page. */
@@ -230,10 +230,29 @@ export class WebBody {
     const id = this.shownId()
     if (id === undefined) return NO_PACK
     try {
-      return loadPack(join(this.packsDir, id), undefined, (dir, file) => `${WEB_BASE}/file?p=${encodeURIComponent(id)}&f=${encodeURIComponent(file)}${versionOf(join(dir, file))}`)
+      return this.load(id)
     } catch {
       return NO_PACK
     }
+  }
+
+  /** A pack with its files served to the page. */
+  private load(id: string): PackInfo {
+    return loadPack(join(this.packsDir, id), undefined, this.urls(id))
+  }
+
+  private urls(id: string): PackUrl {
+    return (dir, file) => `${WEB_BASE}/file?p=${encodeURIComponent(id)}&f=${encodeURIComponent(file)}${versionOf(join(dir, file))}`
+  }
+
+  /** The pack she shows in the page now (in a look: the scene or desk pet on screen). */
+  shownPackId(): string | undefined {
+    return this.shownId()
+  }
+
+  /** A pack's clips for the "画面" card: what each is used for, editable in a development pack (clips.json). */
+  clipsOf(id: string): ClipsView {
+    return clipsView(join(this.packsDir, id), this.load(id), this.urls(id))
   }
 
   /** What the brain hears of what she can do, while no desktop body speaks for her. */

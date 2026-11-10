@@ -6,7 +6,7 @@
  */
 
 import { isRemotePage } from '../core/where.ts'
-import type { BodyMessage, BrainMessage } from '../protocol/index.ts'
+import type { BodyMessage, BrainMessage, SettingsPage } from '../protocol/index.ts'
 import type { BodyConfig, HerBridge, LinkStatus, MicMode } from '../../body/shared/types.ts'
 import type { WebConfig } from '../dsh/web-body.ts'
 
@@ -55,6 +55,8 @@ declare global {
     __herTap?: (x: number, y: number) => void
     /** Open one of her conversations in dsh (set by the client plugin when dsh lets it). */
     __herOpenSession?: (sessionId: string) => void
+    /** Show her settings in dsh, on one of its pages (set by the client plugin). */
+    __herOpenPage?: (page: SettingsPage) => void
   }
 }
 
@@ -126,8 +128,6 @@ function connect(): void {
   }
 }
 
-const notHere = { ok: false, message: '网页身体里还不能做这个' }
-
 window.her = {
   config: async (): Promise<BodyConfig> => {
     const answer = await post<{ config: WebConfig }>('/web/config', { remote: isRemotePage(location.protocol, location.hostname) })
@@ -135,12 +135,6 @@ window.her = {
     host()?.frame(answer.config.frame)
     return answer.config
   },
-  clips: async () => ({ packId: '', name: '', editable: false, clips: [] }),
-  pickScenePhoto: async () => undefined,
-  scenePhotoIn: async () => notHere,
-  saveScene: async () => notHere,
-  screens: async () => [],
-  saveClips: async () => notHere,
   hit: onHer => host()?.hit(onHer),
   drag: (dx, dy) => host()?.drag(dx, dy),
   menu: () => host()?.menu(),

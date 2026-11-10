@@ -1,7 +1,7 @@
 /** Shapes shared by the body's main process, preload and page. */
 
 import type { BodyMessage, BrainMessage } from '../../src/protocol/index.ts'
-import type { BodyConfig, ClipsView, ClipUse, PackLayout, SceneLayout } from '../../src/pack/types.ts'
+import type { BodyConfig } from '../../src/pack/types.ts'
 import type { LinkStatus } from '../main/brain-link.ts'
 
 export type { BodyConfig, ClipsView, ClipUse, PackClipInfo, PackInfo, PackLayout, SceneLayout, ScenePlate } from '../../src/pack/types.ts'
@@ -10,32 +10,11 @@ export type { Mode } from '../../src/pack/types.ts'
 import type { Mode } from '../../src/pack/types.ts'
 export type MicMode = 'push-to-talk' | 'always'
 
-export interface ScreenInfo {
-  /** Logical size (points / CSS pixels). */
-  width: number
-  height: number
-  /** Device pixels per logical pixel. */
-  scale: number
-  primary: boolean
-}
-
 export type { LinkStatus }
 
 /** What the preload exposes to the page as `window.her`. */
 export interface HerBridge {
   config(): Promise<BodyConfig>
-  /** The current pack's clips and what each is used for. */
-  clips(): Promise<ClipsView>
-  /** 做场景: choose the full-screen photo (undefined when cancelled). */
-  pickScenePhoto(): Promise<{ path: string; url: string; width: number; height: number } | undefined>
-  /** 做场景 on a 形象工坊 scene folder: its photo (plate.png). */
-  scenePhotoIn(dir: string): Promise<{ ok: boolean; photo?: { path: string; url: string; width: number; height: number }; message?: string }>
-  /** 做场景: write the scene folder (photo, scene.json, crop.png) and show it in the file manager; `dir`: frame that 形象工坊 folder. */
-  saveScene(input: { path: string; name: string; region: SceneLayout['region']; dir?: string }): Promise<{ ok: boolean; dir?: string; message?: string }>
-  /** The screens, for the 做场景 tab's advice (logical size and scale factor). */
-  screens(): Promise<ScreenInfo[]>
-  /** Save what each clip is used for (and its description); she picks it up at once. */
-  saveClips(changes: Array<{ id: string; use: ClipUse; desc: string }>): Promise<{ ok: boolean; message?: string }>
   /** Tell main whether the pointer is over her (overlay click-through). */
   hit(onHer: boolean): void
   drag(dx: number, dy: number): void

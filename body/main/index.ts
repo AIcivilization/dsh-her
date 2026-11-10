@@ -26,12 +26,11 @@ import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import type { BodyMessage, BrainMessage, PackSummary } from '../../src/protocol/index.ts'
 import { pickScene, shouldSwitch, type Look, type LookPrefs } from '../../src/pack/look.ts'
-import type { BodyConfig, LinkStatus, MicMode, Mode, PackInfo, ScreenInfo } from '../shared/types.ts'
+import type { BodyConfig, LinkStatus, MicMode, Mode, PackInfo } from '../shared/types.ts'
 import { BrainLink } from './brain-link.ts'
 import { idleLookSummary, listLooks, lookPackId, lookSummary, lookView } from '../../src/pack/looks.ts'
 import { importPack } from '../../src/pack/import.ts'
-import { clipsView, loadPack, saveClipUses, summarize } from '../../src/pack/load.ts'
-import { pickScenePhoto, saveScene, scenePhotoIn } from './scene-maker.ts'
+import { loadPack, summarize } from '../../src/pack/load.ts'
 import { hasFfmpeg, useFfmpeg } from '../../src/pack/media.ts'
 import { listPacks, loadSettings, saveSettings, type BodySettings } from '../../src/pack/settings.ts'
 import { iconPixels } from '../shared/icon.ts'
@@ -444,10 +443,7 @@ function menuTemplate(): Electron.MenuItemConstructorOptions[] {
     { label: `和她说话（${process.platform === 'darwin' ? '⌃⌥空格' : 'Ctrl+Alt+空格'}）`, click: talk },
     { label: `和她说话：打字或按住说（${process.platform === 'darwin' ? '⌃⌥↩' : 'Ctrl+Alt+Enter'}）`, click: showInput },
     { label: `任何程序里按住${HOLD_KEY_NAME}说话`, type: 'checkbox', checked: settings.holdKey === true, click: item => setHoldKey(item.checked) },
-    { label: '人设…', click: () => openPanel('persona') },
-    { label: '她记得的事…', click: () => openPanel('memory') },
-    { label: '画面编排…', click: () => openPanel('clips') },
-    { label: '做场景…', click: () => openPanel('scene') },
+    { label: '设置…', click: () => openSettings() },
     { label: '专注一会儿（2 小时不主动说话）', type: 'checkbox', checked: focus, click: item => { link?.send({ t: 'focus.set', on: item.checked }) } },
     {
       label: '一直在听', type: 'checkbox', checked: micMode === 'always',
@@ -600,25 +596,17 @@ function stopHoldHook(): void {
   holdHook = undefined
 }
 
-let panelWindow: BrowserWindow | undefined
+/**
+ * Her settings live in dsh (docs/设置页与编排设计.md): the brain remembers
+ * which page was asked for, dsh comes to the front, and its page shows it.
+ */
+function openSettings(): void {
+  link?.send({ t: 'settings.open' })
+  openDsh()
+}
 
-/** Her settings window (人设, 她记得的事); one at a time, brought to the front if already open. `extra`: more query (做场景 on a folder). */
-function openPanel(tab: 'persona' | 'memory' | 'clips' | 'scene', extra: Record<string, string> = {}): void {
-  const query = { tab, ...extra }
-  if (panelWindow !== undefined && !panelWindow.isDestroyed()) {
-    void panelWindow.loadFile(join(__dirname, 'panel.html'), { query })
-    panelWindow.show()
-    panelWindow.focus()
-    return
-  }
-  panelWindow = new BrowserWindow({
-    width: 560, height: 680, minWidth: 420, minHeight: 400, title: '她', show: false,
-    webPreferences: { preload: join(__dirname, 'preload.cjs') },
-  })
-  panelWindow.once('ready-to-show', () => panelWindow?.show())
-  panelWindow.on('closed', () => { panelWindow = undefined })
-  void panelWindow.loadFile(join(__dirname, 'panel.html'), { query })
-  if (process.platform === 'darwin') app.focus({ steal: true })
+function openDsh(): void {
+  void shell.openExternal('dsh://open').catch(() => {})
 }
 
 function showInput(): void {
@@ -635,36 +623,6 @@ function toPage(channel: string, ...args: unknown[]): void {
 }
 
 ipcMain.handle('config', (): BodyConfig => ({ mode, platform: process.platform, pack, her: herSize(), debug, mute }))
-ipcMain.handle('pack-clips', () => clipsView(join(packsDir, pack.id), pack))
-ipcMain.handle('screens', (): ScreenInfo[] => {
-  const primary = screen.getPrimaryDisplay().id
-  return screen.getAllDisplays().map(d => ({ width: d.size.width, height: d.size.height, scale: d.scaleFactor, primary: d.id === primary }))
-})
-ipcMain.handle('scene-pick-photo', () => pickScenePhoto())
-ipcMain.handle('scene-photo-in', (_event, dir: string) => {
-  try {
-    return { ok: true, photo: scenePhotoIn(dir) }
-  } catch (error) {
-    return { ok: false, message: (error as Error).message }
-  }
-})
-ipcMain.handle('scene-save', (_event, input: Parameters<typeof saveScene>[0]) => {
-  try {
-    return { ok: true, ...saveScene(input) }
-  } catch (error) {
-    return { ok: false, message: (error as Error).message }
-  }
-})
-ipcMain.handle('pack-clips-save', (_event, changes: Parameters<typeof saveClipUses>[1]) => {
-  try {
-    saveClipUses(join(packsDir, pack.id), changes)
-    // Reload the pack so she uses the new layout at once (and the brain hears of new emotions).
-    reshow()
-    return { ok: true }
-  } catch (error) {
-    return { ok: false, message: (error as Error).message }
-  }
-})
 ipcMain.handle('say', (_event, text: string) => (lastTalkAt = Date.now(), link?.send({ t: 'user.text', ...(cid === undefined ? {} : { cid }), text }) ?? false))
 ipcMain.handle('send', (_event, message: BodyMessage) => {
   const withCid = 'cid' in message && typeof message.cid === 'string' && message.cid !== '' ? message : { ...message, cid: cid ?? '' }
@@ -694,7 +652,7 @@ ipcMain.on('drag', (event, delta: { dx: number; dy: number }) => {
 ipcMain.on('bar', () => openBar())
 ipcMain.on('hold', (_event, on: boolean) => { win?.webContents.send('hold', on === true) })
 // dsh's desktop app comes to the front; its page then opens her conversation (the brain told it which).
-ipcMain.on('open-dsh', () => { void shell.openExternal('dsh://open').catch(() => {}) })
+ipcMain.on('open-dsh', () => openDsh())
 ipcMain.on('menu', (event) => {
   const target = BrowserWindow.fromWebContents(event.sender)
   if (target !== null) Menu.buildFromTemplate(menuTemplate()).popup({ window: target })
@@ -788,7 +746,9 @@ if (!app.requestSingleInstanceLock()) {
           return
         } else if (message.t === 'pack.use') {
           try {
-            usePack(message.packId)
+            // The same choice again: its clips changed (画面 in dsh), so load it afresh without switching scenes.
+            if (message.packId === (look === undefined ? pack.id : lookPackId(look))) reshow()
+            else usePack(message.packId)
           } catch (error) {
             link?.send({ t: 'error', code: 'pack', message: (error as Error).message })
           }
@@ -798,9 +758,6 @@ if (!app.requestSingleInstanceLock()) {
           const properties: Array<'openDirectory' | 'openFile' | 'createDirectory'> = ['openDirectory', 'createDirectory', ...(message.file === undefined ? [] : ['openFile' as const])]
           void dialog.showOpenDialog({ title: message.title, buttonLabel: message.button, properties, ...(message.file === undefined ? {} : { filters: [{ name: message.file, extensions: [message.file.replace(/^.*\./, '')] }] }) })
             .then(choice => link?.send({ t: 'folder.picked', id: message.id, ...(choice.canceled || choice.filePaths[0] === undefined ? {} : { path: choice.filePaths[0] }) }))
-          return
-        } else if (message.t === 'scene.frame') {
-          openPanel('scene', { dir: message.dir, name: message.name })
           return
         } else if (message.t === 'look.import') {
           importLookHere(message).catch(error => link?.send({ t: 'pack.report', id: '', ok: false, lines: [{ level: 'error', text: (error as Error).message }] }))

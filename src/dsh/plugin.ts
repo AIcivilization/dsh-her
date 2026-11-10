@@ -39,7 +39,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import { buildSystemPrompt, cardText, DEFAULT_VOICE, extractCues, extractSounds, FALLBACK_LINES, herPaths, initiativePrompt, invalidCharacter, judgeBargeIn, loadCharacter, memoryContext, OWN_PREFIX, parseOpening, parsePersonaCard, parseTouchLines, performanceSection, personaCardPrompt, readingMs, saveCharacter, SentenceSplitter, serviceOf, SOUND_SECTION, speakable, touchClip, touchLinesPrompt, TouchTracker, withSounds, cleanSplit, lastLines, sizeText, splitReason, type Character, type Moment, type SplitSettings, type TalkLine, type TouchLines } from '../core/index.ts'
 import { digestPrompt, notePrompt, parseDigest, transcriptOf } from '../memory/digest.ts'
 import { dayOf, FileMemory } from '../memory/store.ts'
-import { PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type LookView, type PackSummary, type TalkView, type WindowMode } from '../protocol/index.ts'
+import { PROTOCOL_VERSION, SETTINGS_PAGES, type BodyMessage, type BrainMessage, type LookView, type PackSummary, type SettingsPage, type TalkView, type WindowMode } from '../protocol/index.ts'
+import { saveClipUses } from '../pack/load.ts'
+import { listPacks } from '../pack/settings.ts'
 import { BrainServer } from '../server/brain-server.ts'
 import { type AvatarView, API_BASE, apiHandlers, handle, type ApiRuntime } from './api.ts'
 import { bodyRunning, findDevBody, launchBody, type LaunchPlan } from './body-launcher.ts'
@@ -97,8 +99,8 @@ function chunkError(chunk: { type: string; reason?: unknown; error?: unknown; me
 
 /** What to tell you when her model failed: the likely fix, in plain words. */
 export function explainModelError(message: string, model: string): string {
-  if (/no API key|api[_ ]?key|401|unauthori[sz]ed/i.test(message)) return `她用的模型（${model}）没有 API key，没法回答。到「她 → 设置 → 模型」换一个能用的模型，或者在 dsh 的设置里给它填上 key。`
-  if (/quota|insufficient|balance|余额|429/i.test(message)) return `她用的模型（${model}）额度不够或请求太多，暂时没法回答。可以等一会儿，或在「她 → 设置 → 模型」换一个。`
+  if (/no API key|api[_ ]?key|401|unauthori[sz]ed/i.test(message)) return `她用的模型（${model}）没有 API key，没法回答。到「她 → 引擎 → 模型」换一个能用的模型，或者在 dsh 的设置里给它填上 key。`
+  if (/quota|insufficient|balance|余额|429/i.test(message)) return `她用的模型（${model}）额度不够或请求太多，暂时没法回答。可以等一会儿，或在「她 → 引擎 → 模型」换一个。`
   if (/timeout|timed out|ECONN|network|fetch failed/i.test(message)) return `连不上她用的模型（${model}），检查一下网络，或者换一个模型。`
   return `她用的模型（${model}）出错了：${message.slice(0, 160)}`
 }
@@ -460,8 +462,8 @@ export function apply(ctx: Context, config: HerConfig): void {
   }
   let sessionLines: TalkLine[] = []
   let ownLines: Array<TalkLine & { conversation: string }> = []
-  /** "完整对话" asked for: the dsh page that sees it first opens this session. */
-  let openRequest: { sessionId: string; at: number } | undefined
+  /** "完整对话" or "设置…" asked for on a body: the dsh page that sees it first opens this session, or her settings on this page. */
+  let openRequest: { sessionId?: string; page?: SettingsPage; at: number } | undefined
   const talkView = (): TalkView => {
     const id = session?.sessionId
     const segments = session?.segments() ?? []
@@ -510,6 +512,9 @@ export function apply(ctx: Context, config: HerConfig): void {
   const openConversation = () => {
     const id = session?.sessionId
     if (id !== undefined) openRequest = { sessionId: id, at: Date.now() }
+  }
+  const openSettings = (page: SettingsPage | undefined) => {
+    openRequest = { page: page !== undefined && SETTINGS_PAGES.includes(page) ? page : 'home', at: Date.now() }
   }
 
   /** Ready-made looks offered on the release, and the one being fetched. */
@@ -819,6 +824,9 @@ export function apply(ctx: Context, config: HerConfig): void {
       case 'talk.open':
         openConversation()
         break
+      case 'settings.open':
+        openSettings(message.page)
+        break
       case 'user.text': {
         voice?.warm()
         const text = message.text.trim()
@@ -886,21 +894,6 @@ export function apply(ctx: Context, config: HerConfig): void {
       case 'pack.report':
         importStatus = { ...importStatus, state: message.ok ? 'done' : 'failed', lines: message.lines }
         break
-      case 'panel.get':
-        broadcast(panel())
-        break
-      case 'panel.set': {
-        let error: string | undefined
-        try {
-          if (message.character !== undefined) api.saveCharacter(message.character)
-          if (message.forget !== undefined) api.memoryRemove(message.forget)
-          if (message.confirm !== undefined) api.memoryConfirm(message.confirm)
-        } catch (failure) {
-          error = (failure as Error).message
-        }
-        broadcast(panel(error))
-        break
-      }
     }
   }
 
@@ -908,13 +901,6 @@ export function apply(ctx: Context, config: HerConfig): void {
   const mainScreen = (): { width: number; height: number } | undefined => {
     const first = server?.bodies.at(-1)?.hello.caps.screens[0] ?? webScreen
     return first === undefined ? undefined : { width: Math.round(first.w * first.scale), height: Math.round(first.h * first.scale) }
-  }
-
-  /** Who she is and what she remembers, for the body's settings window. */
-  const panel = (error?: string): BrainMessage => {
-    const { facts, episodes, diary } = memory.list()
-    const { name, persona, callYou, pronoun } = character
-    return { t: 'panel', cid, character: { name, persona, callYou, pronoun }, memory: { facts, episodes, diary }, ...(error === undefined ? {} : { error }) }
   }
 
   /** The screen of the browser she lives in, as the page reports it (the desktop body knows its own). */
@@ -1143,10 +1129,12 @@ export function apply(ctx: Context, config: HerConfig): void {
       if (screen !== undefined) webScreen = screen
       const { place, scope } = webBody.place()
       const avatar = webAvatar()
-      // "完整对话" from a body: the first dsh page that asks after it opens her conversation.
-      const open = openRequest !== undefined && Date.now() - openRequest.at < 30_000 ? openRequest.sessionId : undefined
-      if (open !== undefined) openRequest = undefined
-      return { show: webShown(remote), mode: webBody.mode, place, scope, focus: initiative.focused, ...(open === undefined ? {} : { open }), ...(avatar === undefined ? {} : { avatar }) }
+      // "完整对话" or "设置…" from a body: the first dsh page that asks after it opens her conversation, or her settings.
+      const request = openRequest !== undefined && Date.now() - openRequest.at < 30_000 ? openRequest : undefined
+      openRequest = undefined
+      const open = request?.sessionId
+      const page = request?.page
+      return { show: webShown(remote), mode: webBody.mode, place, scope, focus: initiative.focused, ...(open === undefined ? {} : { open }), ...(page === undefined ? {} : { page }), ...(avatar === undefined ? {} : { avatar }) }
     },
     importBatch: async (batch, name) => {
       const dir = uploadTarget(uploadsDir, batch)
@@ -1230,13 +1218,19 @@ export function apply(ctx: Context, config: HerConfig): void {
       const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open'
       spawn(opener, [found.dir], { detached: true, stdio: 'ignore' }).unref()
     },
-    workshopFrame: (id, sceneId) => {
-      const found = findProject(id)
-      const scene = found?.project.scenes.find(s => s.id === sceneId)
-      if (found === undefined || scene === undefined) throw new Error('找不到这个场景')
-      const body = server?.bodies.at(-1)
-      if (body === undefined) throw new Error('身体还没连上：框人物区要在身体那边的窗口里做')
-      body.send({ t: 'scene.frame', dir: join(found.dir, sceneDir(scene)), name: scene.name })
+    lookClips: packId => {
+      const packs = listPacks(paths.packs).map(p => ({ id: p.packId, name: p.name }))
+      const id = packId ?? webBody.shownPackId() ?? packs[0]?.id
+      if (id === undefined || !packs.some(p => p.id === id)) return { packs }
+      return { packs, view: webBody.clipsOf(id) }
+    },
+    lookClipsSave: (packId, changes) => {
+      if (!listPacks(paths.packs).some(p => p.packId === packId)) throw new Error('找不到这个外形')
+      saveClipUses(join(paths.packs, packId), changes)
+      // She shows the new layout at once: the same choice, loaded again.
+      const active = desktopConnected() ? activePack : undefined
+      if (active !== undefined) broadcast({ t: 'pack.use', packId: active })
+      webBody.reload()
     },
     workshopImport: id => {
       const found = findProject(id)

@@ -116,10 +116,8 @@ export type BodyMessage =
   | { t: 'mode.changed'; cid: string; mode: WindowMode; pos?: { x: number; y: number; screen?: number } }
   | { t: 'pack.progress'; id: string; done: number; total: number; step: string }
   | { t: 'pack.report'; id: string; ok: boolean; pack?: PackSummary; lines: Array<{ level: 'ok' | 'warn' | 'error'; text: string }> }
-  /** The body's settings window wants who she is and what she remembers (answered with `panel`). */
-  | { t: 'panel.get'; cid: string }
-  /** Changes made in the body's settings window; answered with a fresh `panel`. */
-  | { t: 'panel.set'; cid: string; character?: Partial<PanelCharacter>; forget?: string[]; confirm?: string[] }
+  /** The body's menu: open her settings in dsh, on one of its pages (主界面 when none). The body then brings dsh to the front. */
+  | { t: 'settings.open'; page?: SettingsPage }
   /** The packs this body has imported, and the one on screen. */
   | { t: 'pack.list'; packs: PackSummary[]; active?: string }
   /** The look on screen and its scenes (null: a single pack, no look). */
@@ -139,19 +137,9 @@ export interface Welcome {
   config: { mic: 'push-to-talk' | 'always'; bargeIn: boolean; focus?: boolean }
 }
 
-/** What the body's settings window can show and change about her. */
-export interface PanelCharacter {
-  name: string
-  persona: string
-  callYou: string
-  pronoun: '他' | '她' | 'TA'
-}
-
-export interface PanelMemory {
-  facts: Array<{ id: string; text: string; status: 'confirmed' | 'candidate'; sensitive: boolean; createdAt: string }>
-  episodes: Array<{ id: string; text: string; at: string; due?: string }>
-  diary: string[]
-}
+/** The pages of her settings in dsh (docs/设置页与编排设计.md §1). */
+export const SETTINGS_PAGES = ['home', 'engine', 'her', 'stage'] as const
+export type SettingsPage = typeof SETTINGS_PAGES[number]
 
 /** What the talk bar shows: the last lines, the conversation they are in, and the earlier ones. */
 export interface TalkView {
@@ -207,15 +195,11 @@ export type BrainMessage =
     ffmpeg?: string
     scenes: Array<{ id: string; name: string; folder: string; when?: { hours?: string; user?: 'active' | 'idle' } }>
   }
-  /** Open 做场景 on a project's scene folder: its plate.png is the photo, scene.json and crop.png are written there. */
-  | { t: 'scene.frame'; dir: string; name: string }
   /**
    * Let the user choose a folder (or, with `file`, also a file of that
    * extension) on the body's computer; answered with `folder.picked`.
    */
   | { t: 'folder.pick'; id: string; title: string; button: string; file?: string }
-  /** Who she is and what she remembers, for the body's settings window; `error` when a change was refused. */
-  | { t: 'panel'; cid: string; character: PanelCharacter; memory: PanelMemory; error?: string }
 
 export type AnyMessage = BodyMessage | BrainMessage
 

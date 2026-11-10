@@ -148,14 +148,14 @@ export function useOf(clip: DevClip): ClipUse {
 }
 
 /** The current pack's clips for the "画面" tab. */
-export function clipsView(dir: string, pack: PackInfo): ClipsView {
+export function clipsView(dir: string, pack: PackInfo, url: PackUrl = fileUrl): ClipsView {
   if (!existsSync(join(dir, 'clips.json'))) {
     return { packId: pack.id, name: pack.name, editable: false, clips: pack.clips.map(c => ({ id: c.id, url: c.url, desc: `${c.role} · ${c.name}`, use: 'idle', durationMs: c.durationMs })) }
   }
   const manifest = readDevManifest(dir)
   return {
     packId: pack.id, name: pack.name, editable: true,
-    clips: manifest.clips.map(c => ({ id: c.id, url: fileUrl(dir, c.file), desc: c.desc ?? '', use: useOf(c), durationMs: c.durationMs ?? 5000 })),
+    clips: manifest.clips.map(c => ({ id: c.id, url: url(dir, c.file), desc: c.desc ?? '', use: useOf(c), durationMs: c.durationMs ?? 5000 })),
   }
 }
 

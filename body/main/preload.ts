@@ -3,12 +3,6 @@ import type { HerBridge } from '../shared/types.ts'
 
 const bridge: HerBridge = {
   config: () => ipcRenderer.invoke('config'),
-  clips: () => ipcRenderer.invoke('pack-clips'),
-  saveClips: changes => ipcRenderer.invoke('pack-clips-save', changes),
-  pickScenePhoto: () => ipcRenderer.invoke('scene-pick-photo'),
-  saveScene: input => ipcRenderer.invoke('scene-save', input),
-  screens: () => ipcRenderer.invoke('screens'),
-  scenePhotoIn: dir => ipcRenderer.invoke('scene-photo-in', dir),
   hit: onHer => ipcRenderer.send('hit', onHer),
   drag: (dx, dy) => ipcRenderer.send('drag', { dx, dy }),
   menu: () => ipcRenderer.send('menu'),

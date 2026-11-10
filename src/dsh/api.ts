@@ -9,7 +9,8 @@
  */
 
 import type { Character } from '../core/index.ts'
-import type { BodyMessage, LookView, PackSummary, TalkView, WindowMode } from '../protocol/index.ts'
+import type { BodyMessage, LookView, PackSummary, SettingsPage, TalkView, WindowMode } from '../protocol/index.ts'
+import type { ClipUse, ClipsView } from '../pack/types.ts'
 import type { WebConfig, WebMode, WebPlace, WebScope } from './web-body.ts'
 
 /** Her small picture in the page, and its moving version when she has one. */
@@ -32,6 +33,9 @@ import type { FocusChoice, InitiativeView } from './initiative.ts'
 import type { Preset } from './presets.ts'
 
 export const API_BASE = '/api/dsh-her'
+
+/** What a clip of a development pack can be used for (the "画面" card). */
+const CLIP_USES: ClipUse[] = ['idle', 'listen', 'talk', 'think', 'shy', 'happy', 'fall-asleep', 'sleep', 'none']
 
 export interface StateView {
   platform: string
@@ -113,7 +117,7 @@ export interface ApiRuntime {
   bodyOpenFolder(): void
   /** The web body: whether to show, her config, a message from the page, the setting. */
   /** `remote`: the page is open on another device than the one running dsh. */
-  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; mode: WebMode; place: WebPlace; scope: WebScope; focus: boolean; open?: string; avatar?: AvatarView }
+  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; mode: WebMode; place: WebPlace; scope: WebScope; focus: boolean; open?: string; page?: SettingsPage; avatar?: AvatarView }
   /** A new folder for files coming from the browser, and importing it as a pack (with no desktop body). */
   webNewBatch(): string
   importBatch(batch: string, name?: string): Promise<void>
@@ -157,7 +161,10 @@ export interface ApiRuntime {
   workshopImportProject(): Promise<{ project: LookProject; status: ProjectStatus } | undefined>
   workshopExamples(): Array<{ card: WorkshopCard; file: string; label: string; ready: boolean }>
   workshopOpen(id: string): void
-  workshopFrame(id: string, sceneId: string): void
+  /** The "画面" card: the packs there are, and one pack's clips (the one she shows when none is named). */
+  lookClips(packId: string | undefined): { packs: Array<{ id: string; name: string }>; view?: ClipsView }
+  /** What each clip of a development pack is used for; she shows it at once. */
+  lookClipsSave(packId: string, changes: Array<{ id: string; use: ClipUse; desc: string }>): void
   /** Make her small picture from the uploaded one. */
   workshopAvatar(id: string): Promise<ProjectStatus>
   /** The same, moving, from the uploaded clip. */
@@ -414,8 +421,16 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
       rt.workshopOpen(str(body.id, '项目'))
       return {}
     },
-    '/workshop/frame': async body => {
-      rt.workshopFrame(str(body.id, '项目'), str(body.scene, '场景'))
+    '/look/clips': async body => rt.lookClips(typeof body.pack === 'string' && body.pack !== '' ? body.pack : undefined),
+    '/look/clips/save': async body => {
+      if (!Array.isArray(body.changes)) throw new Error('缺少要保存的片段')
+      const changes = body.changes.map(raw => {
+        const c = raw as Record<string, unknown>
+        const use = str(c.use, '用途') as ClipUse
+        if (!CLIP_USES.includes(use)) throw new Error(`不认识的用途：${use}`)
+        return { id: str(c.id, '片段'), use, desc: typeof c.desc === 'string' ? c.desc : '' }
+      })
+      rt.lookClipsSave(str(body.pack, '外形'), changes)
       return {}
     },
     '/workshop/avatar': async body => ({ status: await rt.workshopAvatar(str(body.id, '项目')) }),

@@ -20,7 +20,7 @@ import { StackedView } from '../../body/renderer/stacked.ts'
 import type { AvatarView } from '../dsh/api.ts'
 import type { FloatHost } from './web-bridge.ts'
 import { TalkBar } from '../../body/renderer/talk-bar.ts'
-import type { TalkView } from '../protocol/index.ts'
+import type { SettingsPage, TalkView } from '../protocol/index.ts'
 
 const STATUS_EVERY_MS = 5000
 const POS_KEY = 'dsh-her.web.pos'
@@ -499,11 +499,13 @@ export function mountWebFloat(): () => void {
     if (document.hidden) return
     try {
       const res = await fetch('/api/dsh-her/web/status', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ screen: { w: screen.width, h: screen.height, scale: devicePixelRatio }, remote: isRemotePage(location.protocol, location.hostname) }) })
-      const value = await res.json() as { ok: boolean; show?: boolean; place?: Place; scope?: Scope; avatar?: AvatarView; focus?: boolean; open?: string }
+      const value = await res.json() as { ok: boolean; show?: boolean; place?: Place; scope?: Scope; avatar?: AvatarView; focus?: boolean; open?: string; page?: SettingsPage }
       if (value.ok) {
         focus = value.focus === true
         // "完整对话" from the desktop's talk bar: this page opens her conversation.
         if (value.open !== undefined) window.__herOpenSession?.(value.open)
+        // "设置…" from the desktop's menu: this page shows her settings.
+        if (value.page !== undefined) window.__herOpenPage?.(value.page)
         shown = value.show === true
         avatar = value.avatar
         wanted = value.place === 'background' ? 'background' : 'pet'
