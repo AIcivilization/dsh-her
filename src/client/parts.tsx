@@ -131,7 +131,7 @@ export function PackPicker({ state, apply }: { state: StateView; apply: Apply })
         {desktopHere(body)
           ? <button className="her-btn" disabled={imp.state === 'picking' || imp.state === 'running'} onClick={() => void apply(herApi.pickPack())}>导入我的素材…</button>
           : <UploadPack apply={apply} busy={imp.state === 'running'} />}
-        <span className="her-muted">{desktopHere(body) ? '会在身体那台电脑上弹出选择文件夹的窗口。' : '选一个素材文件夹，传上去就导入。'}素材怎么做、怎么命名，见 docs/素材生成提示词.md。</span>
+        <span className="her-muted">{desktopHere(body) ? '会在身体那台电脑上弹出选择文件夹的窗口。' : '选一个素材文件夹，传上去就导入。'}素材怎么做、怎么命名，见<a href="https://github.com/AIcivilization/dsh-her/blob/main/docs/素材生成提示词.md" target="_blank" rel="noreferrer">素材规格</a>。</span>
       </div>
       {imp.state === 'picking' && <p className="her-muted">请在桌面上弹出的窗口里选择素材文件夹…</p>}
       {imp.state === 'running' && (
@@ -607,7 +607,7 @@ export function MicCheck({ state }: { state: StateView }) {
     return (
       <div>
         <p className="her-warn">浏览器只在 HTTPS 或 localhost 下才让网页用麦克风，所以这样打开时只能打字给她（双击她，或者右键菜单）。</p>
-        <p className="her-muted">想说话：用 SSH 隧道从 localhost 打开（<code>ssh -L 3000:127.0.0.1:3000 你的VPS</code>，再开 http://localhost:3000），或者给 dsh 配 HTTPS。见 docs/VPS部署.md。</p>
+        <p className="her-muted">想说话：用 SSH 隧道从 localhost 打开（<code>ssh -L 3000:127.0.0.1:3000 你的VPS</code>，再开 http://localhost:3000），或者给 dsh 配 HTTPS。见<a href="https://github.com/AIcivilization/dsh-her/blob/main/docs/VPS部署.md" target="_blank" rel="noreferrer">VPS 部署</a>。</p>
       </div>
     )
   }

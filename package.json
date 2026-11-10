@@ -31,8 +31,7 @@
     "lib",
     "python",
     "cordis.patch.yml",
-    "README.md",
-    "examples"
+    "README.md"
   ],
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && tsc -p tsconfig.json && node scripts/build-client.mjs",

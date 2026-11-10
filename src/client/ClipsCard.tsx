@@ -53,7 +53,7 @@ export function ClipsCard() {
         <p className="her-muted">
           {view.editable
             ? `「${view.name}」的每一段用在哪里，由你来定。同一类的几段会轮流播；"趴下睡着"在你 10 分钟没理她时播一次，接着播"睡着"；你一开口或点她就醒。鼠标移到画面上预览。`
-            : `「${view.name}」是导入的外形包，片段的用途由文件名决定（见 docs/素材生成提示词.md），这里只能看。`}
+            : `「${view.name}」是导入的外形包，片段的用途由文件名决定（命名规则见素材规格），这里只能看。`}
         </p>
       )}
       <div className="her-clips">
