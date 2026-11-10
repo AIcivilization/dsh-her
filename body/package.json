@@ -1,6 +1,6 @@
 {
   "name": "dsh-her-body",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "type": "module",
   "description": "dsh-her body: the desktop app she lives in (on top of your windows or inside the wallpaper).",
