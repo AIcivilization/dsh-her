@@ -52,6 +52,8 @@ jobs:
   # A computer with no desktop: a real dsh and a real browser (docs/VPS部署.md).
   headless:
     runs-on: ubuntu-latest
+    # A stuck download (apt's mirrors have hung for an hour) fails here instead of holding the run.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -59,10 +61,21 @@ jobs:
           node-version: 22
       - run: npm ci
       - run: npm run build
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      # An LGPL static ffmpeg (BtbN/FFmpeg-Builds), checked against that release's checksums, as for Windows; no apt.
+      - name: ffmpeg
+        run: |
+          base=https://github.com/BtbN/FFmpeg-Builds/releases/download/latest
+          name=ffmpeg-n8.1-latest-linux64-lgpl-8.1
+          curl -fsSL --retry 3 -o "$name.tar.xz" "$base/$name.tar.xz"
+          curl -fsSL --retry 3 -o checksums.sha256 "$base/checksums.sha256"
+          grep " $name.tar.xz\$" checksums.sha256 | sha256sum -c -
+          tar -xJf "$name.tar.xz" "$name/bin/ffmpeg"
+          sudo install -m 755 "$name/bin/ffmpeg" /usr/local/bin/ffmpeg
+          ffmpeg -hide_banner -version | head -1
       - run: npm i -g pnpm @deepseek-ai/dsh@latest
-      - run: npm i --no-save playwright-core && npx playwright-core install --with-deps chromium
-      - run: node scripts/headless-check.mjs
+      # The runner has Google Chrome already: no browser download, no apt.
+      - run: npm i --no-save playwright-core
+      - run: node scripts/headless-check.mjs --browser chrome
       # What a server needs that a Mac test never touches: uv's Linux build, and sherpa's native library.
       - name: uv's Linux build is what we pinned
         run: node --input-type=module -e "import { installUv, run } from './src/voice/uv.ts'; const uv = await installUv('.check-uv'); console.log(await run(uv, ['--version'], 30000))"
