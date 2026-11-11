@@ -61,17 +61,14 @@ jobs:
           node-version: 22
       - run: npm ci
       - run: npm run build
-      # An LGPL static ffmpeg (BtbN/FFmpeg-Builds), checked against that release's checksums, as for Windows; no apt.
+      # The ffmpeg the plugin itself downloads on a server without one (checksum-checked; it has H.264, which
+      # importing needs): what users get, and the download path tested too. No apt.
       - name: ffmpeg
         run: |
-          base=https://github.com/BtbN/FFmpeg-Builds/releases/download/latest
-          name=ffmpeg-n8.1-latest-linux64-lgpl-8.1
-          curl -fsSL --retry 3 -o "$name.tar.xz" "$base/$name.tar.xz"
-          curl -fsSL --retry 3 -o checksums.sha256 "$base/checksums.sha256"
-          grep " $name.tar.xz\$" checksums.sha256 | sha256sum -c -
-          tar -xJf "$name.tar.xz" "$name/bin/ffmpeg"
-          sudo install -m 755 "$name/bin/ffmpeg" /usr/local/bin/ffmpeg
+          node --input-type=module -e "import { ensureFfmpeg } from './src/dsh/ffmpeg-fetch.ts'; await ensureFfmpeg('.check-ffmpeg', () => {})"
+          if [ -f .check-ffmpeg/ffmpeg/ffmpeg ]; then sudo install -m 755 .check-ffmpeg/ffmpeg/ffmpeg /usr/local/bin/ffmpeg; fi
           ffmpeg -hide_banner -version | head -1
+          ffmpeg -hide_banner -encoders 2>/dev/null | grep -q libx264
       - run: npm i -g pnpm @deepseek-ai/dsh@latest
       # The runner has Google Chrome already: no browser download, no apt.
       - run: npm i --no-save playwright-core
