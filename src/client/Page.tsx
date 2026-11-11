@@ -102,7 +102,7 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
       </div>
       <div className="her-steps">
         {STEPS.map((name, i) => (
-          <button key={name} className={`her-step ${i === step ? 'on' : i < step ? 'done' : ''}`} onClick={() => setStep(i)}><i>{i < step ? <Icon name="check" size={12} /> : i + 1}</i>{name}</button>
+          <button key={name} className={`her-step ${i === step ? 'on' : i < step ? 'done' : ''}`} aria-label={`${i + 1}. ${name}`} aria-current={i === step ? 'step' : undefined} onClick={() => setStep(i)}><i>{i < step ? <Icon name="check" size={12} /> : i + 1}</i>{name}</button>
         ))}
       </div>
 
