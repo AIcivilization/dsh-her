@@ -79,60 +79,102 @@ export function SkinCard() {
   const skin = view.skins.find(s => s.id === selected)
   const intro = view.intro
 
+  const dark = document.body.hasAttribute('data-ds-dark-theme')
+  const mode = dark ? 'dark' : 'light'
+  /** A small picture of a skin: its page, side bar, a bubble and its accent. */
+  const swatch = (item: SkinsView['skins'][number] | undefined) => {
+    const color = (name: string, fallback: string) => item?.colors?.[name]?.[mode] ?? fallback
+    const page = color('--dsw-alias-bg-base', dark ? '#151517' : '#ffffff')
+    const picture = item?.background === undefined ? undefined : `url("/api/dsh-her/web/skin-file?id=${encodeURIComponent(item.id)}&f=${encodeURIComponent(item.background.file)}")`
+    return (
+      <span className="her-swatch" style={{ background: picture === undefined ? page : `${picture} center / cover` }}>
+        <i style={{ background: color('--dsw-specific-sidebar-fill', dark ? '#1b1b1c' : '#f9fafb') }} />
+        <b style={{ background: color('--dsw-specific-bubble', dark ? '#2c2c2e' : '#edf3fe') }} />
+        <em style={{ background: item?.bar?.accent?.[mode] ?? color('--dsw-alias-state-business-primary', dark ? '#7aaaff' : '#4176e6') }} />
+      </span>
+    )
+  }
   return (
-    <div className="her-card">
-      <h2>皮肤</h2>
-      <p className="her-muted">一整套样子：dsh 的颜色、背景图、字体、她的对话小条。选一个，整个 dsh 马上换给你看；点保存才算数，不保存就回到原来的。</p>
-      <div className="her-row">
-        <select className="her-select" style={{ width: 'auto', minWidth: 180 }} value={selected ?? ''} onChange={e => pick(e.target.value === '' ? null : e.target.value)}>
-          <option value="">dsh 原样</option>
-          {view.skins.map(s => <option key={s.id} value={s.id}>{s.name}{s.builtin === true ? '（自带）' : ''}</option>)}
-        </select>
-        <button className="her-btn primary" disabled={!trying} onClick={() => void save()}>保存</button>
-        {trying && <button className="her-btn" onClick={cancel}>取消</button>}
-        <button className="her-btn small" onClick={() => folder.current?.click()}>上传皮肤文件夹…</button>
-        <button className="her-btn small her-ai" title="让 dsh 的模型做一套：说你想要的样子" onClick={() => void openDesign(`皮肤（现在选的：${skin?.name ?? 'dsh 原样'}${skin === undefined ? '' : `，id ${skin.id}`}）`).then(m => m !== undefined && setNote({ kind: 'error', text: m }))}>+AI 做一套</button>
-        {skin !== undefined && skin.builtin !== true && <button className="her-btn small" onClick={() => {
-          if (window.confirm(`移走皮肤「${skin.name}」？文件夹会放进 skins/.removed，不会直接删掉。`)) void herApi.skinsRemove(skin.id).then(r => take(r, '移走了。'))
-        }}>移走这套</button>}
-        <input ref={folder} type="file" hidden {...{ webkitdirectory: '' }} onChange={e => { void sendSkin(e.target.files); e.target.value = '' }} />
-      </div>
-      {skin !== undefined && skin.problems.length > 0 && <ul className="her-warnlist">{skin.problems.map(p => <li key={p}>{p}</li>)}</ul>}
-      {skin?.author !== undefined && <p className="her-faint">作者：{skin.author}</p>}
-      <details className="her-muted"><summary>自己做一套皮肤</summary>
-        <p>一个文件夹，里面一个 <code>skin.json</code>，再放要用的图片、字体、视频。文件夹名就是皮肤的名字。<code>skin.json</code> 可以写：</p>
-        <ul>
-          <li><code>name</code>：显示的名字；<code>author</code>：作者。</li>
-          <li><code>colors</code>：dsh 的颜色，比如 <code>{'{"--dsw-alias-bg-base": {"light": "#f3f8fe", "dark": "#0b1626"}}'}</code>，每个颜色写浅色和深色两个值。</li>
-          <li><code>background</code>：<code>{'{"file": "背景.webp", "dim": 0.35}'}</code>，dim 是盖在上面的暗度（0–0.9）。</li>
-          <li><code>font</code>：<code>{'{"file": "字体.woff2"}'}</code>，或 <code>{'{"name": "霞鹜文楷"}'}</code>（电脑上装好的）。要分享的皮肤，只放可以自由分发的字体。</li>
-          <li><code>bar</code>：对话小条的 <code>background</code>、<code>text</code>、<code>accent</code>，也是浅色、深色各一个。</li>
-          <li><code>intro</code>：开机动画，文件夹里的一段视频；<code>css</code>：再加一个 .css 文件（dsh 改版时可能要改）。</li>
-        </ul>
-      </details>
-      {progress !== undefined && <p className="her-muted">正在上传 {progress.file}（{Math.round(progress.done / Math.max(progress.total, 1) * 100)}%）</p>}
-      {note !== undefined && <p className={note.kind === 'ok' ? 'her-ok' : 'her-danger'}>{note.text}</p>}
+    <>
+      <section className="her-card">
+        <div className="her-card-head">
+          <h2>皮肤</h2>
+          <span className="her-row" style={{ margin: 0 }}>
+            <button className="her-btn small" onClick={() => folder.current?.click()}>上传皮肤文件夹…</button>
+            <button className="her-btn small her-ai" title="让 dsh 的模型做一套：说你想要的样子" onClick={() => void openDesign(`皮肤（现在选的：${skin?.name ?? 'dsh 原样'}${skin === undefined ? '' : `，id ${skin.id}`}）`).then(m => m !== undefined && setNote({ kind: 'error', text: m }))}>+AI 做一套</button>
+          </span>
+          <input ref={folder} type="file" hidden {...{ webkitdirectory: '' }} onChange={e => { void sendSkin(e.target.files); e.target.value = '' }} />
+        </div>
+        <p className="her-muted">一整套样子：dsh 的颜色、背景图、字体、她的对话小条。点一个，整个 dsh 马上换给你看；保存才算数。</p>
+        <div className="her-grid her-skins">
+          <button className={`her-choice${(selected ?? '') === '' ? ' on' : ''}`} onClick={() => pick(null)}>{swatch(undefined)}dsh 原样<small>不换</small></button>
+          {view.skins.map(s => (
+            <button key={s.id} className={`her-choice${selected === s.id ? ' on' : ''}`} onClick={() => pick(s.id)}>
+              {swatch(s)}{s.name}<small>{s.builtin === true ? '自带' : s.author ?? '你的'}{s.problems.length > 0 ? ' · 有几处没用上' : ''}</small>
+            </button>
+          ))}
+        </div>
+        {trying && (
+          <div className="her-pending">
+            <span>正在试「{skin?.name ?? 'dsh 原样'}」：整个 dsh 已经换给你看了，还没保存。</span>
+            <button className="her-btn" onClick={cancel}>取消</button>
+            <button className="her-btn primary" onClick={() => void save()}>保存</button>
+          </div>
+        )}
+        {skin !== undefined && skin.problems.length > 0 && <ul className="her-warnlist">{skin.problems.map(p => <li key={p}>{p}</li>)}</ul>}
+        {skin !== undefined && skin.builtin !== true && !trying && (
+          <div className="her-row"><button className="her-btn small" onClick={() => {
+            if (window.confirm(`移走皮肤「${skin.name}」？文件夹会放进 skins/.removed，不会直接删掉。`)) void herApi.skinsRemove(skin.id).then(r => take(r, '移走了。'))
+          }}>移走「{skin.name}」</button></div>
+        )}
+        <details className="her-more"><summary>自己做一套皮肤</summary>
+          <p>一个文件夹，里面一个 <code>skin.json</code>，再放要用的图片、字体、视频。文件夹名就是皮肤的名字。<code>skin.json</code> 可以写：</p>
+          <ul>
+            <li><code>name</code>：显示的名字；<code>author</code>：作者。</li>
+            <li><code>colors</code>：dsh 的颜色，比如 <code>{'{"--dsw-alias-bg-base": {"light": "#f3f8fe", "dark": "#0b1626"}}'}</code>，每个颜色写浅色和深色两个值。</li>
+            <li><code>background</code>：<code>{'{"file": "背景.webp", "dim": 0.35}'}</code>，dim 是盖在上面的暗度（0–0.9）。</li>
+            <li><code>font</code>：<code>{'{"file": "字体.woff2"}'}</code>，或 <code>{'{"name": "霞鹜文楷"}'}</code>（电脑上装好的）。要分享的皮肤，只放可以自由分发的字体。</li>
+            <li><code>bar</code>：对话小条的 <code>background</code>、<code>text</code>、<code>accent</code>，也是浅色、深色各一个。</li>
+            <li><code>intro</code>：开机动画，文件夹里的一段视频；<code>css</code>：再加一个 .css 文件（dsh 改版时可能要改）。</li>
+          </ul>
+        </details>
+        {progress !== undefined && <p className="her-muted">正在上传 {progress.file}（{Math.round(progress.done / Math.max(progress.total, 1) * 100)}%）</p>}
+        {note !== undefined && <p className={note.kind === 'ok' ? 'her-ok' : 'her-danger'}>{note.text}</p>}
+      </section>
 
-      <h2 style={{ marginTop: 18 }}>开机动画</h2>
-      <p className="her-muted">她出场时播一段：电脑开机、桌面程序启动、或者"叫她出来"时。dsh 自己的启动画面换不了；可以选在 dsh 页面打开后也播一次。点一下就跳过。</p>
-      <div className="her-row">
-        <label><input type="checkbox" checked={intro.on} onChange={e => void herApi.introSet({ on: e.target.checked }).then(r => take(r))} /> 播开机动画</label>
-        <select className="her-select" style={{ width: 'auto' }} value={intro.source} onChange={e => void herApi.introSet({ source: e.target.value }).then(r => take(r))}>
-          <option value="skin">{view.skinIntro ? '用皮肤自带的' : '用皮肤自带的（现在这套没有）'}</option>
-          {view.introClips.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-        </select>
-        <select className="her-select" style={{ width: 'auto' }} value={intro.when} onChange={e => void herApi.introSet({ when: e.target.value as 'every' | 'daily' }).then(r => take(r))}>
-          <option value="daily">每天第一次</option>
-          <option value="every">每次</option>
-        </select>
-        <label><input type="checkbox" checked={intro.dsh} onChange={e => void herApi.introSet({ dsh: e.target.checked }).then(r => take(r))} /> 打开 dsh 页面时也播</label>
-      </div>
-      <div className="her-row">
-        <button className="her-btn small" onClick={() => clip.current?.click()}>上传一段开机动画…</button>
-        <button className="her-btn small" onClick={() => void herApi.introPlay().then(r => setNote(r.ok ? { kind: 'ok', text: '在桌面上播了。' } : { kind: 'error', text: r.message }))}>在桌面上播一次</button>
-        <input ref={clip} type="file" accept="video/*" hidden onChange={e => { void sendClip(e.target.files); e.target.value = '' }} />
-        <span className="her-faint">建议 2–5 秒；透明背景用 WebM，她就像从桌面上冒出来。</span>
-      </div>
-    </div>
+      <section className="her-card">
+        <h2>开机动画</h2>
+        <div className="her-setrow">
+          <div><b>她出场时播一段</b><span>电脑开机、桌面程序启动，或者"叫她出来"时。点一下就跳过。</span></div>
+          <input type="checkbox" checked={intro.on} onChange={e => void herApi.introSet({ on: e.target.checked }).then(r => take(r))} />
+        </div>
+        <div className="her-setrow">
+          <div><b>播哪一段</b><span>建议 2–5 秒；透明背景用 WebM，她就像从桌面上冒出来。</span></div>
+          <span className="her-row" style={{ margin: 0, flexWrap: 'nowrap' }}>
+            <select className="her-select" style={{ width: 'auto' }} value={intro.source} onChange={e => void herApi.introSet({ source: e.target.value }).then(r => take(r))}>
+              <option value="skin">{view.skinIntro ? '皮肤自带的' : '皮肤自带的（这套没有）'}</option>
+              {view.introClips.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+            </select>
+            <button className="her-btn" onClick={() => clip.current?.click()}>上传…</button>
+            <input ref={clip} type="file" accept="video/*" hidden onChange={e => { void sendClip(e.target.files); e.target.value = '' }} />
+          </span>
+        </div>
+        <div className="her-setrow">
+          <div><b>多久播一次</b><span>每次她出场都播，或者每天只播第一次。</span></div>
+          <select className="her-select" style={{ width: 'auto' }} value={intro.when} onChange={e => void herApi.introSet({ when: e.target.value as 'every' | 'daily' }).then(r => take(r))}>
+            <option value="daily">每天第一次</option>
+            <option value="every">每次</option>
+          </select>
+        </div>
+        <div className="her-setrow">
+          <div><b>打开 dsh 页面时也播</b><span>dsh 自己的启动画面换不了，这是页面出来以后叠上去的一段。</span></div>
+          <input type="checkbox" checked={intro.dsh} onChange={e => void herApi.introSet({ dsh: e.target.checked }).then(r => take(r))} />
+        </div>
+        <div className="her-setrow">
+          <div><b>看一眼</b><span>现在就在桌面上播一次。</span></div>
+          <button className="her-btn" onClick={() => void herApi.introPlay().then(r => setNote(r.ok ? { kind: 'ok', text: '在桌面上播了。' } : { kind: 'error', text: r.message }))}>播一次</button>
+        </div>
+      </section>
+    </>
   )
 }

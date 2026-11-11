@@ -177,7 +177,7 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
   return (
     <>
       <div className="her-card">
-        <h2>形象工坊</h2>
+        <h2>我的形象项目</h2>
         <p className="her-muted">做一个你自己的她：选好她的样子、她住在哪些场景里，这里会把每一张图、每一段视频的提示词都写好，放进「文稿 / dsh-her 素材」里的一个文件夹。你用即梦、可灵、MiniMax、ComfyUI 这些工具生成，放回文件夹，再一键导入。</p>
         <div className="her-grid">
           {items.map(item => (

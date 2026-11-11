@@ -111,8 +111,8 @@ function chunkError(chunk: { type: string; reason?: unknown; error?: unknown; me
 
 /** What to tell you when her model failed: the likely fix, in plain words. */
 export function explainModelError(message: string, model: string): string {
-  if (/no API key|api[_ ]?key|401|unauthori[sz]ed/i.test(message)) return `她用的模型（${model}）没有 API key，没法回答。到「她 → 引擎 → 模型」换一个能用的模型，或者在 dsh 的设置里给它填上 key。`
-  if (/quota|insufficient|balance|余额|429/i.test(message)) return `她用的模型（${model}）额度不够或请求太多，暂时没法回答。可以等一会儿，或在「她 → 引擎 → 模型」换一个。`
+  if (/no API key|api[_ ]?key|401|unauthori[sz]ed/i.test(message)) return `她用的模型（${model}）没有 API key，没法回答。到「她 → 模型」换一个能用的模型，或者在 dsh 的设置里给它填上 key。`
+  if (/quota|insufficient|balance|余额|429/i.test(message)) return `她用的模型（${model}）额度不够或请求太多，暂时没法回答。可以等一会儿，或在「她 → 模型」换一个。`
   if (/timeout|timed out|ECONN|network|fetch failed/i.test(message)) return `连不上她用的模型（${model}），检查一下网络，或者换一个模型。`
   return `她用的模型（${model}）出错了：${message.slice(0, 160)}`
 }

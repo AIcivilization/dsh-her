@@ -10,7 +10,7 @@ import { desktopHere, desktopOffered, herApi, remotePage, type StateView } from 
 import { serviceOf } from '../core/voices.ts'
 import { UpdateBar } from './UpdateBar.tsx'
 import { Workshop } from './Workshop.tsx'
-import { Fold, useFolds } from './fold.tsx'
+import { Icon } from './icons.tsx'
 import { ClipsCard } from './ClipsCard.tsx'
 import { StageEditor } from './StageEditor.tsx'
 import { SkinCard } from './SkinCard.tsx'
@@ -58,16 +58,15 @@ export function HerPage() {
   const showWizard = wizard ?? !state.character.onboarded
   return (
     <div className="her-page">
-      <UpdateBar state={state} apply={apply} />
       {state.off && (
-        <div className="her-offbar">
-          <b>她关着</b>
-          <span>桌面上、网页里都不显示，不听麦克风，不说话，也不会先开口。你在 dsh 里打字给她，她还是会用文字回。</span>
+        <div className="her-banner off">
+          <Icon name="power" />
+          <span><b>她关着。</b>桌面上、网页里都不显示，不听麦克风，不说话，也不会先开口。你在 dsh 里打字给她，她还是会用文字回。</span>
           <button className="her-btn primary" onClick={() => void apply(herApi.setOff(false))}>叫她出来</button>
         </div>
       )}
       {showWizard
-        ? <Wizard state={state} apply={apply} onDone={() => setWizard(false)} />
+        ? <div className="her-wizard"><Wizard state={state} apply={apply} onDone={() => setWizard(false)} /></div>
         : <Manage state={state} apply={apply} onWizard={() => setWizard(true)} />}
       {error !== undefined && <p className="her-error">{error}</p>}
     </div>
@@ -103,7 +102,7 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
       </div>
       <div className="her-steps">
         {STEPS.map((name, i) => (
-          <button key={name} className={`her-step ${i === step ? 'on' : i < step ? 'done' : ''}`} onClick={() => setStep(i)}>{i + 1}. {name}</button>
+          <button key={name} className={`her-step ${i === step ? 'on' : i < step ? 'done' : ''}`} onClick={() => setStep(i)}><i>{i < step ? <Icon name="check" size={12} /> : i + 1}</i>{name}</button>
         ))}
       </div>
 
@@ -123,7 +122,7 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
           <h2>她的身体</h2>
           <p className="her-muted">{offered ? '她可以住在 dsh 网页里（什么都不用装），也可以装一个桌面程序，住到桌面上，选哪个都可以。' : '她在 dsh 的每个页面上都在。'}</p>
           <BodyStatus state={state} apply={apply} />
-          {nav(ready, ready ? undefined : '也可以先跳过，之后在 引擎 → 身体 里再连')}
+          {nav(ready, ready ? undefined : '也可以先跳过，之后在「住在哪儿」里再连')}
           {!ready && <div className="her-row"><button className="her-btn link" onClick={next}>先跳过</button></div>}
         </div>
       )}
@@ -159,7 +158,7 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
       {step === 6 && (
         <div className="her-card">
           <h2>{offered ? '把她放在哪里' : '她在网页里'}</h2>
-          <p className="her-muted">随时可以在 引擎 → 放在哪里 改。</p>
+          <p className="her-muted">随时可以在「住在哪儿」里改。</p>
           {offered && <ModePicker state={state} apply={apply} />}
           {offered && !body.connected && <p className="her-muted">桌面程序连上之后才能切换这几种。</p>}
           <WebModePicker state={state} apply={apply} />
@@ -170,154 +169,353 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
   )
 }
 
-/** Her settings in four pages (docs/设置页与编排设计.md §1). */
-const PAGES: Array<[SettingsPage, (name: string) => string]> = [['home', () => '主界面'], ['engine', () => '引擎'], ['her', name => name || '她'], ['stage', () => '编排']]
+/**
+ * Her settings, the way system settings are laid out everywhere: who she is
+ * on top, a list on the left in four groups, one thing on the right at a
+ * time. Nothing folds; what needs doing shows on 总览 and as a dot in the list.
+ */
+type Section = 'home' | 'persona' | 'voice' | 'memory' | 'look' | 'stage' | 'library' | 'skin' | 'workshop' | 'speak' | 'initiative' | 'talk' | 'model' | 'body' | 'voices' | 'about'
+type Tone = 'ok' | 'warn' | 'bad' | 'off'
 
-type Section = 'persona' | 'voice' | 'memory' | 'look' | 'clips' | 'model' | 'body' | 'place' | 'listen' | 'voices' | 'initiative' | 'talk'
-/** Which page each part of the settings is on. */
-const PAGE_OF: Record<Section, SettingsPage> = {
-  persona: 'her', voice: 'her', memory: 'her',
-  look: 'stage', clips: 'stage',
-  model: 'engine', body: 'engine', place: 'engine', listen: 'engine', voices: 'engine', initiative: 'engine', talk: 'engine',
+const GROUPS: Array<{ title?: string; items: Array<{ id: Section; label: string; icon: string }> }> = [
+  { items: [{ id: 'home', label: '总览', icon: 'home' }] },
+  { title: '她', items: [{ id: 'persona', label: '人设', icon: 'persona' }, { id: 'voice', label: '声音', icon: 'voice' }, { id: 'memory', label: '记忆', icon: 'memory' }] },
+  { title: '外观', items: [{ id: 'look', label: '形象', icon: 'look' }, { id: 'stage', label: '编排', icon: 'stage' }, { id: 'library', label: '素材库', icon: 'library' }, { id: 'skin', label: '皮肤', icon: 'skin' }, { id: 'workshop', label: '形象工坊', icon: 'workshop' }] },
+  { title: '相处', items: [{ id: 'speak', label: '说话和聆听', icon: 'speak' }, { id: 'initiative', label: '主动说话', icon: 'initiative' }, { id: 'talk', label: '对话', icon: 'talk' }] },
+  { title: '系统', items: [{ id: 'model', label: '模型', icon: 'model' }, { id: 'body', label: '住在哪儿', icon: 'body' }, { id: 'voices', label: '外接语音', icon: 'voices' }, { id: 'about', label: '关于', icon: 'about' }] },
+]
+
+/** What each page is for, in one line under its title. */
+const ABOUT: Record<Section, string> = {
+  home: '',
+  persona: '她叫什么、是谁、怎么说话、怎么称呼你。保存后从她的下一句话开始生效。',
+  voice: '她用哪个声音说话、说多快。',
+  memory: '她记得的关于你的事。聊天时她会自己记；这里可以确认、让她忘掉。',
+  look: '她长什么样：选一个现成的形象，或者导入你自己做的。',
+  stage: '什么时候显示什么：一行一类东西，一列一个场景。',
+  library: '编排用的图片、视频和 SVG 都放在这里。',
+  skin: '换整个 dsh 的样子，和她出场时播的开机动画。',
+  workshop: '从头做一个自己的形象：照着每一步准备图片和视频，再导入。',
+  speak: '怎么叫她、怎么跟她说话，还有麦克风好不好用。',
+  initiative: '她什么时候可以先开口，什么时候不要打扰你。',
+  talk: '你们的对话存在哪儿、什么时候新开一段。',
+  model: '她的大脑用哪个模型。',
+  body: '她住在桌面上，还是住在 dsh 的网页里。',
+  voices: '接讯飞、OpenAI 兼容的服务、你自己的 GPT-SoVITS，或别的 dsh 插件。',
+  about: '版本、更新，和重新走一遍向导。',
 }
-const FOLDS: Record<Section, boolean> = { persona: false, voice: false, memory: false, look: false, clips: false, model: false, body: false, place: false, listen: false, voices: false, initiative: false, talk: false }
+
+/** "设置…" on the body's menu names one of the four old pages: where each lands now. */
+const FROM_MENU: Record<SettingsPage, Section> = { home: 'home', engine: 'model', her: 'persona', stage: 'stage' }
 
 function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; onWizard: () => void }) {
-  const [page, setPage] = useState<SettingsPage>(() => takePage() ?? 'home')
-  const [open, toggle] = useFolds<Section>('dsh-her.settings.open', FOLDS)
+  const [section, setSection] = useState<Section>(() => {
+    const asked = takePage()
+    return asked === undefined ? 'home' : FROM_MENU[asked]
+  })
   // "设置…" on the desktop body's menu.
   useEffect(() => onPageRequest(() => {
     const asked = takePage()
-    if (asked !== undefined) setPage(asked)
+    if (asked !== undefined) setSection(FROM_MENU[asked])
   }), [])
-  /** Show one part of the settings: its page, the part opened and scrolled to. */
-  const go = (section: Section) => {
-    setPage(PAGE_OF[section])
-    toggle(section, true)
-    // After the page and the card are shown.
-    setTimeout(() => document.getElementById(`her-set-${section}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+  const go = (next: Section) => {
+    setSection(next)
+    document.querySelector('.her-page')?.scrollTo({ top: 0 })
   }
-  const card = (id: Section, title: string, summary: string, tone: 'ok' | 'warn' | 'bad' | 'off', children: ReactNode) => (
-    <Fold id={`her-set-${id}`} title={title} summary={summary} tone={tone} open={open[id]} onToggle={() => toggle(id)}>{children}</Fold>
-  )
   const c = state.character
   const body = state.body
-  const here = body.connected || body.web.connected
+  const here = desktopHere(body) || body.web.connected
   const speaking = state.voice.speaking.status
   const pack = body.packs.find(p => p.packId === body.activePack)
+  const tucked = tuckedAway(state)
+
+  /** A dot in the list where something wants attention. */
+  const dots: Partial<Record<Section, Tone>> = {
+    ...(state.model === null || state.problem !== undefined ? { model: 'bad' as const } : {}),
+    ...(speaking === 'no-key' || speaking === 'no-quota' || speaking === 'failed' ? { voice: 'bad' as const } : {}),
+    ...(!here && !state.off && !tucked ? { body: 'warn' as const } : {}),
+    ...(here && pack === undefined ? { look: 'warn' as const } : {}),
+    ...(state.voice.status === 'failed' ? { speak: 'warn' as const } : {}),
+  }
+  const title = GROUPS.flatMap(g => g.items).find(i => i.id === section)!
+
+  return (
+    <div className="her-shell">
+      <Hero state={state} apply={apply} />
+      <div className="her-layout">
+        <nav className="her-nav" aria-label="她的设置">
+          {GROUPS.map((group, i) => (
+            <div key={i} className="her-nav-group">
+              {group.title !== undefined && <div className="her-nav-title">{group.title}</div>}
+              {group.items.map(item => (
+                <button key={item.id} className={`her-nav-item${section === item.id ? ' on' : ''}`} aria-current={section === item.id ? 'page' : undefined} onClick={() => go(item.id)}>
+                  <Icon name={item.icon} />
+                  <span>{item.label}</span>
+                  {dots[item.id] !== undefined && <i className={`her-dot ${dots[item.id]}`} />}
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
+        <main className="her-main">
+          {section !== 'home' && (
+            <header className="her-title">
+              <h1>{title.label}</h1>
+              <p>{ABOUT[section]}</p>
+            </header>
+          )}
+
+          {section === 'home' && <Home state={state} apply={apply} go={go} />}
+
+          {section === 'persona' && <Card><PersonaEditor state={state} apply={apply} /></Card>}
+          {section === 'voice' && (
+            <>
+              <Card><VoicePicker state={state} apply={apply} saveLabel="用这个声音" /></Card>
+              <LinkRow icon="voices" title="想用别家的声音？" text="讯飞、OpenAI 兼容的服务、GPT-SoVITS 或别的插件，在「外接语音」里接。" onClick={() => go('voices')} />
+            </>
+          )}
+          {section === 'memory' && <MemoryView state={state} apply={apply} />}
+
+          {section === 'look' && (
+            <>
+              {state.stagePlaying && <Banner tone="ok" text="她现在按「编排」来。这里选的形象，在关掉编排以后才用。" action="去编排" onClick={() => go('stage')} />}
+              <Card title="选一个形象"><PackPicker state={state} apply={apply} /></Card>
+              {body.look !== undefined && <Card title="场景"><ScenePicker state={state} apply={apply} /></Card>}
+              <Card title="每段画面用在哪里" fold><ClipsCard /></Card>
+              <LinkRow icon="workshop" title="想要一个自己的形象？" text="形象工坊带你一步步准备图片和视频，再导入。" onClick={() => go('workshop')} />
+            </>
+          )}
+          {section === 'stage' && <StageEditor part="table" onLibrary={() => go('library')} />}
+          {section === 'library' && <StageEditor part="library" />}
+          {section === 'skin' && <SkinCard />}
+          {section === 'workshop' && <Workshop state={state} apply={apply} />}
+
+          {section === 'speak' && (
+            <>
+              <Card title="怎么跟她说话">
+                <ul className="her-ways">
+                  <li><Keys keys={state.platform === 'darwin' ? ['⌃', '⌥', '↩'] : ['Ctrl', 'Alt', 'Enter']} /><div><b>对话小条</b><span>在哪儿都能叫出来：打字，或按住 🎙 说。双击她、点 dsh 对话框上她的小头像也行。</span></div></li>
+                  <li><Keys keys={state.platform === 'darwin' ? ['⌃', '⌥', '空格'] : ['Ctrl', 'Alt', '空格']} /><div><b>说一句</b><span>按一下开始说，说完自动发出去。她说话时你开口，就能打断她。</span></div></li>
+                  <li><Keys keys={[state.platform === 'darwin' ? '右 ⌥' : '右 Alt']} /><div><b>按住说话</b><span>小条打开时按住就能说。想在任何程序里都能按住说：右键她（或托盘）勾上那一项。</span></div></li>
+                  <li><span className="her-keys"><kbd>右键她</kbd></span><div><b>一直在听</b><span>在她的右键菜单里勾上，戴耳机长聊时用。</span></div></li>
+                </ul>
+              </Card>
+              <Card title="听你说话" badge={<><Dot tone={toneOf(state.voice.status)} />{listeningText(state.voice.status)}</>}>
+                {here ? <MicCheck state={state} /> : <p className="her-muted">身体连上之后才能用麦克风。</p>}
+              </Card>
+              <LinkRow icon="voices" title="换一家来听" text="讯飞听写、OpenAI 兼容的识别，在「外接语音」里选。" onClick={() => go('voices')} />
+            </>
+          )}
+          {section === 'initiative' && <InitiativeCard state={state} apply={apply} />}
+          {section === 'talk' && <TalkCard state={state} apply={apply} />}
+
+          {section === 'model' && (
+            <>
+              {state.problem !== undefined && <Banner tone="bad" text={`她刚才没能回答：${state.problem.text}`} />}
+              <Card><ModelPicker state={state} apply={apply} /></Card>
+            </>
+          )}
+          {section === 'body' && (
+            <>
+              <Card title="桌面程序" badge={<><Dot tone={here ? 'ok' : body.running ? 'warn' : 'off'} />{desktopHere(body) ? '已连上' : body.web.connected ? '她在网页里' : body.running ? '正在连' : '没连上'}</>}>
+                <BodyStatus state={state} apply={apply} />
+              </Card>
+              {desktopOffered(body) && <Card title="在桌面上怎么待着">{body.connected ? <ModePicker state={state} apply={apply} /> : <p className="her-muted">桌面程序连上之后才能切换。</p>}</Card>}
+              <Card title="在 dsh 网页里"><WebModePicker state={state} apply={apply} /></Card>
+              <WebPlaceCard state={state} apply={apply} />
+            </>
+          )}
+          {section === 'voices' && <Card><VoiceServices state={state} apply={apply} /></Card>}
+          {section === 'about' && (
+            <>
+              <Card title="版本和更新"><UpdateBar state={state} apply={apply} /></Card>
+              <Card title="重新设置">
+                <div className="her-setrow">
+                  <div><b>重新走一遍向导</b><span>七步：检查、身体、外形、人设、声音、麦克风、放在哪里。现有的设置都留着。</span></div>
+                  <button className="her-btn" onClick={onWizard}>打开向导</button>
+                </div>
+              </Card>
+              <Card title="她的东西放在哪儿">
+                <p className="her-muted">人设、记忆、对话、素材、皮肤都在这台电脑上的 <code>~/.dsh-her</code>，不上传。key 在系统钥匙串里。</p>
+                <p className="her-muted">跑在 {platformName(state.platform)} 上{remotePage ? '，你是从别的设备打开这个网页的' : ''}。</p>
+                <div className="her-row">
+                  <a className="her-btn" href="https://github.com/AIcivilization/dsh-her#readme" target="_blank" rel="noreferrer">使用说明</a>
+                  <a className="her-btn" href="https://github.com/AIcivilization/dsh-her/blob/main/docs/素材生成提示词.md" target="_blank" rel="noreferrer">素材规格</a>
+                  <a className="her-btn" href="https://github.com/AIcivilization/dsh-her/issues" target="_blank" rel="noreferrer">反馈问题</a>
+                </div>
+              </Card>
+            </>
+          )}
+        </main>
+      </div>
+    </div>
+  )
+}
+
+/** You put her away in this browser yourself (the switch on 总览): not a fault, so no warning. */
+const tuckedAway = (state: StateView) => !desktopHere(state.body) && !state.body.web.connected && window.__herFloat?.hidden() === true
+
+/** Who she is and how she is, always on top: her picture, name, one line of state, and the switch. */
+function Hero({ state, apply }: { state: StateView; apply: Apply }) {
+  const body = state.body
+  const avatar = body.web.avatar
+  const where: { tone: Tone; text: string } = state.off
+    ? { tone: 'off', text: '关着：不显示、不听、不说话' }
+    : desktopHere(body) ? { tone: 'ok', text: `在桌面上 · ${body.mode === undefined ? '' : MODE_TEXT[body.mode]?.title ?? body.mode}` }
+    : body.web.connected ? { tone: 'ok', text: `在 dsh 网页里 · ${body.web.place === 'pet' ? '桌宠' : '背景'}` }
+    : body.running ? { tone: 'warn', text: '桌面程序正在连…' }
+    : tuckedAway(state) ? { tone: 'off', text: '在这个网页里收起来了' }
+    : { tone: 'warn', text: '身体没连上' }
+  const c = state.character
+  return (
+    <header className={`her-hero${state.off ? ' off' : ''}`}>
+      <div className="her-hero-ava">
+        {avatar?.videoUrl !== undefined ? <video src={avatar.videoUrl} muted loop autoPlay playsInline />
+          : avatar !== undefined && avatar.url !== '' ? <img src={avatar.url} alt="" />
+          : <span>{[...c.name][0] ?? '她'}</span>}
+      </div>
+      <div className="her-hero-text">
+        <h1>{c.name}</h1>
+        <p><Dot tone={where.tone} />{where.text}{state.initiative.focus.on && !state.off ? ' · 专注中' : ''}</p>
+      </div>
+      <label className="her-power" title={state.off ? '叫她出来' : '关掉她：桌面上、网页里都收起来，不听、不说话；重启后也还关着'}>
+        <span>{state.off ? '关着' : '她在'}</span>
+        <input type="checkbox" checked={!state.off} onChange={e => void apply(herApi.setOff(!e.target.checked))} />
+      </label>
+    </header>
+  )
+}
+
+/** 总览: what needs doing, where she is, a few things at hand, and everything she is set to. */
+function Home({ state, apply, go }: { state: StateView; apply: Apply; go: (section: Section) => void }) {
+  const [said, setSaid] = useState<string>()
+  const [, redraw] = useState(0)
+  useEffect(() => {
+    const again = () => redraw(n => n + 1)
+    window.addEventListener('dsh-her:float', again)
+    return () => window.removeEventListener('dsh-her:float', again)
+  }, [])
+  const c = state.character
+  const body = state.body
+  const here = desktopHere(body) || body.web.connected
+  const pack = body.packs.find(p => p.packId === body.activePack)
+  const speaking = state.voice.speaking.status
+  const float = window.__herFloat
+  const todo: Array<{ tone: Tone; text: string; action: string; to: Section }> = [
+    ...(state.model === null ? [{ tone: 'bad' as const, text: 'dsh 还没有可用的模型，她没法回答。', action: '选模型', to: 'model' as const }] : []),
+    ...(state.problem !== undefined ? [{ tone: 'bad' as const, text: `她刚才没能回答：${state.problem.text}`, action: '换模型', to: 'model' as const }] : []),
+    ...(!here && !state.off && !tuckedAway(state) ? [{ tone: 'warn' as const, text: '她的身体没连上，现在看不到她。', action: '去看看', to: 'body' as const }] : []),
+    ...(here && pack === undefined ? [{ tone: 'warn' as const, text: '她还没有形象。', action: '选一个', to: 'look' as const }] : []),
+    ...(speaking === 'no-key' || speaking === 'no-quota' || speaking === 'failed' ? [{ tone: 'bad' as const, text: `她的声音：${speakingText(speaking, state.voice.speaking.service)}`, action: '看声音', to: 'voice' as const }] : []),
+    ...(state.voice.status === 'failed' ? [{ tone: 'warn' as const, text: '听你说话出错了，暂时只能打字。', action: '去看看', to: 'speak' as const }] : []),
+    ...(here && !state.off && body.web.avatar === undefined ? [{ tone: 'off' as const, text: '她还没有小头像（dsh 对话框上的那个）。', action: '去素材库', to: 'library' as const }] : []),
+  ]
+  const focus = state.initiative.focus.on
+  const tiles: Array<{ icon: string; label: string; value: string; to: Section }> = [
+    { icon: 'persona', label: '人设', value: `${c.name}，叫你「${c.callYou || '（没设）'}」`, to: 'persona' },
+    { icon: 'voice', label: '声音', value: `${voiceLabel(state, c.voice.id)} · ${SERVICE_SHORT[serviceOf(c.voice.id)]}`, to: 'voice' },
+    { icon: 'look', label: '形象', value: !here ? '身体没连上' : pack?.name ?? '还没有', to: 'look' },
+    { icon: 'stage', label: '编排', value: state.stagePlaying ? '她按编排来' : '没开', to: 'stage' },
+    { icon: 'skin', label: '皮肤', value: state.skin ?? 'dsh 原样', to: 'skin' },
+    { icon: 'body', label: '住在哪儿', value: desktopHere(body) ? (body.mode === undefined ? '桌面上' : MODE_TEXT[body.mode]?.title ?? body.mode) : body.web.connected ? 'dsh 网页里' : '没连上', to: 'body' },
+    { icon: 'initiative', label: '主动说话', value: initiativeText(state), to: 'initiative' },
+    { icon: 'talk', label: '对话', value: `${state.talk.segment?.title ?? '还没有'}${state.talk.size === undefined ? '' : ` · ${state.talk.size}`}`, to: 'talk' },
+    { icon: 'model', label: '模型', value: state.model === null ? '没有可用的' : state.model.model, to: 'model' },
+  ]
   return (
     <>
-      <div className="her-head">
-        <h1>{c.name}</h1>
-        <div className="her-head-right">
-          <button className="her-btn link" onClick={onWizard}>重新走一遍向导</button>
-          {!state.off && <button className="her-btn her-off" title="桌面上、网页里都收起来，不听、不说话；随时在这里叫她出来" onClick={() => void apply(herApi.setOff(true))}>⏻ 关掉她</button>}
-        </div>
-      </div>
-      <div className="her-tabs">
-        {PAGES.map(([id, label]) => <button key={id} className={`her-tab ${page === id ? 'on' : ''}`} onClick={() => setPage(id)}>{label(c.name)}</button>)}
-      </div>
-
-      {page === 'home' && (
-        <>
-          <p className="her-intro">这里是她的设置。<b>引擎</b>管大脑、身体、听你说话、她先开口和对话；<b>{c.name || '她'}</b>管她是谁、她的声音、她记得的事；<b>编排</b>管她长什么样、什么时候播哪段。</p>
-          {state.problem !== undefined && (
-            <div className="her-card her-alert">
-              <h2>她刚才没能回答</h2>
-              <p>{state.problem.text}</p>
-              <div className="her-row"><button className="her-btn primary" onClick={() => go('model')}>去换模型</button></div>
+      <UpdateBar state={state} apply={apply} />
+      {todo.length > 0 && (
+        <section className={`her-card${todo.some(item => item.tone !== 'off') ? ' her-todo' : ''}`}>
+          <h2>{todo.some(item => item.tone !== 'off') ? '要处理的事' : '还可以做的事'}</h2>
+          {todo.map(item => (
+            <div key={item.text} className="her-todo-row">
+              <Dot tone={item.tone} />
+              <span>{item.text}</span>
+              <button className="her-btn small" onClick={() => go(item.to)}>{item.action}</button>
+            </div>
+          ))}
+        </section>
+      )}
+      <div className="her-home-top">
+        <StageMap state={state} onGo={target => go(target === 'skin' ? 'skin' : target === 'voice' ? 'voice' : target === 'talk' ? 'speak' : target === 'model' ? 'model' : target === 'stage' ? 'look' : 'body')} />
+        <section className="her-card her-quick">
+          <h2>顺手的事</h2>
+          <div className="her-setrow">
+            <div><b>专注一会儿</b><span>2 小时里她不先开口；你找她不受影响。</span></div>
+            <input type="checkbox" checked={focus} disabled={state.off} onChange={e => void apply(herApi.initiativeSet({ focus: e.target.checked ? 'span' : 'off' }))} />
+          </div>
+          {float !== undefined && (
+            <div className="her-setrow">
+              <div><b>在这个网页里显示她</b><span>只影响这个浏览器。</span></div>
+              <input type="checkbox" checked={!float.hidden()} disabled={state.off} onChange={e => float.setHidden(!e.target.checked)} />
             </div>
           )}
-          <StageMap state={state} onGo={target => {
-            if (target === 'stage') { setPage('stage'); return }
-            if (target === 'skin') { document.getElementById('her-skin')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return }
-            go(target === 'voice' ? 'voice' : target === 'talk' ? 'talk' : target === 'model' ? 'model' : target === 'place' ? 'place' : 'body')
-          }} />
-          <NowCard state={state} onChange={go} />
-          <div id="her-skin"><SkinCard /></div>
-          <WebPlaceCard state={state} apply={apply} />
-          <div className="her-card">
-            <h2>状态</h2>
-            <p>{state.model === null ? <><Dot tone="bad" />没有可用的模型</> : <><Dot tone={state.problem === undefined ? 'ok' : 'bad'} />大脑：{state.model.provider} / {state.model.model}{state.model.chosen ? '' : '（dsh 默认）'}{state.problem === undefined ? '' : '：上一次回答失败了'}</>}</p>
-            <p><Dot tone={toneOf(speaking)} />她的声音：{speakingText(speaking, state.voice.speaking.service)}（{voiceLabel(state, c.voice.id)}）</p>
-            {(speaking === 'no-key' || speaking === 'no-quota') && <KeyHelp state={state} />}
-            <p><Dot tone={toneOf(state.voice.status)} />听你说话：{listeningText(state.voice.status)}</p>
-            <p><Dot tone={here ? 'ok' : 'off'} />身体：{desktopHere(body) ? '桌面上' : body.web.connected ? 'dsh 网页里' : '没连上'}</p>
-            <p className="her-muted">记得 {state.memory.facts.length} 件关于你的事、{state.memory.episodes.length} 个事件，写了 {state.memory.diary.length} 天日记。</p>
-            {state.heard !== undefined && <p className="her-faint">最近听到：「{state.heard.text}」</p>}
+          <div className="her-setrow">
+            <div><b>让她现在说一句</b><span>{said ?? '看看她的声音和主动说话好不好用。'}</span></div>
+            <button className="her-btn" disabled={state.off} onClick={() => void herApi.initiativeTry().then(r => setSaid(r.ok ? `她说：「${r.said}」` : r.message))}>说一句</button>
           </div>
-        </>
-      )}
-
-      {page === 'engine' && (
-        <>
-          {card('model', '模型', state.model === null ? '没有可用的模型' : `${state.model.provider} / ${state.model.model}${state.model.chosen ? '' : '（dsh 默认）'}${state.problem === undefined ? '' : ' · 上一次回答失败了'}`,
-            state.model === null || state.problem !== undefined ? 'bad' : 'ok', <ModelPicker state={state} apply={apply} />)}
-          {card('body', '身体', desktopHere(body) ? '桌面程序已连上' : body.web.connected ? '在 dsh 网页里' : body.running ? '正在连' : '没连上', here ? 'ok' : body.running ? 'warn' : 'off',
-            <BodyStatus state={state} apply={apply} />)}
-          {card('place', '放在哪里', desktopHere(body) ? (body.mode === undefined ? '—' : MODE_TEXT[body.mode]?.title ?? body.mode) : body.web.connected ? 'dsh 网页里' : '身体没连上', here ? 'ok' : 'off',
-            <>{desktopOffered(body) && <ModePicker state={state} apply={apply} />}<WebModePicker state={state} apply={apply} /></>)}
-          {card('listen', '听你说话', listeningText(state.voice.status), toneOf(state.voice.status),
-            here ? <MicCheck state={state} /> : <p className="her-muted">身体连上之后才能用麦克风。</p>)}
-          {card('voices', '外接语音', state.character.voice.id.startsWith('ext:') ? `她在用外接的声音（${state.character.voice.id.split(':')[1]}）` : '讯飞、OpenAI 兼容、GPT-SoVITS、别的插件', state.character.voice.id.startsWith('ext:') ? 'ok' : 'off',
-            <VoiceServices state={state} apply={apply} />)}
-          {card('initiative', '主动说话', initiativeText(state), state.initiative.settings.on ? 'ok' : 'off', <InitiativeCard state={state} apply={apply} />)}
-          {card('talk', '对话', `${state.talk.segment?.title ?? '还没有'}${state.talk.size === undefined ? '' : ` · ${state.talk.size}`}`, 'ok', <TalkCard state={state} apply={apply} />)}
-        </>
-      )}
-
-      {page === 'her' && (
-        <>
-          {card('persona', '人设', `${c.name}，叫你「${c.callYou || '（没设）'}」`, 'ok', <PersonaEditor state={state} apply={apply} />)}
-          {card('voice', '声音', `${voiceLabel(state, c.voice.id)} · ${SERVICE_SHORT[serviceOf(c.voice.id)]} · ${speakingText(speaking, state.voice.speaking.service)}`, toneOf(speaking),
-            <VoicePicker state={state} apply={apply} saveLabel="用这个声音" />)}
-          {card('memory', '她记得的事', `${state.memory.facts.length} 件关于你的事 · ${state.memory.episodes.length} 个事件 · ${state.memory.diary.length} 天日记`, 'ok',
-            <div className="her-nested"><MemoryView state={state} apply={apply} /></div>)}
-        </>
-      )}
-
-      {page === 'stage' && (
-        <>
-          <StageEditor />
-          <h3 className="her-sub">原来的外形设置（"让她按这份编排来"关着时，她按这里的来）</h3>
-          {card('look', '外形', here ? `${pack?.name ?? '还没有外形'}${body.look === undefined ? '' : ` · ${body.look.scenes.length} 个场景`}` : '身体没连上', here ? (pack === undefined ? 'warn' : 'ok') : 'off',
-            <><PackPicker state={state} apply={apply} /><ScenePicker state={state} apply={apply} /></>)}
-          {card('clips', '画面', '每一段视频用在哪里', 'ok', <ClipsCard />)}
-          <Workshop state={state} apply={apply} />
-        </>
-      )}
+          {state.heard !== undefined && <p className="her-faint">最近听到：「{state.heard.text}」</p>}
+        </section>
+      </div>
+      <section className="her-card">
+        <h2>现在的设置</h2>
+        <div className="her-tiles">
+          {tiles.map(tile => (
+            <button key={tile.label} className="her-tile" onClick={() => go(tile.to)}>
+              <Icon name={tile.icon} />
+              <span className="her-tile-label">{tile.label}</span>
+              <span className="her-tile-value">{tile.value}</span>
+            </button>
+          ))}
+        </div>
+        <p className="her-faint">记得 {state.memory.facts.length} 件关于你的事、{state.memory.episodes.length} 个事件，写了 {state.memory.diary.length} 天日记。</p>
+      </section>
     </>
   )
 }
 
-/** What she is set to right now, each with a way to change it. */
-function NowCard({ state, onChange }: { state: StateView; onChange: (section: Section) => void }) {
-  const c = state.character
-  const body = state.body
-  const here = body.connected || body.web.connected
-  const pack = body.packs.find(p => p.packId === body.activePack)
-  const scene = body.look?.scenes.find(s => s.id === body.look?.current)
-  const onDesk = body.mode === 'overlay' && body.look?.desk === true
-  const row = (label: string, value: string, section: Section) => (
-    <div className="her-row" style={{ margin: '4px 0' }}>
-      <span className="her-muted" style={{ width: 72, flexShrink: 0 }}>{label}</span>
-      <span style={{ flex: 1, minWidth: 0 }}>{value}</span>
-      <button className="her-btn small" onClick={() => onChange(section)}>改</button>
-    </div>
-  )
+/** A card with an optional title, a small note on the right of it, or folded away until asked for. */
+function Card({ title, badge, fold = false, children }: { title?: string; badge?: ReactNode; fold?: boolean; children: ReactNode }) {
+  if (fold) {
+    return (
+      <details className="her-card her-details">
+        <summary><h2>{title}</h2><Icon name="arrow" size={16} /></summary>
+        <div className="her-details-body">{children}</div>
+      </details>
+    )
+  }
   return (
-    <div className="her-card">
-      <h2>现在的她</h2>
-      {row('人物', `${c.name}，叫你「${c.callYou || '（没设）'}」`, 'persona')}
-      {row('形象', !here ? '身体没连上' : pack?.name ?? '还没有形象：到"编排"选一个或做一个', 'look')}
-      {body.look !== undefined && row('场景', onDesk ? '桌宠（浮在最上层时用）' : `${scene?.name ?? '—'}${body.look.locked ? '（锁定）' : body.look.auto && body.look.scenes.length > 1 ? '（自动换）' : ''}`, 'look')}
-      {row('放在哪里', desktopHere(body) ? (body.mode === undefined ? '—' : MODE_TEXT[body.mode]?.title ?? body.mode) : body.web.connected ? `dsh 网页里 · ${body.web.place === 'pet' ? '桌宠' : body.web.scope === 'page' ? '整个页面的背景' : '对话窗口的背景'}` : '身体没连上', 'place')}
-      {row('声音', `${voiceLabel(state, c.voice.id)} · ${SERVICE_SHORT[serviceOf(c.voice.id)]}${c.voice.speed === 1 ? '' : ` · 语速 ${c.voice.speed}`}`, 'voice')}
-      {row('模型', state.model === null ? '没有可用的模型' : `${state.model.provider} / ${state.model.model}`, 'model')}
-      {row('主动说话', initiativeText(state), 'initiative')}
-      {row('对话', `${state.talk.segment?.title ?? '还没有'}${state.talk.size === undefined ? '' : ` · ${state.talk.size}`}`, 'talk')}
+    <section className="her-card">
+      {title !== undefined && <div className="her-card-head"><h2>{title}</h2>{badge !== undefined && <span className="her-card-badge">{badge}</span>}</div>}
+      {children}
+    </section>
+  )
+}
+
+function Banner({ tone, text, action, onClick }: { tone: Tone; text: string; action?: string; onClick?: () => void }) {
+  return (
+    <div className={`her-banner ${tone}`}>
+      <Icon name={tone === 'ok' ? 'check' : 'alert'} />
+      <span>{text}</span>
+      {action !== undefined && <button className="her-btn small" onClick={onClick}>{action}</button>}
     </div>
   )
+}
+
+/** A way on to a related page. */
+function LinkRow({ icon, title, text, onClick }: { icon: string; title: string; text: string; onClick: () => void }) {
+  return (
+    <button className="her-linkrow" onClick={onClick}>
+      <Icon name={icon} />
+      <span><b>{title}</b><small>{text}</small></span>
+      <Icon name="arrow" size={16} />
+    </button>
+  )
+}
+
+function Keys({ keys }: { keys: string[] }) {
+  return <span className="her-keys">{keys.map(k => <kbd key={k}>{k}</kbd>)}</span>
 }
 
 function initiativeText(state: StateView): string {

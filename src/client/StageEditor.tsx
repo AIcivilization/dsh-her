@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 import { herApi, type StageView } from './api.ts'
 import { uploadFiles, type UploadProgress } from './upload.ts'
 import { openDesign } from './design.ts'
+import { Icon } from './icons.tsx'
 import type { Cell, Hold, Scene, Stage, When, WhenKind } from '../pack/stage.ts'
 
 type Row = 'skin' | 'avatar' | 'desktop' | 'pet'
@@ -35,7 +36,8 @@ const holdText = (hold: Hold | undefined) => hold === 'once' ? '播一遍' : hol
 
 const fileUrl = (row: string, name: string) => `/api/dsh-her/web/library-file?row=${encodeURIComponent(row)}&name=${encodeURIComponent(name)}`
 
-export function StageEditor() {
+/** `part`: the table of scenes (编排), or the 素材库; each is a page of its own. */
+export function StageEditor({ part = 'table', onLibrary }: { part?: 'table' | 'library'; onLibrary?: () => void }) {
   const [view, setView] = useState<StageView>()
   const [draft, setDraft] = useState<Stage>()
   const [dirty, setDirty] = useState(false)
@@ -83,18 +85,39 @@ export function StageEditor() {
   const selected = column === undefined ? undefined : draft.scenes.find(s => s.id === column)
   const rows = (draft.rows.filter(r => r in ROW_LABEL) as Row[])
 
+  if (part === 'library') {
+    return (
+      <div className="her-stage">
+        <section className="her-card">
+          <p className="her-muted">文件名就是素材的名字（"打麻将.mp4"就叫"打麻将"）。可以一次选好多个，也可以选一整个文件夹。传上来的每个文件都会对照规格看一遍，不合适的地方标出来，但照样能用。</p>
+          <details className="her-more"><summary>每一行要什么样的文件</summary>
+            <ul>
+              <li><b>头像</b>：正方形，512×512 左右；图片（PNG、WebP、SVG）或 15 秒以内的视频。</li>
+              <li><b>桌面</b>：和屏幕一样的横版比例（16:9 或 16:10），宽 1920 以上，最好和屏幕一样大；视频或图片。</li>
+              <li><b>宠物</b>：透明背景（带透明的 WebM 视频，或 PNG 图片），竖版，高 1280 左右；视频 5–10 秒，首尾能接上就能无缝循环。</li>
+              <li>SVG 里能运行的东西（脚本、点击事件、外部链接）上传时会去掉，画面不受影响。</li>
+            </ul>
+          </details>
+        </section>
+        {LIBRARY.map(row => <LibraryRow key={row} row={row} view={view} stage={draft} onView={r => take(r)} />)}
+      </div>
+    )
+  }
+
   return (
     <div className="her-stage">
-      <div className={`her-playbar${view.playing ? ' on' : ''}`}>
-        <label><input type="checkbox" checked={view.playing} onChange={e => {
-          const on = e.target.checked
-          void herApi.stagePlay(on).then(r => take(r, on ? '她现在按这份编排来。' : '回到了原来的外形。'))
-        }} /> <b>让她按这份编排来</b></label>
-        <span className="her-muted">{view.playing ? '保存以后她马上换。关掉就回到原来用的外形。' : '现在她还按下面"原来的外形设置"来；打开后按这张表，关掉就回去。'}</span>
-      </div>
+      <section className={`her-card her-playcard${view.playing ? ' on' : ''}`}>
+        <div className="her-setrow">
+          <div><b>让她按这份编排来</b><span>{view.playing ? '保存以后她马上换。关掉就回到原来用的形象。' : '现在她还按「形象」里选的来；打开后按这张表，关掉就回去。'}</span></div>
+          <input type="checkbox" checked={view.playing} onChange={e => {
+            const on = e.target.checked
+            void herApi.stagePlay(on).then(r => take(r, on ? '她现在按这份编排来。' : '回到了原来的形象。'))
+          }} />
+        </div>
+      </section>
       {view.playing && view.playNotes.length > 0 && <ul className="her-warnlist">{view.playNotes.map(n => <li key={n}>{n}</li>)}</ul>}
-      <p className="her-muted">一列是一个场景，一行是一类东西。格子空着就沿用下面一层的，最后落到"初始"。点格子选素材，点列头改它什么时候出现。</p>
-      <div className="her-row">
+      <section className="her-card">
+      <div className="her-row her-toolbar">
         <button className="her-btn primary" disabled={!dirty} onClick={() => void save()}>保存</button>
         {dirty && <button className="her-btn" onClick={cancel}>不保存，回到原样</button>}
         {view.versions.length > 0 && (
@@ -104,8 +127,11 @@ export function StageEditor() {
           </select>
         )}
         <button className="her-btn small her-ai" title="让 dsh 的模型帮你改：打开设计会话，说你想怎么改" onClick={() => void openDesign('整份编排').then(m => m !== undefined && setNote({ kind: 'error', text: m }))}>+AI 改编排</button>
-        {note !== undefined && <span className={note.kind === 'ok' ? 'her-ok' : 'her-danger'}>{note.text}</span>}
+        <span className="her-grow" />
+        <button className="her-btn small" onClick={() => { setBig(!big); setCell(undefined); setColumn(undefined) }}>{big ? '收起大舞台' : '宠物的位置和大小'}</button>
       </div>
+      {note !== undefined && <p className={note.kind === 'ok' ? 'her-ok' : 'her-danger'}>{note.text}</p>}
+      <p className="her-faint">点格子选素材，点列头改这个场景什么时候出现。格子空着就沿用下面一层的，最后落到"初始"。</p>
       {[...view.problems, ...view.missing].length > 0 && (
         <ul className="her-warnlist">{[...view.problems, ...view.missing].map(p => <li key={p}>{p}</li>)}</ul>
       )}
@@ -132,7 +158,7 @@ export function StageEditor() {
                 {draft.scenes.map(scene => {
                   const c = scene.cells[row]
                   const open = cell?.scene === scene.id && cell.row === row
-                  if (row === 'skin') return <td key={scene.id} className="her-faint">{c?.use.join('、') ?? (scene === draft.scenes[0] ? '以后在主界面选' : '沿用')}</td>
+                  if (row === 'skin') return <td key={scene.id} className="her-faint">{c?.use.join('、') ?? (scene === draft.scenes[0] ? '在「皮肤」里选' : '沿用')}</td>
                   return (
                     <td key={scene.id} className={`her-stage-cell${open ? ' on' : ''}`} onClick={() => { setCell(open ? undefined : { scene: scene.id, row }); setColumn(undefined) }}>
                       {c === undefined || c.use.length === 0
@@ -148,7 +174,7 @@ export function StageEditor() {
         </table>
       </div>
 
-      <div className="her-row"><button className="her-btn small" onClick={() => { setBig(!big); setCell(undefined); setColumn(undefined) }}>{big ? '收起大舞台' : '调宠物的位置和大小…'}</button></div>
+      </section>
       {big && <BigStage view={view} stage={draft} onPlace={pet => edit(stage => { stage.place = { ...(stage.place as object | undefined), pet } })} />}
       {cell !== undefined && cell.row !== 'skin' && (
         <CellPicker view={view} row={cell.row} scene={sceneOf(draft, cell.scene)} isBase={draft.scenes[0]!.id === cell.scene}
@@ -172,17 +198,13 @@ export function StageEditor() {
           onClose={() => setColumn(undefined)} />
       )}
 
-      <h3 className="her-sub">素材库</h3>
-      <p className="her-muted">每一行的素材放在这里。文件名就是素材的名字（"打麻将.mp4"就叫"打麻将"）。可以一次选好多个，也可以选一整个文件夹。传上来的每个文件都会对照规格看一遍，不合适的地方标出来，但照样能用。</p>
-      <details className="her-muted"><summary>规格</summary>
-        <ul>
-          <li><b>头像</b>：正方形，512×512 左右；图片（PNG、WebP、SVG）或 15 秒以内的视频。</li>
-          <li><b>桌面</b>：和屏幕一样的横版比例（16:9 或 16:10），宽 1920 以上，最好和屏幕一样大；视频或图片。</li>
-          <li><b>宠物</b>：透明背景（带透明的 WebM 视频，或 PNG 图片），竖版，高 1280 左右；视频 5–10 秒，首尾能接上就能无缝循环。</li>
-          <li>SVG 里能运行的东西（脚本、点击事件、外部链接）上传时会去掉，画面不受影响。</li>
-        </ul>
-      </details>
-      {LIBRARY.map(row => <LibraryRow key={row} row={row} view={view} stage={draft} onView={r => take(r)} />)}
+      {onLibrary !== undefined && (
+        <button className="her-linkrow" onClick={onLibrary}>
+          <Icon name="library" />
+          <span><b>素材库</b><small>格子里能选的图片、视频和 SVG，都在素材库里上传。</small></span>
+          <Icon name="arrow" size={16} />
+        </button>
+      )}
     </div>
   )
 }
@@ -410,7 +432,7 @@ function LibraryRow({ row, view, stage, onView }: { row: Exclude<Row, 'skin'>; v
       {progress !== undefined && <p className="her-muted">正在上传 {progress.file}（{Math.round(progress.done / Math.max(progress.total, 1) * 100)}%）</p>}
       {error !== undefined && <p className="her-danger">{error}</p>}
       {materials.length === 0 ? <p className="her-faint">还没有。</p> : (
-        <div className="her-clips">
+        <div className={`her-clips ${row}`}>
           {materials.map(m => {
             const used = usedIn(m.name)
             return (

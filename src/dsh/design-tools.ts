@@ -116,7 +116,7 @@ export function designTools(deps: DesignDeps): NativeTool[] {
       if (entry === undefined) throw new Error('没有这套皮肤')
       return JSON.stringify(entry.skin, null, 1)
     }),
-    tool('skin_set', '写一套皮肤的 skin.json（新的或用户自己的；自带的不能改，换个 id 复制一份）。颜色写 dsh 的 --dsw-alias-… 名字，每个给 light 和 dark。写好后用户在主界面的皮肤下拉里选它试。', {
+    tool('skin_set', '写一套皮肤的 skin.json（新的或用户自己的；自带的不能改，换个 id 复制一份）。颜色写 dsh 的 --dsw-alias-… 名字，每个给 light 和 dark。写好后用户在「她」页面的「皮肤」里点它试。', {
       id: { type: 'string', description: '文件夹名：字母、数字、中文、-' },
       skin: { type: 'object', description: 'skin.json 的内容：name、colors、bar、background、font…' },
     }, ['id', 'skin'], args => {
@@ -130,7 +130,7 @@ export function designTools(deps: DesignDeps): NativeTool[] {
       if (skin === undefined) throw new Error(problems.join('；'))
       writeFileSync(target, `${JSON.stringify(args.skin, null, 2)}\n`)
       deps.log({ event: 'design', what: 'skin', id })
-      return `写好了皮肤「${skin.name}」（${id}）。${problems.length > 0 ? `没用上的：${problems.join('；')}。` : ''}用户在主界面的皮肤里选它就能看。`
+      return `写好了皮肤「${skin.name}」（${id}）。${problems.length > 0 ? `没用上的：${problems.join('；')}。` : ''}用户在「她」页面的「皮肤」里点它就能看。`
     }),
     tool('svg_get', '读素材库里的一张 SVG（头像、宠物等）。改颜色、改部件前先读，找到对应的 <g id="衣服"> 之类的部分。', { row: { type: 'string', enum: ROWS }, name: { type: 'string' } }, ['row', 'name'], args => {
       const path = deps.library.path(text(args.row, 'row'), text(args.name, 'name'))
@@ -148,7 +148,7 @@ export function herLookTools(deps: DesignDeps & { wear: (id: string | undefined)
     tool('wear_skin', '换一套皮肤（整个 dsh 的样子），对方让你换时用；不给 id 就是换回 dsh 原样。能用的：先用 skin_get 看。', { id: { type: 'string' } }, [], args => {
       const id = typeof args.id === 'string' && args.id !== '' ? args.id : undefined
       deps.wear(id)
-      return id === undefined ? '换回了 dsh 原样。' : `换上了「${deps.skins.get(id)?.skin.name ?? id}」。对方不喜欢可以在主界面换回去。`
+      return id === undefined ? '换回了 dsh 原样。' : `换上了「${deps.skins.get(id)?.skin.name ?? id}」。对方不喜欢可以在「皮肤」里换回去。`
     }),
     ...all.filter(t => t.name === 'skin_get' || t.name === 'svg_get' || t.name === 'svg_set'),
   ]

@@ -183,7 +183,6 @@ function Presets({ state, apply }: { state: StateView; apply: Apply }) {
   )
 }
 
-const HOLD_KEY_TEXT = navigator.platform.startsWith('Mac') ? '右边的 Option' : '右边的 Alt'
 
 /**
  * Her conversations: all kept in her workspace in dsh. Which one you are in,
@@ -196,48 +195,54 @@ export function TalkCard({ state, apply }: { state: StateView; apply: Apply }) {
   const others = talk.segments.filter(s => s.id !== talk.current)
   const { split } = talk
   return (
-    <div>
-      <p className="her-muted">你在哪里和她说（桌面、网页、打字、说话），都存在 dsh 左侧的"她"工作区里，一段对话是一个会话。她记得的事每一段都能用上，新开一段不会让她忘了你。</p>
-      <p>现在这段：<b>{talk.segment?.title ?? '还没有'}</b>{talk.size === undefined ? '' : `（${talk.size}）`}</p>
-      <div className="her-row">
-        <button className="her-btn" onClick={() => void apply(herApi.talkNew())}>新开一段</button>
-        {canOpen && talk.current !== null && <button className="her-btn" onClick={() => open(talk.current!)}>在 dsh 里看完整对话</button>}
-      </div>
+    <>
+      <section className="her-card">
+        <div className="her-setrow">
+          <div><b>{talk.segment?.title ?? '还没有对话'}</b><span>现在这一段{talk.size === undefined ? '' : `，${talk.size}`}。你在哪儿和她说（桌面、网页、打字、说话），都进这一段，存在 dsh 左侧的"她"工作区里。</span></div>
+          <span className="her-row" style={{ margin: 0, flexWrap: 'nowrap' }}>
+            {canOpen && talk.current !== null && <button className="her-btn" onClick={() => open(talk.current!)}>在 dsh 里看</button>}
+            <button className="her-btn primary" onClick={() => void apply(herApi.talkNew())}>新开一段</button>
+          </span>
+        </div>
+        <p className="her-faint">她记得的事每一段都能用上，新开一段不会让她忘了你。</p>
+      </section>
       {others.length > 0 && (
-        <>
-          <label className="her-label">之前的对话（点"接着这段"，之后说的话就进那一段）</label>
-          {others.slice(0, 8).map(s => (
-            <div key={s.id} className="her-row" style={{ margin: '2px 0' }}>
-              <span style={{ flex: 1, minWidth: 0 }}>{s.title}</span>
-              <button className="her-btn small" onClick={() => void apply(herApi.talkResume(s.id))}>接着这段</button>
-              {canOpen && <button className="her-btn small" onClick={() => open(s.id)}>看</button>}
-            </div>
-          ))}
-        </>
+        <section className="her-card">
+          <h2>之前的对话</h2>
+          <ul className="her-list">
+            {others.slice(0, 8).map(s => (
+              <li key={s.id}>
+                <span className="grow">{s.title}</span>
+                {canOpen && <button className="her-btn small" onClick={() => open(s.id)}>看</button>}
+                <button className="her-btn small" title="之后说的话就进这一段" onClick={() => void apply(herApi.talkResume(s.id))}>接着这段聊</button>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
-      <label className="her-label">自动新开一段（默认都关着；满足任何一条就新开）</label>
-      <div className="her-row">
-        <span>隔了</span>
-        <select className="her-select" style={{ width: 120 }} value={split.idleHours ?? ''} onChange={e => void apply(herApi.talkSplit({ idleHours: e.target.value === '' ? null : Number(e.target.value) }))}>
-          <option value="">不按时间</option>
-          {[2, 6, 12, 24].map(h => <option key={h} value={h}>{h} 小时</option>)}
-        </select>
-        <span>没说话</span>
-      </div>
-      <div className="her-row">
-        <span>这一段长到</span>
-        <select className="her-select" style={{ width: 120 }} value={split.maxTokens ?? ''} onChange={e => void apply(herApi.talkSplit({ maxTokens: e.target.value === '' ? null : Number(e.target.value) }))}>
-          <option value="">不按长度</option>
-          {[30_000, 60_000, 100_000].map(n => <option key={n} value={n}>约 {n / 10_000} 万字</option>)}
-        </select>
-        <span className="her-muted">越长每次回答越慢、越贵</span>
-      </div>
-      <div className="her-row">
-        <label><input type="checkbox" checked={split.daily} onChange={e => void apply(herApi.talkSplit({ daily: e.target.checked }))} /> 每天第一次说话时新开一段</label>
-      </div>
-      <label className="her-label">在哪儿都能叫出她</label>
-      <p className="her-muted">桌面上按 {navigator.platform.startsWith('Mac') ? '⌃⌥↩' : 'Ctrl+Alt+Enter'}、双击她，或点 dsh 对话框上她的小头像，就会弹出对话小条：可以打字，也可以按住 🎙 说话。想在任何程序里（包括全屏游戏）按住{HOLD_KEY_TEXT}说话，在她的右键菜单或托盘菜单里勾选（Mac 要在系统设置里允许一次）。</p>
-    </div>
+      <section className="her-card">
+        <h2>自动新开一段</h2>
+        <div className="her-setrow">
+          <div><b>隔了很久没说话</b><span>再开口时就是新的一段。</span></div>
+          <select className="her-select" style={{ width: 130 }} value={split.idleHours ?? ''} onChange={e => void apply(herApi.talkSplit({ idleHours: e.target.value === '' ? null : Number(e.target.value) }))}>
+            <option value="">不按时间</option>
+            {[2, 6, 12, 24].map(h => <option key={h} value={h}>隔 {h} 小时</option>)}
+          </select>
+        </div>
+        <div className="her-setrow">
+          <div><b>这一段太长了</b><span>越长，她每次回答越慢、越贵。</span></div>
+          <select className="her-select" style={{ width: 130 }} value={split.maxTokens ?? ''} onChange={e => void apply(herApi.talkSplit({ maxTokens: e.target.value === '' ? null : Number(e.target.value) }))}>
+            <option value="">不按长度</option>
+            {[30_000, 60_000, 100_000].map(n => <option key={n} value={n}>约 {n / 10_000} 万字</option>)}
+          </select>
+        </div>
+        <div className="her-setrow">
+          <div><b>每天一段</b><span>每天第一次说话时新开一段。</span></div>
+          <input type="checkbox" checked={split.daily} onChange={e => void apply(herApi.talkSplit({ daily: e.target.checked }))} />
+        </div>
+        <p className="her-faint">默认都关着：一直接着同一段说。打开的几条里，满足任何一条就新开。</p>
+      </section>
+    </>
   )
 }
 
@@ -257,39 +262,52 @@ export function InitiativeCard({ state, apply }: { state: StateView; apply: Appl
     if (!result.ok) setError(result.message)
   }
   return (
-    <div>
-      <p className="her-muted">她会在你回到电脑前、有日子的事快到了、或者你们很久没说话时，自己开口说一句。你连着几次没回，她就会慢慢少说，直到你先开口。</p>
-      <div className="her-row">
-        <label><input type="checkbox" checked={settings.on} onChange={e => void apply(herApi.initiativeSet({ on: e.target.checked }))} /> 让她主动说话</label>
-      </div>
+    <>
+      <section className="her-card">
+        <div className="her-setrow">
+          <div><b>让她主动说话</b><span>你回到电脑前、有日子的事快到了、或者你们很久没说话时，她会自己说一句。你连着几次没回，她就慢慢少说，直到你先开口。</span></div>
+          <input type="checkbox" checked={settings.on} onChange={e => void apply(herApi.initiativeSet({ on: e.target.checked }))} />
+        </div>
+        {settings.on && (
+          <>
+            <div className="her-setrow">
+              <div><b>每天最多几次</b><span>今天已经主动说了 {today} 次。</span></div>
+              <select className="her-select" style={{ width: 110 }} value={settings.perDay} onChange={e => void apply(herApi.initiativeSet({ perDay: Number(e.target.value) }))}>
+                {[1, 2, 3, 5, 8].map(n => <option key={n} value={n}>{n} 次</option>)}
+              </select>
+            </div>
+            <div className="her-setrow">
+              <div><b>安静时段</b><span>这段时间里她不先开口。</span></div>
+              <select className="her-select" style={{ width: 150 }} value={`${settings.quietFrom}-${settings.quietTo}`} onChange={e => { const [from, to] = e.target.value.split('-').map(Number); void apply(herApi.initiativeSet({ quietFrom: from!, quietTo: to! })) }}>
+                {QUIET_CHOICES.map(([label, from, to]) => <option key={label} value={`${from}-${to}`}>{label === '一直可以' ? '没有安静时段' : label}</option>)}
+                {!QUIET_CHOICES.some(([, from, to]) => from === settings.quietFrom && to === settings.quietTo) && <option value={`${settings.quietFrom}-${settings.quietTo}`}>自定义</option>}
+              </select>
+            </div>
+          </>
+        )}
+      </section>
       {settings.on && (
-        <>
-          <div className="her-row">
-            <span className="her-label" style={{ margin: 0 }}>每天最多</span>
-            <select className="her-select" style={{ width: 90 }} value={settings.perDay} onChange={e => void apply(herApi.initiativeSet({ perDay: Number(e.target.value) }))}>
-              {[1, 2, 3, 5, 8].map(n => <option key={n} value={n}>{n} 次</option>)}
-            </select>
-            <span className="her-label" style={{ margin: 0 }}>安静时段</span>
-            <select className="her-select" style={{ width: 150 }} value={`${settings.quietFrom}-${settings.quietTo}`} onChange={e => { const [from, to] = e.target.value.split('-').map(Number); void apply(herApi.initiativeSet({ quietFrom: from!, quietTo: to! })) }}>
-              {QUIET_CHOICES.map(([label, from, to]) => <option key={label} value={`${from}-${to}`}>{label}</option>)}
-              {!QUIET_CHOICES.some(([, from, to]) => from === settings.quietFrom && to === settings.quietTo) && <option value={`${settings.quietFrom}-${settings.quietTo}`}>自定义</option>}
-            </select>
+        <section className="her-card">
+          <h2>专注</h2>
+          <div className="her-setrow">
+            <div><b>{focus.on ? (focus.until === -1 ? '专注中，到你关掉为止' : `专注中，到 ${new Date(focus.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`) : '先别打扰我'}</b><span>开会、打游戏时用：她不先开口；你找她说话不受影响。</span></div>
+            <span className="her-row" style={{ margin: 0, flexWrap: 'nowrap' }}>
+              {focus.on
+                ? <button className="her-btn" onClick={() => void apply(herApi.initiativeSet({ focus: 'off' }))}>结束专注</button>
+                : <><button className="her-btn" onClick={() => void apply(herApi.initiativeSet({ focus: 'span' }))}>2 小时</button><button className="her-btn" onClick={() => void apply(herApi.initiativeSet({ focus: 'always' }))}>到我关掉</button></>}
+            </span>
           </div>
-          <div className="her-row">
-            {focus.on
-              ? <><span>{focus.until === -1 ? '专注中，到你关掉为止' : `专注中，到 ${new Date(focus.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}</span><button className="her-btn small" onClick={() => void apply(herApi.initiativeSet({ focus: 'off' }))}>结束专注</button></>
-              : <><button className="her-btn small" onClick={() => void apply(herApi.initiativeSet({ focus: 'span' }))}>专注 2 小时</button><button className="her-btn small" onClick={() => void apply(herApi.initiativeSet({ focus: 'always' }))}>专注到我关掉</button><span className="her-muted">开会、打游戏时用；你找她说话不受影响。</span></>}
-          </div>
-        </>
+        </section>
       )}
-      <p className="her-faint">今天主动说了 {today} 次。{why === undefined ? '她现在可以开口。' : `现在不会开口：${why}。`}</p>
-      {last !== undefined && <p className="her-faint">最近一次：「{last.text}」</p>}
-      <div className="her-row">
-        <button className="her-btn" disabled={busy || !here} onClick={() => void tryNow()}>{busy ? '她在想…' : '现在让她说一句'}</button>
-        {!here && <span className="her-muted">身体连上之后才能试。</span>}
-      </div>
-      {error !== undefined && <p className="her-error">{error}</p>}
-    </div>
+      <section className="her-card">
+        <h2>现在</h2>
+        <div className="her-setrow">
+          <div><b>{why === undefined ? '她现在可以开口' : `她现在不会开口：${why}`}</b><span>{last === undefined ? '还没有主动说过话。' : `最近一次：「${last.text}」`}</span></div>
+          <button className="her-btn" disabled={busy || !here} title={here ? undefined : '身体连上之后才能试'} onClick={() => void tryNow()}>{busy ? '她在想…' : '让她说一句'}</button>
+        </div>
+        {error !== undefined && <p className="her-error">{error}</p>}
+      </section>
+    </>
   )
 }
 
