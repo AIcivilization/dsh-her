@@ -21,7 +21,7 @@ import { join } from 'node:path'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { promisify } from 'node:util'
-import { ffmpegCommand, frame, stillSize } from './media.ts'
+import { ffmpegCommand, frame, h264, stillSize } from './media.ts'
 
 export const AVATAR_SOURCES = ['头像原图.png', '头像原图.jpg', '头像原图.jpeg', '头像原图.webp']
 export const AVATAR_FILE = '头像.png'
@@ -134,6 +134,7 @@ export async function makeAvatarClip(dir: string): Promise<{ overhang: number }>
     await frame(path, 'first', join(dir, AVATAR_SOURCES[0]!))
     await makeAvatar(dir)
   }
+  const encodeAs = await h264(22)
   const size = CLIP_WORK_SIZE
   const frameBytes = size * size * 4
   const decode = spawn(ffmpegCommand(), ['-v', 'error', '-t', String(CLIP_MOST_SECONDS), '-i', path, '-filter_complex',
@@ -141,7 +142,7 @@ export async function makeAvatarClip(dir: string): Promise<{ overhang: number }>
     '-r', String(CLIP_FPS), '-f', 'rawvideo', '-pix_fmt', 'rgba', '-'], { stdio: ['ignore', 'pipe', 'pipe'] })
   const encode = spawn(ffmpegCommand(), ['-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', `${size}x${size}`, '-r', String(CLIP_FPS), '-i', '-', '-filter_complex',
     `[0]scale=${AVATAR_SIZE}:${AVATAR_SIZE}:flags=lanczos,format=rgba,split[c][a];[a]alphaextract,format=yuv420p[m];[c]format=yuv420p[rgb];[rgb][m]vstack,format=yuv420p`,
-    '-an', '-c:v', 'libx264', '-preset', 'medium', '-crf', '22', '-movflags', '+faststart', join(dir, AVATAR_CLIP)], { stdio: ['pipe', 'ignore', 'pipe'] })
+    '-an', ...encodeAs, '-movflags', '+faststart', join(dir, AVATAR_CLIP)], { stdio: ['pipe', 'ignore', 'pipe'] })
   let errors = ''
   for (const process of [decode, encode]) process.stderr.on('data', chunk => { errors += chunk })
   const finished = (process: typeof decode | typeof encode) => new Promise<number | null>(done => process.on('close', done))

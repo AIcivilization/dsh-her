@@ -4,7 +4,7 @@
  * `DSH_HER_FFMPEG`, else the app's own (installed body), else `ffmpeg` on PATH.
  */
 
-import { execFile } from 'node:child_process'
+import { execFile, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -19,6 +19,57 @@ let FFMPEG = process.env.DSH_HER_FFMPEG ?? (bundled !== undefined && existsSync(
 /** Use this ffmpeg from now on (one the brain found or downloaded). */
 export function useFfmpeg(path: string): void {
   FFMPEG = path
+  encoders = undefined
+}
+
+/**
+ * H.264 encoders, best first. Builds differ: a GPL one has libx264; an LGPL
+ * one (what is shipped and downloaded, BtbN's) has Cisco's libopenh264; Windows
+ * has Media Foundation's and macOS VideoToolbox's even without either.
+ */
+const H264 = ['libx264', 'libopenh264', 'h264_mf', 'h264_videotoolbox'] as const
+export type H264Encoder = typeof H264[number]
+
+/** The encoder to use from what `ffmpeg -encoders` lists; undefined when none can write H.264. */
+export function pickH264(encoderList: string): H264Encoder | undefined {
+  const names = new Set(encoderList.split('\n').map(line => /^\s*V\S*\s+(\S+)/.exec(line)?.[1]).filter((n): n is string => n !== undefined))
+  return H264.find(name => names.has(name))
+}
+
+/**
+ * Arguments for H.264 at a quality given as libx264's CRF (12: near lossless,
+ * for work in between; 20–22: what she plays). Encoders without CRF get a bitrate
+ * that looks the same at her sizes.
+ */
+export function h264Args(encoder: H264Encoder, crf: number): string[] {
+  if (encoder === 'libx264') return ['-c:v', 'libx264', '-preset', 'medium', '-crf', String(crf)]
+  const rate = crf <= 14 ? '20M' : crf <= 20 ? '8M' : '5M'
+  if (encoder === 'h264_videotoolbox') return ['-c:v', 'h264_videotoolbox', '-b:v', rate, '-allow_sw', '1']
+  return ['-c:v', encoder, '-b:v', rate, '-maxrate', rate]
+}
+
+let encoders: Promise<H264Encoder> | undefined
+const NO_H264 = '这个 ffmpeg 不能写 H.264（没有 libx264、libopenh264 或系统自带的编码器），导入要用它：换一个 ffmpeg'
+
+/** The H.264 arguments for the ffmpeg in use (looked up once per ffmpeg). */
+export async function h264(crf: number): Promise<string[]> {
+  encoders ??= run(FFMPEG, ['-hide_banner', '-encoders'], { maxBuffer: 8 * 1024 * 1024 }).then(({ stdout }) => {
+    const found = pickH264(stdout)
+    if (found === undefined) throw new Error(NO_H264)
+    return found
+  })
+  const encoder = await encoders.catch(error => {
+    encoders = undefined
+    throw error
+  })
+  return h264Args(encoder, crf)
+}
+
+/** The same, where waiting is not possible (making stills into clips while a stage is put on). */
+export function h264Sync(crf: number): string[] {
+  const found = pickH264(String(spawnSync(FFMPEG, ['-hide_banner', '-encoders'], { encoding: 'utf8', timeout: 20_000 }).stdout ?? ''))
+  if (found === undefined) throw new Error(NO_H264)
+  return h264Args(found, crf)
 }
 
 /** The ffmpeg in use: a full path once one was found, else the bare name on PATH. */
@@ -117,13 +168,13 @@ export async function keyToStacked(input: string, output: string, key: { r: numb
   await ffmpeg(['-y', '-i', input, '-filter_complex',
     `[0]scale='min(${width},iw)':-2,chromakey=${hex(key)}:0.13:0.06,despill=type=green,format=rgba,split[c][a];` +
     '[a]alphaextract,format=yuv420p[m];[c]format=yuv420p[rgb];[rgb][m]vstack,format=yuv420p',
-    '-an', '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-movflags', '+faststart', '-map_metadata', '-1', output])
+    '-an', ...await h264(20), '-movflags', '+faststart', '-map_metadata', '-1', output])
 }
 
 /** Re-encode a clip as it is (scene packs). */
 export async function transcodeOpaque(input: string, output: string, width: number): Promise<void> {
   await ffmpeg(['-y', '-i', input, '-vf', `scale='min(${width},iw)':-2,format=yuv420p`,
-    '-an', '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-movflags', '+faststart', '-map_metadata', '-1', output])
+    '-an', ...await h264(20), '-movflags', '+faststart', '-map_metadata', '-1', output])
 }
 
 /**
@@ -135,7 +186,7 @@ export async function transcodeOpaque(input: string, output: string, width: numb
 export async function loopBack(input: string, output: string, width: number): Promise<void> {
   await ffmpeg(['-y', '-i', input, '-filter_complex',
     `[0]scale='min(${width},iw)':-2,split[a][b];[b]reverse,trim=start_frame=1,setpts=PTS-STARTPTS[r];[a][r]concat=n=2:v=1:a=0,format=yuv420p`,
-    '-an', '-c:v', 'libx264', '-preset', 'medium', '-crf', '12', output])
+    '-an', ...await h264(12), output])
 }
 
 export const MASK_WIDTH = 64

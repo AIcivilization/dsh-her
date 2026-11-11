@@ -3,8 +3,11 @@
  * bare PATH, so an ffmpeg the user's terminal can run may not be on it: look in
  * the usual places and ask the login shell too. Failing that, a computer without
  * one (a VPS) gets one pinned, checked download into `<home>/ffmpeg`, from
- * dsh-her's release `ffmpeg-1` (BtbN's LGPL builds, the program alone, gzipped);
- * a mirror may serve it, the SHA-256 decides. macOS has no build there.
+ * dsh-her's prerelease `ffmpeg-1`: BtbN's LGPL builds of n8.1.3-35-gf1acb0a266
+ * (autobuild-2026-11-11-12-39, checked against BtbN's checksums), the program
+ * alone, gzipped. LGPL means no libx264: H.264 is written with libopenh264
+ * (media.ts picks). A mirror may serve it, the SHA-256 decides. macOS has no
+ * build there: the desktop body brings one, or Homebrew's.
  */
 
 import { execFile } from 'node:child_process'
@@ -23,9 +26,9 @@ import { installedBody } from './body-install.ts'
 const RELEASE = 'https://github.com/AIcivilization/dsh-her/releases/download/ffmpeg-1/'
 
 export const FFMPEG_BUILDS: Record<string, { file: string; size: number; sha256: string }> = {
-  'linux-x64': { file: 'ffmpeg-8.1-linux-x64.gz', size: 58167037, sha256: 'e3bcb58db89178fc9b303d6d4da646023f532c33cf9a39cd4ec7ff2295c605f2' },
-  'linux-arm64': { file: 'ffmpeg-8.1-linux-arm64.gz', size: 53387780, sha256: '6fe8e0ca5fab3e372642ab844c011548618769e8fab42852093972fac77f2109' },
-  'win32-x64': { file: 'ffmpeg-8.1-win32-x64.gz', size: 54486001, sha256: 'd81b7c919af2fe627f5f206ffafe490ee03fecdcbf9173345bb280e7d6e62f22' },
+  'linux-x64': { file: 'ffmpeg-8.1-linux-x64.gz', size: 57987764, sha256: '5ff340d191e967bfc7dcf8987df6ade711a84351da4832de19cb8b13314befac' },
+  'linux-arm64': { file: 'ffmpeg-8.1-linux-arm64.gz', size: 53244972, sha256: 'abd5006ca9037fc7dda9d6290709d84d6e248fbce6a3bd1e46eebe2456ddc946' },
+  'win32-x64': { file: 'ffmpeg-8.1-win32-x64.gz', size: 54443921, sha256: 'a92f2cd328083cb0615117aca9e4972837b64830762fcf3e3a4a6f126351fe45' },
 }
 
 /** Where a GUI app's PATH does not reach. */

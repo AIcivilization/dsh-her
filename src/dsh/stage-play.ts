@@ -15,7 +15,7 @@ import { copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSyn
 import { basename, dirname, extname, join } from 'node:path'
 import { cleanPlace, LOOK_FORMAT, type Look, type LookScene, type LookWhen } from '../pack/look.ts'
 import { layerOf, type Cell, type Scene, type Stage, type When } from '../pack/stage.ts'
-import { ffmpegCommand } from '../pack/media.ts'
+import { ffmpegCommand, h264Sync } from '../pack/media.ts'
 import type { Library } from './library.ts'
 
 export const STAGE_LOOK = 'stage'
@@ -52,7 +52,12 @@ function clipOfPicture(home: string, row: string, path: string): string | undefi
   const out = join(home, 'library', '.clips', row, `${basename(path)}-${Math.floor(statSync(path).mtimeMs).toString(36)}.${alpha ? 'webm' : 'mp4'}`)
   if (existsSync(out)) return out
   mkdirSync(dirname(out), { recursive: true })
-  const codec = alpha ? ['-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-b:v', '0', '-crf', '32'] : ['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-tune', 'stillimage']
+  let codec: string[]
+  try {
+    codec = alpha ? ['-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-b:v', '0', '-crf', '32'] : [...h264Sync(20), '-pix_fmt', 'yuv420p']
+  } catch {
+    return undefined
+  }
   const made = spawnSync(ffmpegCommand(), ['-hide_banner', '-loglevel', 'error', '-y', '-loop', '1', '-i', path, '-t', '6', '-r', '10', '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', ...codec, `${out}.part.${alpha ? 'webm' : 'mp4'}`], { timeout: 120_000 })
   if (made.status !== 0) {
     rmSync(`${out}.part.${alpha ? 'webm' : 'mp4'}`, { force: true })
