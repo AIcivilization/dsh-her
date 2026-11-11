@@ -45,7 +45,8 @@ test('keys outside macOS: a file only you can read', async () => {
   const secrets = new Secrets(home, false)
   await secrets.set('xf.apiKey', 'k-1')
   assert.equal(await secrets.get('xf.apiKey'), 'k-1')
-  assert.equal(statSync(join(home, 'secrets.json')).mode & 0o777, 0o600)
+  // Windows has no such permission bits; the file is in your own profile there.
+  if (process.platform !== 'win32') assert.equal(statSync(join(home, 'secrets.json')).mode & 0o777, 0o600)
   await secrets.set('xf.apiKey', '')
   assert.equal(await secrets.has('xf.apiKey'), false)
   await assert.rejects(secrets.set('a', 'x\ny'), /换行/)
