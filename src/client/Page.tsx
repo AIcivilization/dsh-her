@@ -12,6 +12,10 @@ import { UpdateBar } from './UpdateBar.tsx'
 import { Workshop } from './Workshop.tsx'
 import { Fold, useFolds } from './fold.tsx'
 import { ClipsCard } from './ClipsCard.tsx'
+import { StageEditor } from './StageEditor.tsx'
+import { SkinCard } from './SkinCard.tsx'
+import { StageMap } from './StageMap.tsx'
+import { VoiceServices } from './VoiceServices.tsx'
 import { onPageRequest, takePage } from './open-page.ts'
 import type { SettingsPage } from '../protocol/index.ts'
 import { SERVICE_SHORT, voiceLabel } from './choice.tsx'
@@ -55,6 +59,13 @@ export function HerPage() {
   return (
     <div className="her-page">
       <UpdateBar state={state} apply={apply} />
+      {state.off && (
+        <div className="her-offbar">
+          <b>她关着</b>
+          <span>桌面上、网页里都不显示，不听麦克风，不说话，也不会先开口。你在 dsh 里打字给她，她还是会用文字回。</span>
+          <button className="her-btn primary" onClick={() => void apply(herApi.setOff(false))}>叫她出来</button>
+        </div>
+      )}
       {showWizard
         ? <Wizard state={state} apply={apply} onDone={() => setWizard(false)} />
         : <Manage state={state} apply={apply} onWizard={() => setWizard(true)} />}
@@ -162,14 +173,14 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
 /** Her settings in four pages (docs/设置页与编排设计.md §1). */
 const PAGES: Array<[SettingsPage, (name: string) => string]> = [['home', () => '主界面'], ['engine', () => '引擎'], ['her', name => name || '她'], ['stage', () => '编排']]
 
-type Section = 'persona' | 'voice' | 'memory' | 'look' | 'clips' | 'model' | 'body' | 'place' | 'listen' | 'initiative' | 'talk'
+type Section = 'persona' | 'voice' | 'memory' | 'look' | 'clips' | 'model' | 'body' | 'place' | 'listen' | 'voices' | 'initiative' | 'talk'
 /** Which page each part of the settings is on. */
 const PAGE_OF: Record<Section, SettingsPage> = {
   persona: 'her', voice: 'her', memory: 'her',
   look: 'stage', clips: 'stage',
-  model: 'engine', body: 'engine', place: 'engine', listen: 'engine', initiative: 'engine', talk: 'engine',
+  model: 'engine', body: 'engine', place: 'engine', listen: 'engine', voices: 'engine', initiative: 'engine', talk: 'engine',
 }
-const FOLDS: Record<Section, boolean> = { persona: false, voice: false, memory: false, look: false, clips: false, model: false, body: false, place: false, listen: false, initiative: false, talk: false }
+const FOLDS: Record<Section, boolean> = { persona: false, voice: false, memory: false, look: false, clips: false, model: false, body: false, place: false, listen: false, voices: false, initiative: false, talk: false }
 
 function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; onWizard: () => void }) {
   const [page, setPage] = useState<SettingsPage>(() => takePage() ?? 'home')
@@ -198,7 +209,10 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
     <>
       <div className="her-head">
         <h1>{c.name}</h1>
-        <button className="her-btn link" onClick={onWizard}>重新走一遍向导</button>
+        <div className="her-head-right">
+          <button className="her-btn link" onClick={onWizard}>重新走一遍向导</button>
+          {!state.off && <button className="her-btn her-off" title="桌面上、网页里都收起来，不听、不说话；随时在这里叫她出来" onClick={() => void apply(herApi.setOff(true))}>⏻ 关掉她</button>}
+        </div>
       </div>
       <div className="her-tabs">
         {PAGES.map(([id, label]) => <button key={id} className={`her-tab ${page === id ? 'on' : ''}`} onClick={() => setPage(id)}>{label(c.name)}</button>)}
@@ -214,7 +228,13 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
               <div className="her-row"><button className="her-btn primary" onClick={() => go('model')}>去换模型</button></div>
             </div>
           )}
+          <StageMap state={state} onGo={target => {
+            if (target === 'stage') { setPage('stage'); return }
+            if (target === 'skin') { document.getElementById('her-skin')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return }
+            go(target === 'voice' ? 'voice' : target === 'talk' ? 'talk' : target === 'model' ? 'model' : target === 'place' ? 'place' : 'body')
+          }} />
           <NowCard state={state} onChange={go} />
+          <div id="her-skin"><SkinCard /></div>
           <WebPlaceCard state={state} apply={apply} />
           <div className="her-card">
             <h2>状态</h2>
@@ -239,6 +259,8 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
             <>{desktopOffered(body) && <ModePicker state={state} apply={apply} />}<WebModePicker state={state} apply={apply} /></>)}
           {card('listen', '听你说话', listeningText(state.voice.status), toneOf(state.voice.status),
             here ? <MicCheck state={state} /> : <p className="her-muted">身体连上之后才能用麦克风。</p>)}
+          {card('voices', '外接语音', state.character.voice.id.startsWith('ext:') ? `她在用外接的声音（${state.character.voice.id.split(':')[1]}）` : '讯飞、OpenAI 兼容、GPT-SoVITS、别的插件', state.character.voice.id.startsWith('ext:') ? 'ok' : 'off',
+            <VoiceServices state={state} apply={apply} />)}
           {card('initiative', '主动说话', initiativeText(state), state.initiative.settings.on ? 'ok' : 'off', <InitiativeCard state={state} apply={apply} />)}
           {card('talk', '对话', `${state.talk.segment?.title ?? '还没有'}${state.talk.size === undefined ? '' : ` · ${state.talk.size}`}`, 'ok', <TalkCard state={state} apply={apply} />)}
         </>
@@ -256,6 +278,8 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
 
       {page === 'stage' && (
         <>
+          <StageEditor />
+          <h3 className="her-sub">原来的外形设置（"让她按这份编排来"关着时，她按这里的来）</h3>
           {card('look', '外形', here ? `${pack?.name ?? '还没有外形'}${body.look === undefined ? '' : ` · ${body.look.scenes.length} 个场景`}` : '身体没连上', here ? (pack === undefined ? 'warn' : 'ok') : 'off',
             <><PackPicker state={state} apply={apply} /><ScenePicker state={state} apply={apply} /></>)}
           {card('clips', '画面', '每一段视频用在哪里', 'ok', <ClipsCard />)}

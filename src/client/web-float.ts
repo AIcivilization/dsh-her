@@ -20,6 +20,7 @@ import { StackedView } from '../../body/renderer/stacked.ts'
 import type { AvatarView } from '../dsh/api.ts'
 import type { FloatHost } from './web-bridge.ts'
 import { TalkBar } from '../../body/renderer/talk-bar.ts'
+import { wearSaved } from './skin-wear.ts'
 import type { SettingsPage, TalkView } from '../protocol/index.ts'
 
 const STATUS_EVERY_MS = 5000
@@ -413,7 +414,7 @@ export function mountWebFloat(): () => void {
   /** Her small picture when she has one, else a round button with her name. */
   const drawPill = () => {
     if (pill === undefined) return
-    const url = avatar?.clipUrl ?? avatar?.url ?? ''
+    const url = avatar?.videoUrl ?? avatar?.clipUrl ?? avatar?.url ?? ''
     if (pill.dataset.url === url) return
     pill.dataset.url = url
     pill.textContent = ''
@@ -424,6 +425,19 @@ export function mountWebFloat(): () => void {
       : `position:fixed;z-index:1000;width:${AVATAR_SIZE}px;height:${AVATAR_SIZE}px;padding:0;border:none;cursor:pointer;background:none`
     if (avatar === undefined) {
       pill.textContent = '她'
+      return
+    }
+    // A clip from 编排's avatar row: played as it is.
+    if (avatar.videoUrl !== undefined) {
+      const video = document.createElement('video')
+      video.muted = true
+      video.loop = true
+      video.autoplay = true
+      video.playsInline = true
+      video.src = new URL(avatar.videoUrl, document.baseURI).href
+      video.style.cssText = 'display:block;width:100%;height:100%;object-fit:contain;pointer-events:none'
+      pill.appendChild(video)
+      void video.play().catch(() => {})
       return
     }
     const image = document.createElement('img')
@@ -499,8 +513,10 @@ export function mountWebFloat(): () => void {
     if (document.hidden) return
     try {
       const res = await fetch('/api/dsh-her/web/status', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ screen: { w: screen.width, h: screen.height, scale: devicePixelRatio }, remote: isRemotePage(location.protocol, location.hostname) }) })
-      const value = await res.json() as { ok: boolean; show?: boolean; place?: Place; scope?: Scope; avatar?: AvatarView; focus?: boolean; open?: string; page?: SettingsPage }
+      const value = await res.json() as { ok: boolean; show?: boolean; place?: Place; scope?: Scope; avatar?: AvatarView; focus?: boolean; open?: string; page?: SettingsPage; skin?: { id: string; rev: number }; intro?: { url: string; when: 'every' | 'daily' } }
       if (value.ok) {
+        void wearSaved(value.skin)
+        if (value.intro !== undefined) playIntroOnce(value.intro)
         focus = value.focus === true
         // "完整对话" from the desktop's talk bar: this page opens her conversation.
         if (value.open !== undefined) window.__herOpenSession?.(value.open)
@@ -515,6 +531,37 @@ export function mountWebFloat(): () => void {
       // The brain is restarting: keep what is on screen.
     }
     apply()
+  }
+
+  /** Her opening clip, once when this page opens (and once a day, when so set); a click skips it. */
+  let introDone = false
+  const playIntroOnce = (intro: { url: string; when: 'every' | 'daily' }) => {
+    if (introDone) return
+    introDone = true
+    const today = new Date().toDateString()
+    try {
+      if (intro.when === 'daily' && localStorage.getItem('dsh-her.intro.day') === today) return
+      localStorage.setItem('dsh-her.intro.day', today)
+    } catch {
+      // private window: it plays
+    }
+    const veil = document.createElement('div')
+    veil.style.cssText = 'position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.25);cursor:pointer'
+    veil.title = '点一下跳过'
+    const video = document.createElement('video')
+    video.src = new URL(intro.url, document.baseURI).href
+    video.muted = true
+    video.playsInline = true
+    video.autoplay = true
+    video.style.cssText = 'max-width:80vw;max-height:80vh'
+    veil.append(video)
+    const end = () => veil.remove()
+    veil.onclick = end
+    video.onended = end
+    video.onerror = end
+    setTimeout(end, 8000)
+    document.body.append(veil)
+    void video.play().catch(end)
   }
 
   window.__herFloat = hostApi

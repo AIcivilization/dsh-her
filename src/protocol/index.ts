@@ -107,6 +107,8 @@ export type BodyMessage =
   | { t: 'presence'; state: 'active' | 'idle' | 'away'; fullscreen: boolean; locked: boolean }
   /** The body's menu: she should (not) speak first for a while. */
   | { t: 'focus.set'; on: boolean }
+  /** The body's menu: switch her off, or call her back. */
+  | { t: 'off.set'; off: boolean }
   /** The talk bar (docs/对话入口设计.md): its lines, a new conversation, an earlier one, the whole conversation in dsh. */
   | { t: 'talk.get' }
   | { t: 'talk.new' }
@@ -133,8 +135,8 @@ export interface Welcome {
   v: number
   sessionId: string
   characters: CharacterView[]
-  /** `focus`: she is not speaking first, for the body's menu. */
-  config: { mic: 'push-to-talk' | 'always'; bargeIn: boolean; focus?: boolean }
+  /** `focus`: she is not speaking first, for the body's menu. `off`: she is switched off (no window, no listening). */
+  config: { mic: 'push-to-talk' | 'always'; bargeIn: boolean; focus?: boolean; off?: boolean }
 }
 
 /** The pages of her settings in dsh (docs/设置页与编排设计.md §1). */
@@ -176,7 +178,7 @@ export type BrainMessage =
   | { t: 'heard'; cid: string; uttId: string; text: string; ignored?: 'echo' | 'filler' }
   | { t: 'ask'; cid: string; id: string; question: string; options: string[] }
   | { t: 'mode'; cid: string; mode: WindowMode; screen?: number; pos?: { x: number; y: number }; scale?: number }
-  | { t: 'config'; mic?: 'push-to-talk' | 'always'; bargeIn?: boolean; focus?: boolean }
+  | { t: 'config'; mic?: 'push-to-talk' | 'always'; bargeIn?: boolean; focus?: boolean; off?: boolean }
   /** Let the user choose a folder on the body's computer and import it (progress and report follow). */
   | { t: 'pack.pick'; id: string; ffmpeg?: string }
   | { t: 'pack.import'; id: string; dir: string }
@@ -200,6 +202,8 @@ export type BrainMessage =
    * extension) on the body's computer; answered with `folder.picked`.
    */
   | { t: 'folder.pick'; id: string; title: string; button: string; file?: string }
+  /** Play her opening clip once (a file on this computer): she comes out (§4.5). */
+  | { t: 'intro'; path: string }
 
 export type AnyMessage = BodyMessage | BrainMessage
 

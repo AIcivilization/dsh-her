@@ -1,13 +1,13 @@
 // Calls to the plugin's endpoints on DSH's own authenticated `/api` channel.
 
-import type { StateView } from '../dsh/api.ts'
+import type { SkinsView, StageView, StateView, VoicesView } from '../dsh/api.ts'
 import type { ManualInstall } from '../dsh/body-install.ts'
 import { isRemotePage } from '../core/where.ts'
 import type { LookProject, WorkshopCard } from '../core/workshop.ts'
 import type { ProjectStatus } from '../dsh/workshop.ts'
 import type { ClipUse, ClipsView } from '../pack/types.ts'
 
-export type { StateView }
+export type { SkinsView, StageView, StateView, VoicesView }
 
 export interface FrameRegion {
   x: number
@@ -104,6 +104,24 @@ export const herApi = {
   workshopImportProject: () => post<{ project: LookProject; status: ProjectStatus } | { cancelled: true }>('/workshop/import-project'),
   workshopExamples: () => post<{ examples: Array<{ card: WorkshopCard; file: string; label: string; ready: boolean }> }>('/workshop/examples'),
   workshopOpen: (id: string) => post<Record<string, never>>('/workshop/open', { id }),
+  setOff: (off: boolean) => post<WithState>('/off', { off }),
+  stageGet: () => post<StageView>('/stage/get'),
+  stageSave: (stage: unknown) => post<StageView>('/stage/save', { stage }),
+  stagePlay: (on: boolean) => post<StageView>('/stage/play', { on }),
+  designOpen: (focus: string) => post<{ sessionId: string }>('/design/open', { focus }),
+  libraryUndo: (row: string, name: string) => post<StageView>('/library/undo', { row, name }),
+  skinsGet: () => post<SkinsView>('/skins/get'),
+  voicesGet: () => post<VoicesView>('/voices/get'),
+  voicesSave: (config: unknown) => post<VoicesView>('/voices/save', { config }),
+  voicesSecret: (provider: string, field: string, value: string) => post<VoicesView>('/voices/secret', { provider, field, value }),
+  voicesTest: (voice: string) => post<{ ms: number; durationMs: number; audio: string; format: string }>('/voices/test', { voice }),
+  skinsUse: (id: string | null) => post<SkinsView>('/skins/use', { id }),
+  skinsRemove: (id: string) => post<SkinsView>('/skins/remove', { id }),
+  introSet: (change: Record<string, unknown>) => post<SkinsView>('/intro/set', change),
+  introPlay: () => post<Record<string, never>>('/intro/play'),
+  stageRestore: (id: string) => post<StageView>('/stage/restore', { id }),
+  libraryRename: (row: string, from: string, to: string) => post<StageView>('/library/rename', { row, from, to }),
+  libraryRemove: (row: string, name: string) => post<StageView>('/library/remove', { row, name }),
   lookClips: (pack?: string) => post<{ packs: Array<{ id: string; name: string }>; view?: ClipsView }>('/look/clips', pack === undefined ? {} : { pack }),
   lookClipsSave: (pack: string, changes: Array<{ id: string; use: ClipUse; desc: string }>) => post<Record<string, never>>('/look/clips/save', { pack, changes }),
   workshopImport: (id: string) => post<WithState>('/workshop/import', { id }),

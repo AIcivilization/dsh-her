@@ -13,7 +13,7 @@
 
 export const VOICE_MODEL = 'cosyvoice-v3-flash'
 
-export type VoiceService = 'edge' | 'cosyvoice' | 'ming'
+export type VoiceService = 'edge' | 'cosyvoice' | 'ming' | 'ext'
 
 export interface VoiceOption {
   id: string
@@ -62,6 +62,8 @@ export function voiceName(id: string): string {
 /** Which service a voice belongs to; an id not in the list goes by its shape (Edge ids end in "Neural"). */
 export function serviceOf(id: string): VoiceService {
   if (id.startsWith('ming:') || id.startsWith(OWN_PREFIX)) return 'ming'
+  // A voice of an outside service (讯飞, an OpenAI-style one, GPT-SoVITS, a plugin): ext:<provider>:<voice>.
+  if (id.startsWith('ext:')) return 'ext'
   return VOICES.find(v => v.id === id)?.service ?? (/Neural$/.test(id) ? 'edge' : 'cosyvoice')
 }
 
@@ -87,4 +89,5 @@ export const SERVICE_NAMES: Record<VoiceService, string> = {
   edge: '微软 Edge（免费，要联网）',
   cosyvoice: '阿里云百炼 CosyVoice（要 key，按字数付费）',
   ming: '本机 Ming（离线、免费、能表达情绪；Apple 芯片，下载约 2 GB）',
+  ext: '外接的语音服务（讯飞、OpenAI 兼容、GPT-SoVITS、别的插件）',
 }

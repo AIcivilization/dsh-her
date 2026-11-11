@@ -69,6 +69,13 @@ export const STYLES = `
 .her-btn.primary{background:${ACCENT};border-color:${ACCENT};color:${ON_ACCENT}}
 .her-btn.small{padding:2px 8px;font-size:12px}
 .her-btn.link{border:none;background:none;color:${ACCENT};padding:2px 4px}
+.her-off{border:1.5px solid ${DANGER};background:none;color:${DANGER};font-weight:600;padding:7px 16px;border-radius:999px}
+.her-off:hover{background:${DANGER};color:#fff}
+.her-offbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border:1.5px solid ${DANGER};border-radius:12px;padding:12px 16px;margin-bottom:14px}
+.her-offbar b{font-size:15px}
+.her-offbar span{flex:1;min-width:200px;color:${MUTED}}
+.her-offbar .her-btn{font-size:15px;padding:8px 20px}
+.her-head-right{display:flex;align-items:center;gap:10px}
 .her-input,.her-textarea,.her-select{width:100%;border:1px solid ${LINE};background:${LAYER2};color:${TEXT};border-radius:8px;padding:7px 10px;font:inherit}
 .her-textarea{min-height:120px;resize:vertical}
 .her-label{display:block;font-size:12px;color:${MUTED};margin:10px 0 4px}
@@ -122,4 +129,52 @@ export const STYLES = `
 .her-clip video{width:100%;aspect-ratio:9/16;object-fit:contain;background:${LAYER2};border-radius:8px}
 .her-clip.off video{opacity:.35}
 .her-clip .her-input{width:100%;box-sizing:border-box}
+.her-clip-img{width:100%;aspect-ratio:9/16;object-fit:contain;background:${LAYER2};border-radius:8px}
+.her-playbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border:1px solid ${LINE};border-radius:10px;padding:10px 12px;margin-bottom:10px}
+.her-playbar.on{border-color:${OK}}
+.her-playbar label{white-space:nowrap}
+.her-warnlist{margin:8px 0;padding-left:18px;color:${WARN}}
+.her-stage-scroll{overflow-x:auto;margin:10px 0}
+.her-stage-table{border-collapse:separate;border-spacing:0;font-size:12px;min-width:100%}
+.her-stage-table th,.her-stage-table td{border:1px solid ${LINE};padding:6px;vertical-align:top;text-align:left;font-weight:400;min-width:120px;max-width:180px}
+.her-stage-table th{cursor:pointer;background:${LAYER2}}
+.her-stage-table th.on,.her-stage-cell.on{outline:2px solid ${ACCENT};outline-offset:-2px}
+.her-stage-table th.off{opacity:.55}
+.her-stage-table .her-stage-row,.her-stage-table th:first-child{min-width:44px;width:44px;color:${MUTED};background:none;cursor:default}
+.her-stage-table .her-stage-add{min-width:44px;width:44px;vertical-align:middle;cursor:default;background:none}
+.her-stage-cell{cursor:pointer}
+.her-stage-cell:hover{background:${HOVER}}
+.her-stage-name{font-weight:600;font-size:13px;margin-top:4px}
+.her-chip{display:inline-block;margin:0 3px 3px 0;padding:1px 6px;border-radius:6px;background:${LAYER2};border:1px solid ${LINE}}
+.her-chip.bad{color:${DANGER};border-color:${DANGER}}
+.her-thumb{position:relative;width:160px;aspect-ratio:16/9;border-radius:6px;overflow:hidden;background:#0d1b2a;border:1px solid ${LINE}}
+.her-thumb-desk{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.her-thumb-text{display:block;padding:3px 5px;color:#cfe3ff;font-size:10px;line-height:1.3;background:#1d3557;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.her-thumb-her{width:100%;height:100%;display:flex;align-items:flex-end;justify-content:center;font-size:11px;color:#0d1b2a;background:#9cc3ff;border-radius:40% 40% 6px 6px}
+.her-thumb-dsh{position:absolute;right:6%;top:12%;width:38%;height:62%;border:1px solid rgba(255,255,255,.55);border-radius:3px;background:rgba(20,20,26,.55)}
+.her-thumb-ava{position:absolute;right:12%;bottom:18%;width:22%;aspect-ratio:1;border-radius:50%;overflow:hidden;background:rgba(127,180,255,.6)}
+.her-thumb-pet{position:absolute;left:6%;bottom:4%;width:22%;height:48%;overflow:hidden;color:#cfe3ff;font-size:10px;display:flex;align-items:flex-end;justify-content:center}
+.her-thumb-fill{width:100%;height:100%;object-fit:contain}
+.her-stage-panel{margin-top:10px}
+.her-btn.her-ai{border-color:${ACCENT};color:${ACCENT}}
+.her-map{position:relative;width:100%;max-width:640px;aspect-ratio:16/9;border-radius:10px;overflow:hidden;background:linear-gradient(160deg,#16324f,#0b1a2c);margin:8px 0}
+.her-map-desk{position:absolute;inset:0;background:radial-gradient(ellipse at 30% 30%,rgba(120,180,255,.25),transparent 60%)}
+.her-map-dsh{position:absolute;left:55%;top:8%;width:40%;height:72%;border-radius:6px;background:rgba(240,246,255,.9);box-shadow:0 4px 18px rgba(0,0,0,.35)}
+.her-map-chat{position:absolute;left:8%;right:8%;bottom:8%;height:16%;border-radius:6px;background:#dbe8fa}
+.her-map-ava{position:absolute;right:8%;top:-60%;width:16%;aspect-ratio:1;border-radius:50%;background:#7fb6ff}
+.her-map-pet{position:absolute;left:12%;bottom:6%;width:14%;height:50%;border-radius:45% 45% 10% 10%;background:#9cc3ff}
+.her-map-bubble{position:absolute;left:20%;top:30%;padding:2px 10px;border-radius:10px;background:#fff;color:#334;font-size:12px}
+.her-map-bar{position:absolute;left:30%;bottom:4%;width:26%;height:8%;border-radius:6px;background:rgba(28,26,34,.85)}
+.her-map-spot{position:absolute;transform:translate(-10%,-50%);display:inline-flex;align-items:center;gap:2px;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.5);background:rgba(10,20,35,.75);color:#fff;font-size:12px;cursor:pointer;white-space:nowrap}
+.her-map-spot:hover{background:rgba(10,20,35,.95)}
+.her-map-spot.warn{border-color:${WARN}}
+.her-bigstage{position:relative;width:100%;max-width:720px;aspect-ratio:16/9;margin:8px 0;touch-action:none;user-select:none}
+.her-bigstage>.her-thumb{position:absolute;inset:0;width:100%;height:100%}
+.her-bigstage .her-thumb-pet{display:none}
+.her-bigpet{position:absolute;transform:translate(-50%,-100%);border:2px dashed #9cc3ff;border-radius:40% 40% 8px 8px;background:rgba(156,195,255,.25);cursor:grab;display:flex;align-items:flex-end;justify-content:center;color:#cfe3ff;font-size:13px}
+.her-bigpet-size{position:absolute;right:-7px;top:-7px;width:14px;height:14px;border-radius:50%;background:#9cc3ff;cursor:ns-resize}
+.her-choices{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.her-pick{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border:1px solid ${LINE};border-radius:8px;cursor:pointer}
+.her-pick.on{border-color:${ACCENT}}
+.her-pick.bad{color:${DANGER}}
 `

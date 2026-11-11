@@ -11,12 +11,51 @@
 import type { Character } from '../core/index.ts'
 import type { BodyMessage, LookView, PackSummary, SettingsPage, TalkView, WindowMode } from '../protocol/index.ts'
 import type { ClipUse, ClipsView } from '../pack/types.ts'
+import type { Stage } from '../pack/stage.ts'
+import type { Skin } from '../core/skin.ts'
+import type { IntroSettings } from '../core/intro.ts'
+import type { VoicesConfig } from '../voice/external.ts'
+import type { LibraryRow, Material } from './library.ts'
+import type { StageVersion } from './stage-store.ts'
 import type { WebConfig, WebMode, WebPlace, WebScope } from './web-body.ts'
+
+/** 编排 for the page: the stage, what is wrong in it, the 素材库, the looks it can use whole, the versions to go back to. */
+export interface StageView {
+  stage?: Stage
+  problems: string[]
+  library: Record<LibraryRow, Material[]>
+  missing: string[]
+  packs: Array<{ id: string; name: string; layer: 'overlay' | 'scene' }>
+  versions: StageVersion[]
+  /** She plays this stage (else what was chosen under 外形), and what of it cannot be played yet. */
+  playing: boolean
+  playNotes: string[]
+}
+
+/** Outside voices for the page. `keys`: which are set ("xf.apiKey": true), never their values. */
+export interface VoicesView extends VoicesConfig {
+  plugins: Array<{ provider: string; voices: Array<{ id: string; name: string }> }>
+  keys: Record<string, boolean>
+  /** Her voice now. */
+  current: string
+}
+
+/** Skins for the page: each with what is wrong in it and when its files changed; the one in use; her opening clip. */
+export interface SkinsView {
+  skins: Array<Skin & { problems: string[]; rev: number }>
+  current: string | null
+  intro: IntroSettings
+  introClips: Material[]
+  /** The skin in use has an opening clip of its own. */
+  skinIntro: boolean
+}
 
 /** Her small picture in the page, and its moving version when she has one. */
 export interface AvatarView {
   url: string
   clipUrl?: string
+  /** A plain clip from the 素材库 (编排's avatar row), played as it is. */
+  videoUrl?: string
   /** How much of its bottom hangs below the table's edge. */
   overhang: number
 }
@@ -82,6 +121,11 @@ export interface StateView {
   initiative: InitiativeView
   /** Ready-made looks offered on the release, and the one being fetched. */
   presets: { list: Preset[]; active?: { id: string; state: 'downloading' | 'failed'; done: number; total: number; error?: string } }
+  /** She is switched off: not shown, not listening, not speaking (the big button on her page). */
+  off: boolean
+  /** The skin dsh wears (its name), and whether she plays 编排 — for the picture on 主界面. */
+  skin: string | null
+  stagePlaying: boolean
   /** Her last reply failed with no words (the model had no key, no quota …): why, and what to do. */
   problem?: { text: string; at: number }
   memory: { facts: Fact[]; episodes: Episode[]; diary: string[]; lastDigestDay: string | null }
@@ -101,6 +145,30 @@ export interface ApiRuntime {
   talkSplit(change: Partial<SplitSettings>): void
   initiativeSet(change: Partial<InitiativeSettings>): void
   initiativeFocus(choice: FocusChoice): void
+  /** Switch her off, or call her back. */
+  setOff(off: boolean): void
+  /** 编排 and 素材库 (docs/设置页与编排设计.md §2, §3). */
+  stageGet(): StageView
+  /** "+AI": the design session, told what to change; its id to open in dsh. */
+  designOpen(focus: string): Promise<{ sessionId: string }>
+  /** An SVG back to the one before its last change. */
+  libraryUndo(row: string, name: string): StageView
+  /** Outside voices (§7): the services, which keys are set (never the keys), who listens. */
+  voicesGet(): Promise<VoicesView>
+  voicesSave(config: unknown): Promise<VoicesView>
+  voicesSecret(provider: string, field: string, value: string): Promise<VoicesView>
+  voicesTest(voice: string): Promise<{ ms: number; durationMs: number; audio: string; format: string }>
+  /** Skins and her opening clip (§4). */
+  skinsGet(): SkinsView
+  skinsUse(id: string | undefined): SkinsView
+  skinsRemove(id: string): SkinsView
+  introSet(change: Partial<IntroSettings>): SkinsView
+  introPlay(): void
+  stagePlay(on: boolean): StageView
+  stageSave(stage: unknown): StageView
+  stageRestore(id: string): StageView
+  libraryRename(row: string, from: string, to: string): StageView
+  libraryRemove(row: string, name: string): StageView
   /** Have her say something now; what she said. */
   initiativeTry(): Promise<string>
   /** Read the list of ready-made looks, with their pictures. */
@@ -117,7 +185,7 @@ export interface ApiRuntime {
   bodyOpenFolder(): void
   /** The web body: whether to show, her config, a message from the page, the setting. */
   /** `remote`: the page is open on another device than the one running dsh. */
-  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; mode: WebMode; place: WebPlace; scope: WebScope; focus: boolean; open?: string; page?: SettingsPage; avatar?: AvatarView }
+  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; mode: WebMode; place: WebPlace; scope: WebScope; focus: boolean; open?: string; page?: SettingsPage; avatar?: AvatarView; skin?: { id: string; rev: number }; intro?: { url: string; when: 'every' | 'daily' } }
   /** A new folder for files coming from the browser, and importing it as a pack (with no desktop body). */
   webNewBatch(): string
   importBatch(batch: string, name?: string): Promise<void>
@@ -239,6 +307,41 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
         if (focus !== 'off' && focus !== 'span' && focus !== 'always') throw new ApiError('专注的选项不对')
         rt.initiativeFocus(focus)
       }
+      return withState()
+    },
+    '/stage/get': async () => ({ ...rt.stageGet() }),
+    '/design/open': async body => rt.designOpen(typeof body.focus === 'string' ? body.focus : ''),
+    '/library/undo': async body => ({ ...rt.libraryUndo(str(body.row, '行'), str(body.name, '素材')) }),
+    '/voices/get': async () => ({ ...await rt.voicesGet() }),
+    '/voices/save': async body => ({ ...await rt.voicesSave(body.config) }),
+    '/voices/secret': async body => ({ ...await rt.voicesSecret(str(body.provider, '服务'), str(body.field, '哪一项'), typeof body.value === 'string' ? body.value : '') }),
+    '/voices/test': async body => ({ ...await rt.voicesTest(str(body.voice, '声音')) }),
+    '/skins/get': async () => ({ ...rt.skinsGet() }),
+    '/skins/use': async body => ({ ...rt.skinsUse(body.id === null || body.id === undefined ? undefined : str(body.id, '皮肤')) }),
+    '/skins/remove': async body => ({ ...rt.skinsRemove(str(body.id, '皮肤')) }),
+    '/intro/set': async body => {
+      const change: Partial<IntroSettings> = {}
+      if (typeof body.on === 'boolean') change.on = body.on
+      if (typeof body.dsh === 'boolean') change.dsh = body.dsh
+      if (body.when === 'every' || body.when === 'daily') change.when = body.when
+      if (typeof body.source === 'string') change.source = body.source
+      return { ...rt.introSet(change) }
+    },
+    '/intro/play': async () => {
+      rt.introPlay()
+      return {}
+    },
+    '/stage/save': async body => ({ ...rt.stageSave(body.stage) }),
+    '/stage/play': async body => {
+      if (typeof body.on !== 'boolean') throw new ApiError('缺少 on')
+      return { ...rt.stagePlay(body.on) }
+    },
+    '/stage/restore': async body => ({ ...rt.stageRestore(str(body.id, '版本')) }),
+    '/library/rename': async body => ({ ...rt.libraryRename(str(body.row, '行'), str(body.from, '素材'), str(body.to, '新名字')) }),
+    '/library/remove': async body => ({ ...rt.libraryRemove(str(body.row, '行'), str(body.name, '素材')) }),
+    '/off': async body => {
+      if (typeof body.off !== 'boolean') throw new ApiError('缺少 off')
+      rt.setOff(body.off)
       return withState()
     },
     '/talk/state': async () => ({ talk: rt.state().talk }),

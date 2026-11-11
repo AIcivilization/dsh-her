@@ -57,6 +57,15 @@ export function apply(ctx: ClientContext): void {
     return () => { delete window.__herOpenSession }
   }))
 
+  // Skins: dsh's own theme service takes the colours (overrideTokens).
+  const withTheme = ctx as unknown as { inject?: (deps: string[], fn: (c: { effect(fn: () => () => void): void; theme?: { overrideTokens?(source: string, tokens: Record<string, { light: string; dark: string }>): () => void } }) => void) => void }
+  withTheme.inject?.(['theme'], c => c.effect(() => {
+    const theme = c.theme
+    if (typeof theme?.overrideTokens !== 'function') return () => {}
+    window.__herTheme = { overrideTokens: (source, tokens) => theme.overrideTokens!(source, tokens) }
+    return () => { delete window.__herTheme }
+  }))
+
   // "设置…" on the desktop body: show her page (layout.selectPanel), on the page of her settings asked for.
   const withLayout = ctx as unknown as { inject?: (deps: string[], fn: (c: { effect(fn: () => () => void): void; layout?: { selectPanel?(id: string): void } }) => void) => void }
   let selectPanel: ((id: string) => void) | undefined

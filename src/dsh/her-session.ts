@@ -111,6 +111,8 @@ export interface HerSessionDeps {
   performance: () => string
   /** Have the body perform an action; resolves when it is done. */
   playAction: (action: string) => Promise<{ ok: boolean; reason?: string; transcript?: string }>
+  /** More tools of hers (design-tools.ts: putting on a skin, changing an SVG of herself). */
+  extraTools?: () => unknown[]
   /** "关于对方" for her prompt, from memory. */
   aboutYou: () => string
   memory: MemoryProvider
@@ -375,6 +377,8 @@ export class HerSession {
         return { ok: false, text: `没做成：${action}（${why}）` }
       },
     })
+
+    for (const extra of this.deps.extraTools?.() ?? []) agentCtx.tools.register(extra)
 
     const memory = this.deps.memory
     const textOutput = {

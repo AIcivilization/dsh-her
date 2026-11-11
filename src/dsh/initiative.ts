@@ -20,6 +20,8 @@ export interface InitiativeDeps {
   dayOf: (date: Date) => string
   ready: () => boolean
   bodyHere: () => boolean
+  /** She is switched off: she says nothing of her own. */
+  off: () => boolean
   busy: () => boolean
   due: (now: Date) => Array<{ id: string; text: string; due?: string }>
   /** Her line for this moment (undefined moment: a try from the page); undefined when she has nothing to say. */
@@ -78,7 +80,7 @@ export class Initiative {
     const returned = this.presence.returned(at)
     return decide({
       settings: this.settingsNow, record: this.record, now, dayOf: this.deps.dayOf,
-      ready: this.deps.ready(), bodyHere: this.deps.bodyHere(), presence: this.presence.current(at), busy: this.composing || this.deps.busy(),
+      ready: this.deps.ready(), bodyHere: this.deps.bodyHere(), off: this.deps.off(), presence: this.presence.current(at), busy: this.composing || this.deps.busy(),
       due: this.deps.due(now), ...(returned === undefined ? {} : { returned }),
     })
   }
@@ -139,6 +141,7 @@ export class Initiative {
 
   /** From the page: have her say something now, whatever the clock says; returns what she said. */
   async tryNow(): Promise<string> {
+    if (this.deps.off()) throw new Error('她关着：先在页面顶上点"叫她出来"')
     if (!this.deps.bodyHere()) throw new Error('身体还没连上，她没法开口')
     if (this.composing || this.deps.busy()) throw new Error('她正在说话，等她说完')
     this.composing = true

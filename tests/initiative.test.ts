@@ -21,6 +21,7 @@ test('every gate keeps her quiet and says why', () => {
   assert.match(why({ record: { ...EMPTY_RECORD, focusUntil: at + HOUR } }), /专注/)
   assert.match(why({ ready: false }), /向导/)
   assert.match(why({ bodyHere: false }), /身体/)
+  assert.match(why({ off: true }), /关着/)
   assert.match(why({ presence: undefined }), /不知道/)
   assert.match(why({ presence: 'idle' }), /不在/)
   assert.match(why({ presence: 'away' }), /不在/)

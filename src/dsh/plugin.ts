@@ -41,7 +41,19 @@ import { digestPrompt, notePrompt, parseDigest, transcriptOf } from '../memory/d
 import { dayOf, FileMemory } from '../memory/store.ts'
 import { PROTOCOL_VERSION, SETTINGS_PAGES, type BodyMessage, type BrainMessage, type LookView, type PackSummary, type SettingsPage, type TalkView, type WindowMode } from '../protocol/index.ts'
 import { saveClipUses } from '../pack/load.ts'
-import { listPacks } from '../pack/settings.ts'
+import { listPacks, loadSettings } from '../pack/settings.ts'
+import { listLooks } from '../pack/looks.ts'
+import { emptyStage, missingMaterials, parseStage, Picker, renameMaterial, resolveStage, stageFromLook, stageFromPack, type Scene, type When } from '../pack/stage.ts'
+import { compileStage, readPlay, removeStageLook, STAGE_LOOK, STAGE_LOOK_ID, writePlay } from './stage-play.ts'
+import { Library, type LibraryRow } from './library.ts'
+import { Skins } from './skins.ts'
+import { designTools, herLookTools, undoSvg, type DesignDeps } from './design-tools.ts'
+import { DesignSession } from './design-session.ts'
+import { Secrets } from '../voice/secrets.ts'
+import { cleanVoices, ExternalVoices, SECRET_FIELDS, type PluginVoice } from '../voice/external.ts'
+import { cleanIntro, type IntroSettings } from '../core/intro.ts'
+import { checkMaterial } from '../pack/material-check.ts'
+import { StageStore } from './stage-store.ts'
 import { BrainServer } from '../server/brain-server.ts'
 import { type AvatarView, API_BASE, apiHandlers, handle, type ApiRuntime } from './api.ts'
 import { bodyRunning, findDevBody, launchBody, type LaunchPlan } from './body-launcher.ts'
@@ -334,8 +346,34 @@ export function apply(ctx: Context, config: HerConfig): void {
   let speakingUntil = 0
   const herBusy = () => current !== undefined || awaitingReply || Date.now() < speakingUntil
 
+  /**
+   * Switched off (the button on her page, or the body's menu): no picture,
+   * no listening, no voice, nothing of her own. What you type to her in dsh
+   * still gets a written answer. Remembered across restarts.
+   */
+  const offFile = join(paths.root, 'off.json')
+  let herOff = (() => {
+    try {
+      return (JSON.parse(readFileSync(offFile, 'utf8')) as { off?: unknown }).off === true
+    } catch {
+      return false
+    }
+  })()
+  const setHerOff = (next: boolean) => {
+    if (next === herOff) return
+    herOff = next
+    mkdirSync(paths.root, { recursive: true })
+    writeFileSync(offFile, `${JSON.stringify({ off: next })}\n`)
+    if (next) cut()
+    else for (const body of server?.bodies ?? []) setTimeout(() => playIntro(message => body.send(message)), 800)
+    // The desktop closes or opens her window; the page hides or shows her at its next look (web/status).
+    server?.broadcast({ t: 'config', off: next })
+    log({ event: 'off', off: next })
+  }
+
   /** Say one sentence of hers: her sound marks and performance tags are taken out, the rest goes to the voice. */
   const saySentence = (uid: string, seq: number, text: string) => {
+    if (herOff) return
     // Ming can sigh and laugh: those tags become its sound markers, out of the subtitle.
     const sounds = usesMing() ? extractSounds(text) : undefined
     const performed = extractCues(sounds?.text ?? text, bodyPack)
@@ -345,7 +383,7 @@ export function apply(ctx: Context, config: HerConfig): void {
 
   /** She says something by herself, not as a reply: the session hears of it before your next words. */
   const sayOwnLine = (text: string, note: string) => {
-    if (speech === undefined) return
+    if (speech === undefined || herOff) return
     voice?.warm()
     const uid = `own-${Date.now().toString(36)}-${nextOwn++}`
     ownLine = { uid, note }
@@ -371,7 +409,7 @@ export function apply(ctx: Context, config: HerConfig): void {
   }
   const herSystem = () => buildSystemPrompt({
     name: character.name, persona: character.persona, you: { call: character.callYou, pronoun: character.pronoun },
-    performance: performanceSection(bodyPack), aboutYou: aboutYou(), now: new Date(),
+    performance: [performanceSection(bodyPack), stageSection()].filter(Boolean).join('\n'), aboutYou: aboutYou(), now: new Date(),
   })
 
   const initiative = new Initiative({
@@ -379,6 +417,7 @@ export function apply(ctx: Context, config: HerConfig): void {
     dayOf,
     ready: () => character.onboarded,
     bodyHere: () => desktopConnected() || webBody.connected,
+    off: () => herOff,
     busy: herBusy,
     due: now => memory.due(now),
     compose: async (moment: Moment | undefined, recent: string[]) => {
@@ -637,6 +676,13 @@ export function apply(ctx: Context, config: HerConfig): void {
 
   /** Have the body perform an action and wait (at most 90 s) for it to finish. */
   const playAction = (action: string): Promise<{ ok: boolean; reason?: string; transcript?: string }> => {
+    // A scene of the stage: the brain keeps it (her small picture, and the bodies' desktop when it has one).
+    if (action.startsWith('stage_')) {
+      const choice = stageChoices().find(c => c.scene.id === action.slice('stage_'.length))
+      if (choice === undefined) return Promise.resolve({ ok: false, reason: 'unsupported' })
+      enterScene(choice.scene, 'she')
+      return Promise.resolve({ ok: true })
+    }
     // The latest body that shows her (has packs), not a text-only client that connected after it.
     const bodies = server?.bodies ?? []
     const desktop = [...bodies].reverse().find(b => b.hello.packs.length > 0) ?? bodies.at(-1)
@@ -805,9 +851,17 @@ export function apply(ctx: Context, config: HerConfig): void {
     switch (message.t) {
       case 'presence':
         if (message.state === 'active' || message.state === 'idle' || message.state === 'away') initiative.report(source, message.state)
+        if (message.state === 'active' || message.state === 'idle' || message.state === 'away') moments.user = message.state === 'active' ? 'active' : 'idle'
+        break
+      case 'user.speechStart':
+        moments.youAt = Date.now()
         break
       case 'touch':
+        moments.touch = { part: message.part === 'head' ? 'head' : 'body', kind: message.kind === 'long' ? 'long' : 'tap', at: Date.now() }
         touched(message)
+        break
+      case 'off.set':
+        setHerOff(message.off)
         break
       case 'focus.set':
         initiative.setFocus(message.on ? 'span' : 'off')
@@ -914,6 +968,8 @@ export function apply(ctx: Context, config: HerConfig): void {
   const lookAvatar = (lookId: string) => avatarOf(lookId) ?? (/^[\w-]+$/.test(lookId) ? avatarIn(join(paths.root, 'looks', lookId)) : undefined)
   /** Her small picture for the look she wears, with an address that changes when the picture does. */
   const webAvatar = (): AvatarView | undefined => {
+    const fromStage = stageAvatar()
+    if (fromStage !== undefined) return fromStage
     const active = webBody.activeId()
     const avatar = active?.startsWith('look:') === true ? lookAvatar(active.slice('look:'.length)) : undefined
     if (avatar === undefined) return undefined
@@ -945,10 +1001,206 @@ export function apply(ctx: Context, config: HerConfig): void {
     })
   }
   const uploadsDir = join(paths.root, 'uploads')
+  const library = new Library(paths.root)
+  const stages = new StageStore(paths.root)
+  /**
+   * 编排 as the page shows it. The first time, it is made from what she
+   * wears now (a look or a pack, §3.11), and saved; the old files stay.
+   */
+  const stageView = () => {
+    if (!stages.exists) {
+      const chosen = loadSettings(paths.root)
+      const look = chosen.look === undefined ? undefined : listLooks(paths.root, paths.packs).find(l => l.id === chosen.look)
+      const pack = look === undefined && chosen.pack !== undefined ? listPacks(paths.packs).find(p => p.packId === chosen.pack) : undefined
+      stages.save(look !== undefined ? stageFromLook(look) : pack !== undefined ? stageFromPack(pack) : emptyStage(character.name))
+      log({ event: 'stage', action: 'made', from: look?.id ?? pack?.packId ?? null })
+    }
+    const { stage, problems } = stages.load()
+    examineLater()
+    const materials = library.all()
+    const packs = listPacks(paths.packs).map(p => ({ id: p.packId, name: p.name, layer: p.layer }))
+    const missing = stage === undefined ? [] : [
+      ...missingMaterials(stage, Object.fromEntries(Object.entries(materials).map(([row, list]) => [row, list.map(m => m.name)]))),
+      ...stage.scenes.flatMap(scene => Object.values(scene.cells).flatMap(cell => cell.use.filter(u => u.startsWith('pack:') && !packs.some(p => `pack:${p.id}` === u)).map(u => `${scene.name}那一格用的外形 ${u.slice(5)} 已经不在了`))),
+    ]
+    return { ...(stage === undefined ? {} : { stage }), problems, library: materials, missing, packs: packs.filter(p => !p.id.startsWith(`${STAGE_LOOK}-`)), versions: stages.versions(), playing: readPlay(paths.root).on, playNotes }
+  }
+  const skins = new Skins(paths.root)
+  /** Voices and listening from outside services; their keys in the keychain (or secrets.json). */
+  const secrets = new Secrets(paths.root)
+  const externalVoices = new ExternalVoices(paths.root, secrets)
+  const voicesView = async () => {
+    const config = externalVoices.config()
+    const keys: Record<string, boolean> = {}
+    for (const p of config.providers) for (const field of SECRET_FIELDS[p.kind]) keys[`${p.id}.${field}`] = await secrets.has(`${p.id}.${field}`)
+    return { ...config, plugins: externalVoices.pluginVoices(), keys, current: character.voice.id }
+  }
+  /** Her opening clip (§4.5): on or off, which one, every time or once a day, also when dsh's page opens. */
+  const introFile = join(paths.root, 'intro.json')
+  const introSettings = (): IntroSettings => {
+    try {
+      return cleanIntro(JSON.parse(readFileSync(introFile, 'utf8')))
+    } catch {
+      return cleanIntro({})
+    }
+  }
+  const saveIntro = (settings: IntroSettings) => writeFileSync(introFile, `${JSON.stringify(settings)}\n`)
+  /** The clip chosen: the skin's own, or one of the 素材库's opening clips. */
+  const introPath = (settings = introSettings()): string | undefined => {
+    if (settings.source === 'skin') {
+      const id = skins.current()
+      const skin = id === undefined ? undefined : skins.get(id)?.skin
+      return skin?.intro === undefined ? undefined : skins.file(skin.id, skin.intro)
+    }
+    return library.path('intro', settings.source)
+  }
+  /** She comes out on a desktop body: the clip, when it is on and its time has come. */
+  const playIntro = (send: (message: BrainMessage) => void, force = false) => {
+    const settings = introSettings()
+    const path = introPath(settings)
+    if (path === undefined || (!force && (!settings.on || herOff))) return
+    const today = dayOf(new Date())
+    if (!force && settings.when === 'daily' && settings.lastDay === today) return
+    send({ t: 'intro', path })
+    saveIntro({ ...settings, lastDay: today })
+    log({ event: 'intro', force })
+  }
+  const skinView = () => ({
+    skins: skins.list().map(e => ({ ...e.skin, problems: e.problems, rev: e.rev })),
+    current: skins.current() ?? null,
+    intro: introSettings(),
+    introClips: library.list('intro'),
+    skinIntro: introPath({ ...introSettings(), source: 'skin' }) !== undefined,
+  })
+  /** "+AI" (§6): the design tools, and the session of their own in her workspace. */
+  const designDeps: DesignDeps = { home: paths.root, library, skins, stages, applied: () => applyStage(), log: entry => log(entry) }
+  const design = new DesignSession({
+    home: paths.root, room: join(dir, 'room'), title: session?.title ?? `她 · ${character.name}`,
+    services: () => services, route: () => route(), tools: () => designTools(designDeps), logger: ctx.logger,
+  })
+  /** Files put into the 素材库 by hand (or before this version) are looked at in the background, one at a time. */
+  let examining = false
+  const examineLater = () => {
+    if (examining) return
+    const todo = library.unexamined()
+    if (todo.length === 0) return
+    examining = true
+    void (async () => {
+      // dsh's own PATH may not have ffmpeg: find it the way imports do (hers, the desktop app's, the login shell's).
+      if (!await findFfmpeg(paths.root)) return
+      for (const { row, name } of todo) await library.examine(row, name).catch(() => undefined)
+    })().finally(() => { examining = false })
+  }
+  /** What could not be played of the stage last time it was put on. */
+  let playNotes: string[] = []
+  /** Show a pack or look on every body there is (a look just written is found by the body when it looks again). */
+  const showChoice = (id: string) => {
+    if (desktopConnected()) broadcast({ t: 'pack.use', packId: id })
+    webBody.use(id)
+    refreshBodyPack()
+  }
+  /** Put the stage on her (when she plays it): its look is written again and shown. */
+  const applyStage = () => {
+    if (!readPlay(paths.root).on) return
+    const { stage, problems } = stages.load()
+    if (stage === undefined) {
+      playNotes = problems
+      return
+    }
+    const { look, notes } = compileStage(stage, paths.root, paths.packs, library, listPacks(paths.packs).map(p => p.packId))
+    playNotes = notes
+    if (look !== undefined) showChoice(STAGE_LOOK_ID)
+    log({ event: 'stage', action: 'play', notes: notes.length })
+  }
+  /**
+   * Scenes of the stage she can go into herself or when you ask ("她自己选",
+   * "你说了"), or that come up by chance ("隔一会儿随机"): which are on, until when.
+   */
+  const chosenUntil = new Map<string, number>()
+  const randomNext = new Map<string, number>()
+  const holdMs = (scene: Scene) => scene.hold === 'once' ? 60_000 : typeof scene.hold === 'object' ? scene.hold.minutes * 60_000 : 15 * 60_000
+  const chosenNow = () => [...chosenUntil].filter(([, until]) => until > Date.now()).map(([id]) => id)
+  /** The stage's scenes she can go into with play_action (stage_<id>), with how. */
+  const stageChoices = (): Array<{ scene: Scene; how: 'she' | 'you' }> => {
+    if (!readPlay(paths.root).on) return []
+    const { stage } = stages.load()
+    if (stage === undefined) return []
+    return stage.scenes.slice(1).filter(s => s.off !== true).flatMap((scene): Array<{ scene: Scene; how: 'she' | 'you' }> => {
+      const kinds = (scene.when ?? []).map(w => w.on)
+      return kinds.includes('she-chooses') ? [{ scene, how: 'she' }] : kinds.includes('you-ask') ? [{ scene, how: 'you' }] : []
+    })
+  }
+  /** Go into a scene of the stage (she chose it, you asked, or chance): for as long as it holds. */
+  const enterScene = (scene: Scene, why: string) => {
+    chosenUntil.clear()
+    chosenUntil.set(scene.id, Date.now() + holdMs(scene))
+    avatarShown = undefined
+    // A scene with a desktop of its own: the bodies go there too.
+    if (bodyLook?.id === STAGE_LOOK && bodyLook.scenes.some(s => s.id === scene.id)) broadcast({ t: 'look.set', go: scene.id })
+    log({ event: 'stage', action: 'enter', scene: scene.id, why })
+  }
+  const stageSection = () => {
+    const choices = stageChoices()
+    if (choices.length === 0) return ''
+    return ['你可以换到这些场景（调用 play_action，名字一字不差；换过去会持续一阵）：', ...choices.map(({ scene, how }) => `- stage_${scene.id}：${scene.name}${scene.about === undefined ? '' : `——${scene.about}`}（${how === 'she' ? '你想的时候就可以去' : '对方让你去、或者聊到这件事时'}）`)].join('\n')
+  }
+  /** "隔一会儿随机": every minute, a random scene whose time has come comes up. */
+  const stageTick = () => {
+    if (!readPlay(paths.root).on || herOff) return
+    const { stage } = stages.load()
+    if (stage === undefined) return
+    const now = Date.now()
+    for (const scene of stage.scenes.slice(1)) {
+      const random = scene.off === true ? undefined : scene.when?.find((w): w is Extract<When, { on: 'random' }> => w.on === 'random')
+      if (random === undefined) {
+        randomNext.delete(scene.id)
+        continue
+      }
+      const [low, high] = random.everyMinutes
+      const due = randomNext.get(scene.id)
+      if (due === undefined) randomNext.set(scene.id, now + (low + Math.random() * (high - low)) * 60_000)
+      else if (now >= due && chosenNow().length === 0 && !herBusy()) {
+        enterScene(scene, 'random')
+        randomNext.set(scene.id, now + holdMs(scene) + (low + Math.random() * (high - low)) * 60_000)
+      }
+    }
+  }
+  /** What is going on, for the avatar row: speaking, touched, at the computer. */
+  const moments: { youAt?: number; touch?: { part: 'head' | 'body'; kind: 'tap' | 'long'; at: number }; user?: 'active' | 'idle' } = {}
+  const avatarPicker = new Picker()
+  let avatarShown: { key: string; name: string; until: number } | undefined
+  /** Her small picture from the avatar row of the stage, when she plays it and it has one now. */
+  const stageAvatar = (): AvatarView | undefined => {
+    if (!readPlay(paths.root).on) return undefined
+    const { stage } = stages.load()
+    if (stage === undefined) return undefined
+    const now = Date.now()
+    const got = resolveStage(stage, {
+      hour: new Date(now).getHours(),
+      herSpeaking: now < speakingUntil,
+      thinking: awaitingReply,
+      youSpeaking: moments.youAt !== undefined && now - moments.youAt < 4000,
+      ...(moments.touch !== undefined && now - moments.touch.at < 3000 ? { touched: { part: moments.touch.part, kind: moments.touch.kind } } : {}),
+      ...(moments.user === undefined ? {} : { user: moments.user }),
+      chosen: chosenNow(),
+    }).avatar
+    if (got === undefined) return undefined
+    const key = `${got.scene.id}:${got.cell.use.join('|')}`
+    // A new scene picks at once; the same one moves on every half minute.
+    if (avatarShown === undefined || avatarShown.key !== key || now >= avatarShown.until) {
+      const name = avatarPicker.next(got.scene.id, 'avatar', { ...got.cell, use: got.cell.use.filter(u => library.path('avatar', u) !== undefined) })
+      if (name === undefined) return undefined
+      avatarShown = { key, name, until: now + 30_000 }
+    }
+    const path = library.path('avatar', avatarShown.name)
+    if (path === undefined) return undefined
+    const url = `/api/dsh-her/web/library-file?row=avatar&name=${encodeURIComponent(avatarShown.name)}&v=${Math.floor(statSync(path).mtimeMs).toString(36)}`
+    return /\.(mp4|webm|mov|m4v)$/i.test(path) ? { url: '', videoUrl: url, overhang: 0 } : { url, overhang: 0 }
+  }
   const browserScreen = () => (webScreen === undefined ? {} : { screen: { width: webScreen.w, height: webScreen.h, scale: webScreen.scale } })
 
   /** Whether the page should show her: asked for, or (the default) while no desktop body is here. */
-  const webShown = (remote = false): boolean => webShows(webBody.mode, desktopConnected() || bodyRunning(paths.root), remote)
+  const webShown = (remote = false): boolean => !herOff && webShows(webBody.mode, desktopConnected() || bodyRunning(paths.root), remote)
   /** A message from the page, as main fills in the character id for the desktop page. */
   const withCid = (message: BodyMessage): BodyMessage => ('cid' in message && typeof message.cid === 'string' && message.cid !== '' ? message : { ...message, cid } as BodyMessage)
 
@@ -989,6 +1241,9 @@ export function apply(ctx: Context, config: HerConfig): void {
         initiative: initiative.view(),
         talk: { ...talkView(), split: talk.split, current: session?.sessionId ?? null },
         presets: { list: presetList, ...(presetState === undefined ? {} : { active: presetState }) },
+        off: herOff,
+        skin: (() => { const id = skins.current(); return id === undefined ? null : skins.get(id)?.skin.name ?? null })(),
+        stagePlaying: readPlay(paths.root).on,
         memory: { facts, episodes, diary, lastDigestDay: memory.lastDigestDay() ?? null },
       }
     },
@@ -1048,6 +1303,96 @@ export function apply(ctx: Context, config: HerConfig): void {
     },
     initiativeSet: change => initiative.setSettings(change),
     initiativeFocus: choice => initiative.setFocus(choice),
+    setOff: off => setHerOff(off),
+    stageGet: () => stageView(),
+    designOpen: async focus => ({ sessionId: await design.open(focus) }),
+    libraryUndo: (row, name) => {
+      if (!undoSvg(paths.root, library, row, name)) throw new Error('没有上一版')
+      applyStage()
+      return stageView()
+    },
+    voicesGet: () => voicesView(),
+    voicesSave: async raw => {
+      externalVoices.save(cleanVoices(raw))
+      return voicesView()
+    },
+    voicesSecret: async (provider, field, value) => {
+      const known = externalVoices.config().providers.find(p => p.id === provider)
+      if (known === undefined || !SECRET_FIELDS[known.kind].includes(field)) throw new Error('这个服务没有这一项')
+      await secrets.set(`${provider}.${field}`, value)
+      log({ event: 'voice-key', provider, field, set: value.trim() !== '' })
+      return voicesView()
+    },
+    voicesTest: async id => {
+      const started = Date.now()
+      const out = await externalVoices.synthesize(id, '你好，我是这个声音。', 1)
+      return { ms: Date.now() - started, durationMs: out.durationMs, audio: Buffer.from(out.audio).toString('base64'), format: out.format }
+    },
+    skinsGet: () => skinView(),
+    skinsUse: id => {
+      skins.use(id)
+      log({ event: 'skin', id: id ?? null })
+      return skinView()
+    },
+    skinsRemove: id => {
+      skins.remove(id)
+      return skinView()
+    },
+    introSet: change => {
+      saveIntro(cleanIntro({ ...introSettings(), ...change }))
+      return skinView()
+    },
+    introPlay: () => {
+      const bodies = server?.bodies ?? []
+      if (bodies.length === 0) throw new Error('桌面程序没连上；网页里打开 dsh 时会播')
+      for (const body of bodies) playIntro(message => body.send(message), true)
+    },
+    stagePlay: on => {
+      const play = readPlay(paths.root)
+      if (on === play.on) return stageView()
+      if (on) {
+        const before = desktopConnected() ? activePack : webBody.activeId()
+        writePlay(paths.root, { on: true, ...(before === undefined || before === STAGE_LOOK_ID ? {} : { before }) })
+        applyStage()
+      } else {
+        writePlay(paths.root, { on: false })
+        playNotes = []
+        avatarShown = undefined
+        if (play.before !== undefined) {
+          showChoice(play.before)
+          // Out of the 外形 list too, so it is not picked there by mistake (the bodies have moved off it).
+          setTimeout(() => removeStageLook(paths.root, paths.packs), 5000)
+        }
+      }
+      log({ event: 'stage', action: on ? 'play-on' : 'play-off' })
+      return stageView()
+    },
+    stageSave: raw => {
+      const { stage, problems } = parseStage(raw)
+      if (stage === undefined) throw new Error(problems[0] ?? '编排用不了')
+      stages.save(stage)
+      log({ event: 'stage', action: 'saved', scenes: stage.scenes.length })
+      applyStage()
+      return stageView()
+    },
+    stageRestore: id => {
+      stages.restore(id)
+      applyStage()
+      return stageView()
+    },
+    libraryRename: (row, from, to) => {
+      library.rename(row, from, to)
+      // 编排 follows the new name (saved as a new version, so it can be taken back).
+      const { stage } = stages.load()
+      if (stage !== undefined && renameMaterial(stage, row, from, to.trim())) stages.save(stage)
+      applyStage()
+      return stageView()
+    },
+    libraryRemove: (row, name) => {
+      library.remove(row, name)
+      applyStage()
+      return stageView()
+    },
     initiativeTry: () => initiative.tryNow(),
     presetsRefresh: async () => {
       const base = config.body.releases
@@ -1134,7 +1479,19 @@ export function apply(ctx: Context, config: HerConfig): void {
       openRequest = undefined
       const open = request?.sessionId
       const page = request?.page
-      return { show: webShown(remote), mode: webBody.mode, place, scope, focus: initiative.focused, ...(open === undefined ? {} : { open }), ...(page === undefined ? {} : { page }), ...(avatar === undefined ? {} : { avatar }) }
+      // The skin every dsh page wears, and the opening clip it may play once.
+      const skinId = skins.current()
+      const skin = skinId === undefined ? undefined : { id: skinId, rev: skins.get(skinId)?.rev ?? 0 }
+      const intro = introSettings()
+      const introAt = intro.on && intro.dsh && !herOff ? introPath(intro) : undefined
+      const introClip = introAt === undefined ? undefined : intro.source === 'skin'
+        ? `/api/dsh-her/web/skin-file?id=${encodeURIComponent(skinId ?? '')}&f=${encodeURIComponent(introAt.split(/[/\\]/).pop() ?? '')}`
+        : `/api/dsh-her/web/library-file?row=intro&name=${encodeURIComponent(intro.source)}`
+      return {
+        show: webShown(remote), mode: webBody.mode, place, scope, focus: initiative.focused,
+        ...(open === undefined ? {} : { open }), ...(page === undefined ? {} : { page }), ...(avatar === undefined ? {} : { avatar }),
+        ...(skin === undefined ? {} : { skin }), ...(introClip === undefined ? {} : { intro: { url: introClip, when: intro.when } }),
+      }
     },
     importBatch: async (batch, name) => {
       const dir = uploadTarget(uploadsDir, batch)
@@ -1339,14 +1696,26 @@ export function apply(ctx: Context, config: HerConfig): void {
     exportMemory: () => memory.exportMarkdown(),
   }
 
+  // Another dsh plugin can give her a voice (docs/设置页与编排设计.md §7):
+  // ctx.inject(['herVoices'], c => c.herVoices.register({ id, name, voices, synthesize, recognize? })).
+  ctx.effect(() => {
+    try {
+      return (ctx as unknown as { provide(name: string, value: unknown): () => void }).provide('herVoices', { register: (voice: PluginVoice) => externalVoices.register(voice) })
+    } catch (error) {
+      ctx.logger.warn(`dsh-her: herVoices not offered (${(error as Error).message})`)
+      return () => {}
+    }
+  }, 'dsh-her: herVoices')
   ctx.effect(() => {
     mkdirSync(dir, { recursive: true })
     mkdirSync(paths.logs, { recursive: true })
     session = new HerSession({
       cid,
       character: () => character,
-      performance: () => [performanceSection(bodyPack), usesMing() ? SOUND_SECTION : ''].filter(Boolean).join('\n'),
+      performance: () => [performanceSection(bodyPack), stageSection(), usesMing() ? SOUND_SECTION : ''].filter(Boolean).join('\n'),
       playAction,
+      // She can put on a skin, or change an SVG of herself, when you ask (§6.4).
+      extraTools: () => herLookTools({ ...designDeps, wear: id => skins.use(id) }),
       aboutYou,
       memory,
       dir,
@@ -1404,6 +1773,7 @@ export function apply(ctx: Context, config: HerConfig): void {
 
     ming = new MingVoice(join(paths.root, 'ming'), join(paths.root, 'uv'), ctx.logger, ownVoices.settings().idleMinutes ?? defaultIdleMinutes())
     voice = new Voice(paths.models, join(paths.root, 'edge-tts'), { ...config.voice, voice: character.voice.id, speed: character.voice.speed }, ctx.logger, { voice: ming, own: ownVoices })
+    voice.external = externalVoices
     const herVoice = voice
     void herVoice.start()
     speech = new SpeechQueue((text, cues) => herVoice.synthesize(speakable(text), cues), {
@@ -1432,6 +1802,8 @@ export function apply(ctx: Context, config: HerConfig): void {
       logger: ctx.logger,
       welcome: client => {
         bodyPack = client.hello.packs[0] ?? bodyPack
+        // She comes out: her opening clip, when there is one (a body that shows her, not a text client).
+        if (client.hello.packs.length > 0) setTimeout(() => playIntro(message => client.send(message)), 1500)
         // The talk bar's lines follow the welcome.
         setTimeout(refreshTalkSoon, 0)
         return {
@@ -1439,7 +1811,7 @@ export function apply(ctx: Context, config: HerConfig): void {
           v: PROTOCOL_VERSION,
           sessionId: session?.sessionId ?? '',
           characters: [{ cid, name: character.name, mode: 'overlay' }],
-          config: { mic: config.voice.mic, bargeIn: true, focus: initiative.focused },
+          config: { mic: config.voice.mic, bargeIn: true, focus: initiative.focused, off: herOff },
         }
       },
       message: (_client, message, audio) => onBodyMessage(message, audio),
@@ -1483,6 +1855,10 @@ export function apply(ctx: Context, config: HerConfig): void {
       ensureTouchLines()
     }, INITIATIVE_CHECK_MS)
     initiativeTimer.unref()
+    const stageTimer = setInterval(stageTick, 60_000)
+    // 素材库 checks and pictures made into clips need ffmpeg: found once now, not on the first click.
+    void findFfmpeg(paths.root).catch(() => false)
+    stageTimer.unref()
     noteTimer.unref()
     digestTimer.unref()
 
@@ -1493,6 +1869,7 @@ export function apply(ctx: Context, config: HerConfig): void {
       clearInterval(digestTimer)
       clearInterval(noteTimer)
       clearInterval(initiativeTimer)
+      clearInterval(stageTimer)
       clearTimeout(stuckTimer)
       herVoice.stop()
       voice = undefined
@@ -1543,7 +1920,7 @@ export function apply(ctx: Context, config: HerConfig): void {
       return path === undefined ? new Response('not found', { status: 404 }) : new Response(readFileSync(path), { headers: { 'content-type': 'image/png', 'cache-control': 'private, no-cache' } })
     })
     get('events', request => webBody.connect(request.signal, () => {
-      webBody.send({ t: 'welcome', v: PROTOCOL_VERSION, sessionId: session?.sessionId ?? '', characters: [{ cid, name: character.name, mode: 'overlay' }], config: { mic: config.voice.mic, bargeIn: true, focus: initiative.focused } })
+      webBody.send({ t: 'welcome', v: PROTOCOL_VERSION, sessionId: session?.sessionId ?? '', characters: [{ cid, name: character.name, mode: 'overlay' }], config: { mic: config.voice.mic, bargeIn: true, focus: initiative.focused, off: herOff } })
       refreshBodyPack()
       refreshTalkSoon()
       log({ event: 'web-body', state: 'connected' })
@@ -1556,6 +1933,18 @@ export function apply(ctx: Context, config: HerConfig): void {
         pending.settle({ ok: false, reason: 'no body' })
       }
     }))
+    // A file of a skin (its background, font, clip, CSS).
+    get('skin-file', request => {
+      const query = new URL(request.url).searchParams
+      const path = skins.file(query.get('id') ?? '', query.get('f') ?? '')
+      return path === undefined ? new Response('not found', { status: 404 }) : fileResponse(path, request)
+    })
+    // A file of the 素材库, to show it in its grid and in 编排.
+    get('library-file', request => {
+      const query = new URL(request.url).searchParams
+      const path = library.path(query.get('row') ?? '', query.get('name') ?? '')
+      return path === undefined ? new Response('not found', { status: 404 }) : fileResponse(path, request)
+    })
     // A file of a 形象工坊 project (its photo, crop.png …), to frame or to download.
     get('project-file', request => {
       const query = new URL(request.url).searchParams
@@ -1576,12 +1965,34 @@ export function apply(ctx: Context, config: HerConfig): void {
         const query = new URL(request.url).searchParams
         const file = query.get('path') ?? ''
         const project = query.get('project')
-        const root = project === null ? uploadTarget(uploadsDir, query.get('batch') ?? '') : findProject(project)?.dir
-        const target = root === undefined ? undefined : uploadTarget(root, file)
-        if (target === undefined) return refuse(`不能放到这里：${file}`)
-        if (!uploadAllowed(file)) return refuse(`不支持这种文件：${file}`)
-        try {
+        const row = query.get('library')
+        const skin = query.get('skin')
+        let target: string | undefined
+        if (skin !== null) {
+          // A skin's folder: skin.json and its pictures, font, clip, CSS.
+          target = skins.target(skin, file)
+          if (target === undefined) return refuse(`皮肤里只能放 skin.json、图片、字体、视频和 .css，名字只能用字母、数字、中文和 -：${file}`)
           return answer(200, { ok: true, size: await saveUpload(request, target) })
+        } else if (row !== null) {
+          // 素材库: one picture or clip, by its own name, into its row.
+          target = library.target(row, file)
+          if (target === undefined) return refuse(`素材库只收图片和视频，名字里不能有 / \\ : * ? " < > |：${file}`)
+        } else {
+          const root = project === null ? uploadTarget(uploadsDir, query.get('batch') ?? '') : findProject(project)?.dir
+          target = root === undefined ? undefined : uploadTarget(root, file)
+          if (target === undefined) return refuse(`不能放到这里：${file}`)
+          if (!uploadAllowed(file)) return refuse(`不支持这种文件：${file}`)
+        }
+        try {
+          const size = await saveUpload(request, target)
+          if (row !== null) {
+            // 素材库: an SVG loses what could run; every file is looked at once against the spec.
+            const cleaned = library.cleanSvg(target)
+            const name = basename(target).replace(/\.[^.]+$/, '')
+            const info = await findFfmpeg(paths.root).then(found => (found ? library.examine(row as LibraryRow, name) : undefined)).catch(() => undefined)
+            return answer(200, { ok: true, size, cleaned, warnings: info === undefined ? [] : checkMaterial(row, info) })
+          }
+          return answer(200, { ok: true, size })
         } catch (error) {
           return answer(500, { ok: false, message: (error as Error).message })
         }

@@ -25,7 +25,11 @@ export function listLooks(home: string, packsDir: string): Look[] {
         console.warn(`look ${entry}: ${problem}`)
         continue
       }
-      const scenes = look.scenes.filter(s => hasPack(packsDir, s.pack))
+      const scenes = look.scenes.filter(s => hasPack(packsDir, s.pack)).map(s => {
+        if (s.desk === undefined || hasPack(packsDir, s.desk)) return s
+        const { desk: _gone, ...rest } = s
+        return rest
+      })
       if (!scenes.some(s => s.id === look.default)) {
         console.warn(`look ${entry}: the default scene's pack is missing`)
         continue

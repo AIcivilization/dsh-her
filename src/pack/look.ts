@@ -22,6 +22,8 @@ export interface LookScene {
   name: string
   /** The imported pack that shows this scene. */
   pack: string
+  /** Her desk pet in this scene (floating on top), instead of the look's own. */
+  desk?: string
   when?: LookWhen
 }
 
@@ -36,6 +38,22 @@ export interface Look {
   default: string
   /** An automatic switch waits at least this long after the last one. */
   minStayMinutes?: number
+  /** Where the desk pet floats, as fractions of the screen: the middle of her (x), her feet (y), her height. */
+  place?: { pet?: PetPlace }
+}
+
+export interface PetPlace {
+  x: number
+  y: number
+  height: number
+}
+
+/** A place read from a file, kept inside the screen; undefined when it is not one. */
+export function cleanPlace(value: unknown): PetPlace | undefined {
+  const v = value as Partial<PetPlace> | undefined
+  if (typeof v !== 'object' || v === null || ![v.x, v.y, v.height].every(n => typeof n === 'number' && Number.isFinite(n))) return undefined
+  const clamp = (n: number, low: number, high: number) => Math.min(high, Math.max(low, n))
+  return { x: clamp(v.x!, 0, 1), y: clamp(v.y!, 0.1, 1), height: clamp(v.height!, 0.1, 0.95) }
 }
 
 /** What the user set for a look: switching on or off, held in one scene, scenes left out. */

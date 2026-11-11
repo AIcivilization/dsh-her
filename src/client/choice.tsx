@@ -24,4 +24,4 @@ export function voiceLabel(state: StateView, id: string): string {
   return voiceName(id)
 }
 
-export const SERVICE_SHORT: Record<string, string> = { edge: '微软 Edge', cosyvoice: '阿里云百炼', ming: '本机 Ming' }
+export const SERVICE_SHORT: Record<string, string> = { edge: '微软 Edge', cosyvoice: '阿里云百炼', ming: '本机 Ming', ext: '外接' }

@@ -24,6 +24,7 @@ import { readCloudKey } from './cloud-key.ts'
 import { fetchModel, missingModels, modelPath, MODELS } from './models.ts'
 import type { MingVoice } from './ming.ts'
 import { MING_STEPS, type OwnVoices } from './ming-voices.ts'
+import type { ExternalVoices } from './external.ts'
 import type { Synthesized } from './speech-queue.ts'
 
 export interface VoiceConfig {
@@ -57,6 +58,8 @@ export class Voice {
   private readonly cloud: CosyVoice
   private readonly edge: EdgeVoice
   private readonly ming: { voice: MingVoice; own: OwnVoices } | undefined
+  /** Voices and listening from outside services (external.ts). */
+  external: ExternalVoices | undefined
   private readonly cache = new Map<string, Synthesized>()
   private readonly modelsDir: string
   private config: VoiceConfig
@@ -157,10 +160,21 @@ export class Voice {
 
   /** What you said, from 16-bit mono PCM. Empty when nothing was understood. */
   async recognize(pcm16: Uint8Array, sampleRate: number): Promise<{ text: string; ms: number }> {
-    if (this.listening !== 'ready' || this.asr === undefined) throw new Error('语音识别还没准备好')
+    if ((this.listening !== 'ready' || this.asr === undefined) && this.external?.listening === undefined) throw new Error('语音识别还没准备好')
+    // An outside service listens when one is chosen; the local one is there when it fails.
+    if (this.external?.listening !== undefined) {
+      const started = Date.now()
+      try {
+        return { text: await this.external.recognize(pcm16, sampleRate), ms: Date.now() - started }
+      } catch (error) {
+        this.logger.warn(`dsh-her: outside recognition failed (${(error as Error).message}); trying the local one`)
+        if (this.listening !== 'ready' || this.asr === undefined) throw error
+      }
+    }
     const view = new DataView(pcm16.buffer, pcm16.byteOffset, pcm16.byteLength)
     const samples = new Float32Array(Math.floor(pcm16.byteLength / 2))
     for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true) / 0x8000
+    if (this.asr === undefined) throw new Error('语音识别还没准备好')
     const heard = await this.asr.recognize(samples, sampleRate)
     return { text: heard.text, ms: heard.ms }
   }
@@ -188,6 +202,12 @@ export class Voice {
         })
         this.mark('ready')
         return { audio: audio.audio, durationMs: audio.durationMs, format: 'wav' }
+      }
+      if (serviceOf(voice) === 'ext') {
+        if (this.external === undefined) throw new Error('外接语音还没准备好')
+        const audio = await this.external.synthesize(voice, text, speed)
+        this.mark('ready')
+        return audio
       }
       if (serviceOf(voice) === 'edge') {
         if (this.edge.status.status !== 'ready') this.mark('installing')

@@ -1,0 +1,15 @@
+<!doctype html>
+<!-- Her opening clip (docs/设置页与编排设计.md §4.5): plays once, a click skips it, then the window closes. -->
+<html><head><meta charset="utf-8"><title>她</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; media-src file:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<style>html,body{margin:0;height:100%;background:transparent;overflow:hidden;cursor:pointer}video{width:100%;height:100%;object-fit:contain}</style>
+</head><body><video id="v" autoplay playsinline></video>
+<script>
+const video = document.getElementById('v')
+const end = () => window.close()
+video.src = new URLSearchParams(location.search).get('src') || ''
+video.onended = end
+video.onerror = end
+document.body.onclick = end
+setTimeout(end, 15000)
+</script></body></html>

@@ -60,6 +60,8 @@ export interface InitiativeInput {
   ready: boolean
   /** A body is here to say it. */
   bodyHere: boolean
+  /** She is switched off (the button on her page, or the body's menu). */
+  off?: boolean
   /** undefined: no body has said lately whether you are there. */
   presence: PresenceState | undefined
   /** She is talking or thinking right now. */
@@ -108,6 +110,7 @@ export function decide(input: InitiativeInput): Decision {
   if (!settings.on) return wait('主动说话关着')
   if (focusOn(record, at)) return wait('专注中，她不主动说话')
   if (!input.ready) return wait('向导还没走完')
+  if (input.off === true) return wait('她关着')
   if (!input.bodyHere) return wait('身体没连上')
   if (presence === undefined) return wait('不知道你在不在（身体还没报告）')
   if (presence !== 'active') return wait('你现在不在电脑前')

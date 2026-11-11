@@ -21,11 +21,12 @@
  */
 
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerMonitor, screen, session, shell, systemPreferences, Tray } from 'electron'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import type { BodyMessage, BrainMessage, PackSummary } from '../../src/protocol/index.ts'
-import { pickScene, shouldSwitch, type Look, type LookPrefs } from '../../src/pack/look.ts'
+import { cleanPlace, pickScene, shouldSwitch, type Look, type LookPrefs } from '../../src/pack/look.ts'
 import type { BodyConfig, LinkStatus, MicMode, Mode, PackInfo } from '../shared/types.ts'
 import { BrainLink } from './brain-link.ts'
 import { idleLookSummary, listLooks, lookPackId, lookSummary, lookView } from '../../src/pack/looks.ts'
@@ -88,9 +89,12 @@ function setLookPrefs(next: LookPrefs): void {
 }
 /** The pack a look shows: the desk pet when she floats on top (if it has one), else the scene she is in. */
 function lookPack(l: Look, m: Mode): string {
-  if (m === 'overlay' && l.desk !== undefined) return l.desk
-  const scene = settings.looks?.[l.id]?.scene
-  return (l.scenes.find(s => s.id === scene) ?? l.scenes.find(s => s.id === l.default)!).pack
+  const chosen = settings.looks?.[l.id]?.scene
+  const scene = l.scenes.find(s => s.id === chosen) ?? l.scenes.find(s => s.id === l.default)!
+  // Floating on top: the scene's own desk pet, else the look's.
+  const desk = scene.desk ?? l.desk
+  if (m === 'overlay' && desk !== undefined) return desk
+  return scene.pack
 }
 /** The scene the rules want now. */
 const wantedScene = (l: Look) => pickScene(l, { hour: new Date().getHours(), idleSeconds: powerMonitor.getSystemIdleTime() }, settings.looks?.[l.id]?.off)
@@ -115,6 +119,8 @@ let pack = loadOrNothing(packPath)
 let mode: Mode = chosenMode() ?? (look === undefined ? layerMode(pack) : 'wallpaper')
 /** She is not speaking first for a while (from the brain; the menu can change it). */
 let focus = false
+/** Switched off on her page or here: no window, no listening, until she is called back. Remembered, so she does not flash up at the next start. */
+let off = settings.off === true
 /** When either of you last said something: no scene changes mid-conversation. */
 let lastTalkAt = 0
 let win: BrowserWindow | undefined
@@ -132,10 +138,13 @@ const screenAspect = () => {
 }
 
 /** Her size on screen: 42% of the screen's height, in her picture's own shape (never wider than 60% of it). */
+/** Where 编排 puts her when she floats on top (its look's place), if it says. */
+const petPlace = () => (look === undefined || mode !== 'overlay' ? undefined : cleanPlace(look.place?.pet))
+
 function herSize(): { width: number; height: number } {
   const area = screen.getPrimaryDisplay().workArea
   const aspect = pack.aspect ?? 0.75
-  let height = Math.round(area.height * 0.42)
+  let height = Math.round(area.height * (petPlace()?.height ?? 0.42))
   if (height * aspect > area.width * 0.6) height = Math.round((area.width * 0.6) / aspect)
   return { width: Math.round(height * aspect), height }
 }
@@ -165,7 +174,10 @@ function createWindow(): BrowserWindow {
     created.show()
   } else {
     const size = { width: Math.max(her.width, 340), height: Math.round(her.height * (1 + BUBBLE_ROOM)) }
-    const pos = overlayPos ?? { x: area.x + area.width - size.width - 24, y: area.y + area.height - size.height }
+    const place = petPlace()
+    const pos = overlayPos ?? (place === undefined
+      ? { x: area.x + area.width - size.width - 24, y: area.y + area.height - size.height }
+      : { x: Math.round(area.x + area.width * place.x - size.width / 2), y: Math.round(area.y + area.height * place.y - size.height) })
     created = new BrowserWindow({
       ...pos, ...size,
       transparent: true, frame: false, hasShadow: false, resizable: false, skipTaskbar: true,
@@ -179,6 +191,43 @@ function createWindow(): BrowserWindow {
   return created
 }
 
+/** Her opening clip: a window of its own over where she floats, gone when the clip ends or is clicked. */
+function playIntro(path: string): void {
+  if (off || !existsSync(path)) return
+  const area = screen.getPrimaryDisplay().workArea
+  const size = { width: Math.round(area.width * 0.5), height: Math.round(area.height * 0.6) }
+  const intro = new BrowserWindow({
+    ...size, x: Math.round(area.x + (area.width - size.width) / 2), y: Math.round(area.y + (area.height - size.height) / 2),
+    frame: false, transparent: true, hasShadow: false, resizable: false, skipTaskbar: true, alwaysOnTop: true, focusable: false, show: false, backgroundColor: '#00000000',
+  })
+  intro.setAlwaysOnTop(true, 'screen-saver')
+  intro.once('ready-to-show', () => intro.showInactive())
+  void intro.loadFile(join(__dirname, 'intro.html'), { query: { src: pathToFileURL(path).href } })
+}
+
+/**
+ * Switch her off or call her back. Off: her window and the talk bar close
+ * (no picture, no microphone, no voice); the brain also stops her speaking
+ * first. `tell`: the change was made here, so the brain hears of it.
+ */
+function setOff(next: boolean, tell: boolean): void {
+  if (tell) link?.send({ t: 'off.set', off: next })
+  if (next === off && (off ? win === undefined : win !== undefined)) return
+  off = next
+  settings = { ...settings, off }
+  saveSettings(expand(home), settings)
+  if (off && barWindow !== undefined && !barWindow.isDestroyed()) barWindow.close()
+  replaceWindow()
+  refreshTray()
+}
+
+/** A fresh window for her (after a change of mode, pack or scene); none while she is switched off. */
+function replaceWindow(): void {
+  const old = win
+  win = off ? undefined : createWindow()
+  old?.destroy()
+}
+
 function switchMode(next: Mode): void {
   if (next === mode && win !== undefined) return
   mode = next
@@ -186,9 +235,7 @@ function switchMode(next: Mode): void {
   saveSettings(expand(home), settings)
   // A look shows its desk pet on top and its scene elsewhere.
   if (look !== undefined) showLookPack()
-  const old = win
-  win = createWindow()
-  old?.destroy()
+  replaceWindow()
   refreshTray()
   reportMode()
   if (look !== undefined) {
@@ -206,11 +253,18 @@ function showLookPack(): void {
 
 /** Show what is chosen again: a fresh window with the pack reloaded (after its layout changed). */
 function reshow(): void {
-  if (look !== undefined) showLookPack()
+  // The look itself may have been written again (编排 saved): read it afresh.
+  if (look !== undefined) {
+    const id = look.id
+    const before = JSON.stringify(look.place ?? null)
+    look = listLooks(expand(home), packsDir).find(l => l.id === id) ?? look
+    // 编排 moved her: its place wins over where she was dragged.
+    if (JSON.stringify(look.place ?? null) !== before) overlayPos = undefined
+    showLookPack()
+    reportLook()
+  }
   else pack = loadOrNothing(packPath, screenAspect())
-  const old = win
-  win = createWindow()
-  old?.destroy()
+  replaceWindow()
   refreshTray()
   reportPacks()
 }
@@ -245,9 +299,7 @@ function useLook(id: string): void {
     reportMode()
   }
   showLookPack()
-  const old = win
-  win = createWindow()
-  old?.destroy()
+  replaceWindow()
   refreshTray()
   reportPacks()
   reportLook()
@@ -273,9 +325,7 @@ function switchScene(sceneId: string): boolean {
     if (mode === 'wallpaper' && win !== undefined) win.webContents.reload()
     else {
       // Another scene may have another shape: a window of its own.
-      const old = win
-      win = createWindow()
-      old?.destroy()
+      replaceWindow()
     }
     refreshTray()
     reportPacks()
@@ -350,9 +400,7 @@ function usePack(packId: string): void {
     mode = nextMode
     reportMode()
   }
-  const old = win
-  win = createWindow()
-  old?.destroy()
+  replaceWindow()
   refreshTray()
   reportPacks()
   if (leftLook) reportLook()
@@ -432,8 +480,19 @@ function statusLabel(): string {
 function menuTemplate(): Electron.MenuItemConstructorOptions[] {
   const item = (label: string, value: Mode): Electron.MenuItemConstructorOptions =>
     ({ label, type: 'radio', checked: mode === value, click: () => switchMode(value) })
+  if (off) {
+    return [
+      { label: statusLabel(), enabled: false },
+      { label: '她关着', enabled: false },
+      { label: '叫她出来', click: () => setOff(false, true) },
+      { type: 'separator' },
+      { label: '设置…', click: () => openSettings() },
+      { label: '退出', click: () => app.quit() },
+    ]
+  }
   return [
     { label: statusLabel(), enabled: false },
+    { label: '关掉她', click: () => setOff(true, true) },
     {
       label: `外形：${look?.name ?? pack.name}`,
       submenu: packList().map(p => ({ label: p.name, type: 'radio' as const, checked: p.packId === (look === undefined ? pack.id : lookPackId(look)), click: () => usePack(p.packId) })),
@@ -479,7 +538,7 @@ function sceneMenu(l: Look): Electron.MenuItemConstructorOptions {
 function refreshTray(): void {
   if (tray === undefined) return
   tray.setContextMenu(Menu.buildFromTemplate(menuTemplate()))
-  if (process.platform === 'darwin') tray.setTitle(status.status === 'connected' ? '她' : '她·睡')
+  if (process.platform === 'darwin') tray.setTitle(off ? '她·关' : status.status === 'connected' ? '她' : '她·睡')
   tray.setToolTip(`dsh-her · ${statusLabel()}`)
 }
 
@@ -506,6 +565,7 @@ function barBounds(): Electron.Rectangle {
  * app: a window you called is allowed there; her own figure is not.
  */
 function openBar(): void {
+  if (off) return
   if (process.platform === 'darwin') app.focus({ steal: true })
   if (barWindow !== undefined && !barWindow.isDestroyed()) {
     barWindow.setBounds(barBounds())
@@ -693,8 +753,8 @@ if (!app.requestSingleInstanceLock()) {
     } else {
       pack = loadOrNothing(packPath, screenAspect())
     }
-    win = createWindow()
-    if (SMOKE) {
+    win = off && !SMOKE ? undefined : createWindow()
+    if (SMOKE && win !== undefined) {
       const timer = setTimeout(() => app.exit(1), 60_000)
       win.webContents.once('did-finish-load', () => {
         clearTimeout(timer)
@@ -730,6 +790,7 @@ if (!app.requestSingleInstanceLock()) {
           cid = message.characters[0]?.cid
           micMode = message.config.mic
           focus = message.config.focus === true
+          setOff(message.config.off === true, false)
           refreshTray()
           reportPacks()
           reportMode()
@@ -740,6 +801,10 @@ if (!app.requestSingleInstanceLock()) {
             focus = message.focus
             refreshTray()
           }
+          if (message.off !== undefined) setOff(message.off, false)
+          return
+        } else if (message.t === 'intro') {
+          playIntro(message.path)
           return
         } else if (message.t === 'mode') {
           switchMode(message.mode)
@@ -794,4 +859,7 @@ app.on('will-quit', () => {
   stopHoldHook()
   link?.stop()
 })
-app.on('window-all-closed', () => app.quit())
+// Closing her window ends the program, unless she was switched off: then only the tray stays, to call her back.
+app.on('window-all-closed', () => {
+  if (!off) app.quit()
+})

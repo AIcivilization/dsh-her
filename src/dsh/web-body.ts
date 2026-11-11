@@ -50,6 +50,8 @@ const NO_PACK: PackInfo = { id: '', name: '还没有外形', layer: 'overlay', l
 const TYPES: Record<string, string> = {
   '.mp4': 'video/mp4', '.webm': 'video/webm', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.bin': 'application/octet-stream', '.mask': 'application/octet-stream',
+  '.webp': 'image/webp', '.gif': 'image/gif', '.svg': 'image/svg+xml', '.mov': 'video/quicktime', '.m4v': 'video/mp4',
+  '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.otf': 'font/otf', '.css': 'text/css; charset=utf-8',
 }
 
 /** What the page's floating window needs to know: its size, her config. */
@@ -88,6 +90,9 @@ export function fileResponse(path: string, request: Request, forever = false): R
   const etag = `"${size.toString(16)}-${Math.floor(mtimeMs).toString(16)}"`
   const headers: Record<string, string> = {
     'content-type': TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream',
+    // A picture or clip is never a page: nothing in an SVG runs even when it is opened on its own.
+    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:",
+    'x-content-type-options': 'nosniff',
     'accept-ranges': 'bytes',
     etag,
     // An address with the file's date in it never changes: the browser need not even ask (traffic, on a VPS).
@@ -221,9 +226,9 @@ export class WebBody {
     const { look, packId } = this.chosen()
     if (this.place().place === 'background') return this.scenePack()
     if (look === undefined) return packId
-    if (look.desk !== undefined) return look.desk
-    const scene = loadSettings(this.home).looks?.[look.id]?.scene
-    return (look.scenes.find(s => s.id === scene) ?? look.scenes.find(s => s.id === look.default)!).pack
+    const chosen = loadSettings(this.home).looks?.[look.id]?.scene
+    const scene = look.scenes.find(s => s.id === chosen) ?? look.scenes.find(s => s.id === look.default)!
+    return scene.desk ?? look.desk ?? scene.pack
   }
 
   private shown(): PackInfo {

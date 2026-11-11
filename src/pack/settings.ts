@@ -21,6 +21,8 @@ export interface BodySettings {
   mode?: Mode
   /** Hold the right Option / Alt key in any program to talk (docs/对话入口设计.md); needs a system permission on macOS. */
   holdKey?: boolean
+  /** Switched off (the brain says so; kept here so she does not flash up at the next start). */
+  off?: boolean
 }
 
 export function loadSettings(home: string): BodySettings {
