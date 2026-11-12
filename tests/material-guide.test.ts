@@ -5,7 +5,8 @@ import { DEFAULT_WHO, fillPrompt, GUIDE, GUIDE_GROUPS, guideMarkdown, WHO } from
 import { cleanVeil, DEFAULT_VEIL } from '../src/dsh/web-body.ts'
 
 test('the document in docs/ is the one the guide writes (run scripts/make-material-doc.mjs after changing the guide)', () => {
-  assert.equal(readFileSync(new URL('../docs/素材规格与提示词.md', import.meta.url), 'utf8'), guideMarkdown())
+  // A Windows checkout may have turned the line ends into CRLF.
+  assert.equal(readFileSync(new URL('../docs/素材规格与提示词.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n'), guideMarkdown())
 })
 
 test('every material says its size, its rules and a prompt; every group has some', () => {
