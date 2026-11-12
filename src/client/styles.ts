@@ -74,8 +74,10 @@ body[data-ds-dark-theme] .her-page{--her-ink:var(--her-bar-accent,#86b4ff);--her
   .her-show-lines{display:none!important}
   .her-show-label,.her-show-label.left,.her-show-label.right,.her-show-label.top,.her-show-label.bottom{position:static!important;translate:none!important;max-width:none!important;align-items:flex-start!important;text-align:left!important}
   .her-show-label.left b{flex-direction:row!important}
-  .her-show-head{flex-direction:column;align-items:flex-start;gap:2px}
-  .her-sheet{grid-template-columns:1fr}
+  .her-show-head{flex-direction:column!important;align-items:flex-start!important;gap:2px}
+  .her-sheet{grid-template-columns:1fr!important}
+  .her-range input{width:110px!important}
+  .her-people-new .her-input{width:100%!important}
   .her-hero{padding:12px 14px;gap:12px}
   .her-hero-ava{width:46px;height:46px;font-size:19px}
   .her-power span{display:none}
