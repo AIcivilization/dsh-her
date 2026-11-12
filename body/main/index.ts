@@ -25,7 +25,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
-import type { BodyMessage, BrainMessage, PackSummary } from '../../src/protocol/index.ts'
+import type { BodyMessage, BrainMessage, DeskPlaces, PackSummary } from '../../src/protocol/index.ts'
 import { cleanPlace, pickScene, shouldSwitch, type Look, type LookPrefs } from '../../src/pack/look.ts'
 import type { BodyConfig, LinkStatus, MicMode, Mode, PackInfo } from '../shared/types.ts'
 import { BrainLink } from './brain-link.ts'
@@ -125,6 +125,21 @@ let off = settings.off === true
 let lastTalkAt = 0
 let win: BrowserWindow | undefined
 let tray: Tray | undefined
+/**
+ * Where she shows on the desktop (docs/设置页与编排设计.md §13): in the
+ * wallpaper, floating on top, each on its own. Both: the scene in the
+ * wallpaper and, in a second window, the look's desk pet floating over it.
+ * Neither: a window nobody sees, so she still speaks and listens.
+ * Not set (before 0.8): one window, by `mode`.
+ */
+let places: DeskPlaces | undefined = settings.places
+  // A new install shows her in both; one that chose a mode before 0.8 keeps its one window.
+  ?? (settings.mode === undefined && settings.pack === undefined && settings.look === undefined && arg('mode') === undefined ? { wallpaper: true, overlay: true } : undefined)
+const shownPlaces = (): DeskPlaces => places ?? { wallpaper: mode === 'wallpaper', overlay: mode !== 'wallpaper' }
+const unseen = () => places !== undefined && !places.wallpaper && !places.overlay
+/** The floating window beside the wallpaper one, and what it shows. */
+let petWin: BrowserWindow | undefined
+let petPack: PackInfo | undefined
 let link: BrainLink | undefined
 let status: { status: LinkStatus; detail?: string } = { status: 'connecting' }
 let cid: string | undefined
@@ -141,17 +156,63 @@ const screenAspect = () => {
 /** Where 编排 puts her when she floats on top (its look's place), if it says. */
 const petPlace = () => (look === undefined || mode !== 'overlay' ? undefined : cleanPlace(look.place?.pet))
 
-function herSize(): { width: number; height: number } {
+function herSize(of: PackInfo = pack, place = petPlace()): { width: number; height: number } {
   const area = screen.getPrimaryDisplay().workArea
-  const aspect = pack.aspect ?? 0.75
-  let height = Math.round(area.height * (petPlace()?.height ?? 0.42))
+  const aspect = of.aspect ?? 0.75
+  let height = Math.round(area.height * (place?.height ?? 0.42))
   if (height * aspect > area.width * 0.6) height = Math.round((area.width * 0.6) / aspect)
   return { width: Math.round(height * aspect), height }
 }
 
+/** A window for her floating on top: transparent, above everything, taking the mouse only on her. */
+function floatingWindow(her: { width: number; height: number }, place: ReturnType<typeof petPlace>, show: boolean): BrowserWindow {
+  const area = screen.getPrimaryDisplay().workArea
+  const size = { width: Math.max(her.width, 340), height: Math.round(her.height * (1 + BUBBLE_ROOM)) }
+  const pos = overlayPos ?? (place === undefined
+    ? { x: area.x + area.width - size.width - 24, y: area.y + area.height - size.height }
+    : { x: Math.round(area.x + area.width * place.x - size.width / 2), y: Math.round(area.y + area.height * place.y - size.height) })
+  const created = new BrowserWindow({
+    ...pos, ...size, show,
+    transparent: true, frame: false, hasShadow: false, resizable: false, skipTaskbar: true,
+    alwaysOnTop: true, backgroundColor: '#00000000',
+    // Unseen, she still has to speak and listen: no slowing down in the background.
+    webPreferences: { preload: join(__dirname, 'preload.cjs'), backgroundThrottling: show },
+  })
+  created.setAlwaysOnTop(true, 'floating')
+  created.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false })
+  created.setIgnoreMouseEvents(true, { forward: true })
+  return created
+}
+
+/** The look's desk pet for the scene she is in, when both places are on and the wallpaper shows the scene. */
+function petPackId(): string | undefined {
+  if (off || places === undefined || !places.wallpaper || !places.overlay || look === undefined || mode !== 'wallpaper') return undefined
+  const desk = lookPack(look, 'overlay')
+  return desk === lookPack(look, 'wallpaper') ? undefined : desk
+}
+
+/** The floating window beside the wallpaper one: there when it should be, with what it should show. */
+function syncPet(): void {
+  const id = petPackId()
+  const old = petWin
+  petWin = undefined
+  petPack = undefined
+  if (id !== undefined) {
+    try {
+      petPack = loadPack(join(packsDir, id), screenAspect())
+      const place = look === undefined ? undefined : cleanPlace(look.place?.pet)
+      petWin = floatingWindow(herSize(petPack, place), place, true)
+      void petWin.loadFile(join(__dirname, 'index.html'))
+    } catch (error) {
+      console.warn(`no floating window (${(error as Error).message})`)
+      petPack = undefined
+    }
+  }
+  old?.destroy()
+}
+
 function createWindow(): BrowserWindow {
   const display = screen.getPrimaryDisplay()
-  const area = display.workArea
   const her = herSize()
   const webPreferences = { preload: join(__dirname, 'preload.cjs'), backgroundThrottling: true }
   let created: BrowserWindow
@@ -173,19 +234,7 @@ function createWindow(): BrowserWindow {
     }
     created.show()
   } else {
-    const size = { width: Math.max(her.width, 340), height: Math.round(her.height * (1 + BUBBLE_ROOM)) }
-    const place = petPlace()
-    const pos = overlayPos ?? (place === undefined
-      ? { x: area.x + area.width - size.width - 24, y: area.y + area.height - size.height }
-      : { x: Math.round(area.x + area.width * place.x - size.width / 2), y: Math.round(area.y + area.height * place.y - size.height) })
-    created = new BrowserWindow({
-      ...pos, ...size,
-      transparent: true, frame: false, hasShadow: false, resizable: false, skipTaskbar: true,
-      alwaysOnTop: true, backgroundColor: '#00000000', webPreferences,
-    })
-    created.setAlwaysOnTop(true, 'floating')
-    created.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false })
-    created.setIgnoreMouseEvents(true, { forward: true })
+    created = floatingWindow(her, petPlace(), !unseen())
   }
   void created.loadFile(join(__dirname, 'index.html'))
   return created
@@ -226,18 +275,67 @@ function replaceWindow(): void {
   const old = win
   win = off ? undefined : createWindow()
   old?.destroy()
+  syncPet()
+}
+
+/** The one window's mode for the places chosen: the wallpaper when it is on, else floating (or the plain window, when that was chosen). */
+const modeFor = (next: DeskPlaces): Mode => (next.wallpaper && next.overlay
+  // Both: a look puts its scene in the wallpaper and its pet on top; one pack goes where it belongs.
+  ? (look === undefined ? layerMode(pack) : 'wallpaper')
+  : next.wallpaper ? 'wallpaper' : mode === 'window' ? 'window' : 'overlay')
+
+/** Choose where she shows on the desktop. `tell`: chosen here, so the brain hears of it. */
+function setPlaces(next: DeskPlaces, tell: boolean): void {
+  const same = places !== undefined && places.wallpaper === next.wallpaper && places.overlay === next.overlay
+  places = { wallpaper: next.wallpaper, overlay: next.overlay }
+  const nextMode = unseen() ? 'overlay' : modeFor(places)
+  settings = { ...settings, places, mode: nextMode }
+  saveSettings(expand(home), settings)
+  if (!same || nextMode !== mode) {
+    mode = nextMode
+    if (look !== undefined) showLookPack()
+    replaceWindow()
+    refreshTray()
+    reportMode()
+    if (look !== undefined) {
+      reportPacks()
+      reportLook()
+    }
+  }
+  if (tell) reportPrefs()
+}
+
+/** The icon in the menu bar / tray: there unless switched away on her page. */
+function setTray(on: boolean): void {
+  settings = { ...settings, noTray: !on }
+  saveSettings(expand(home), settings)
+  if (on && tray === undefined) {
+    // macOS shows "她" as the tray title; Windows and Linux need a picture.
+    tray = new Tray(process.platform === 'darwin' ? nativeImage.createEmpty() : trayIcon())
+    refreshTray()
+  } else if (!on && tray !== undefined) {
+    tray.destroy()
+    tray = undefined
+  }
+}
+
+function reportPrefs(): void {
+  link?.send({ t: 'body.prefs', places: shownPlaces(), tray: settings.noTray !== true, holdKey: settings.holdKey === true })
 }
 
 function switchMode(next: Mode): void {
-  if (next === mode && win !== undefined) return
+  if (next === mode && win !== undefined && !unseen() && (places === undefined || places.wallpaper !== places.overlay)) return
   mode = next
-  settings = { ...settings, mode }
+  // One window in this mode: the other place goes off.
+  if (places !== undefined) places = { wallpaper: next === 'wallpaper', overlay: next !== 'wallpaper' }
+  settings = { ...settings, mode, ...(places === undefined ? {} : { places }) }
   saveSettings(expand(home), settings)
   // A look shows its desk pet on top and its scene elsewhere.
   if (look !== undefined) showLookPack()
   replaceWindow()
   refreshTray()
   reportMode()
+  reportPrefs()
   if (look !== undefined) {
     reportPacks()
     reportLook()
@@ -293,7 +391,7 @@ function useLook(id: string): void {
   const prefs = lookPrefs()
   const keep = prefs.scene !== undefined && next.scenes.some(s => s.id === prefs.scene) && (prefs.locked === true || prefs.auto === false)
   setLookPrefs({ ...prefs, scene: keep ? prefs.scene : wantedScene(next), switchedAt: Date.now() })
-  const nextMode = chosenMode() ?? 'wallpaper'
+  const nextMode = places !== undefined ? (unseen() ? 'overlay' : modeFor(places)) : chosenMode() ?? 'wallpaper'
   if (nextMode !== mode) {
     mode = nextMode
     reportMode()
@@ -322,7 +420,11 @@ function switchScene(sceneId: string): boolean {
   win?.webContents.send('fade-out')
   setTimeout(() => {
     showLookPack()
-    if (mode === 'wallpaper' && win !== undefined) win.webContents.reload()
+    if (mode === 'wallpaper' && win !== undefined) {
+      win.webContents.reload()
+      // The scene's own desk pet floats over it.
+      if (petPackId() !== petPack?.id) syncPet()
+    }
     else {
       // Another scene may have another shape: a window of its own.
       replaceWindow()
@@ -395,7 +497,7 @@ function usePack(packId: string): void {
   const { look: _look, ...rest } = settings
   settings = { ...rest, pack: packId }
   saveSettings(expand(home), settings)
-  const nextMode = chosenMode() ?? layerMode(pack)
+  const nextMode = places !== undefined ? (unseen() ? 'overlay' : modeFor(places)) : chosenMode() ?? layerMode(pack)
   if (nextMode !== mode) {
     mode = nextMode
     reportMode()
@@ -513,8 +615,8 @@ function menuTemplate(): Electron.MenuItemConstructorOptions[] {
       },
     },
     { type: 'separator' },
-    item('浮在最上层', 'overlay'),
-    item('住在壁纸里', 'wallpaper'),
+    { label: '浮在桌面上', type: 'checkbox', checked: shownPlaces().overlay && mode !== 'window', click: box => setPlaces({ ...shownPlaces(), overlay: box.checked }, true) },
+    { label: '住在壁纸里', type: 'checkbox', checked: shownPlaces().wallpaper, click: box => setPlaces({ ...shownPlaces(), wallpaper: box.checked }, true) },
     item('普通窗口', 'window'),
     { type: 'separator' },
     { label: '退出', click: () => app.quit() },
@@ -543,12 +645,17 @@ function refreshTray(): void {
 }
 
 let barWindow: BrowserWindow | undefined
-const BAR_SIZE = { width: 470, height: 250 }
+const BAR_SIZE = { width: 470, height: 340 }
+/** Her windows hear whether the talk bar is open: her answer shows there then, not over her head as well. */
+const tellBar = (open: boolean) => {
+  for (const target of [win, petWin]) if (target !== undefined && !target.isDestroyed()) target.webContents.send('bar-open', open)
+}
 
 /** Where the talk bar goes: beside her when she floats, else at the bottom of the screen you are on. */
 function barBounds(): Electron.Rectangle {
   const { width, height } = BAR_SIZE
-  const her = mode === 'overlay' && win !== undefined && !win.isDestroyed() ? win.getBounds() : undefined
+  const floating = petWin ?? (mode === 'overlay' && !unseen() ? win : undefined)
+  const her = floating !== undefined && !floating.isDestroyed() ? floating.getBounds() : undefined
   const area = (her === undefined ? screen.getDisplayNearestPoint(screen.getCursorScreenPoint()) : screen.getDisplayMatching(her)).workArea
   let x = her === undefined ? area.x + (area.width - width) / 2 : her.x - width + 40
   if (her !== undefined && x < area.x) x = her.x + her.width - 40
@@ -571,6 +678,7 @@ function openBar(): void {
     barWindow.setBounds(barBounds())
     barWindow.show()
     barWindow.focus()
+    tellBar(true)
     return
   }
   barWindow = new BrowserWindow({
@@ -584,9 +692,11 @@ function openBar(): void {
   barWindow.once('ready-to-show', () => {
     barWindow?.show()
     barWindow?.focus()
+    tellBar(true)
   })
   barWindow.on('closed', () => {
     barWindow = undefined
+    tellBar(false)
     // A held button whose window went away is let go.
     win?.webContents.send('hold', false)
   })
@@ -600,12 +710,13 @@ function toHer(channel: 'talk'): void {
 /** Holding the key anywhere, through a keyboard hook (uiohook); off until asked for. */
 let holdHook: { stop(): void } | undefined
 let trustTimer: NodeJS.Timeout | undefined
-function setHoldKey(on: boolean): void {
+function setHoldKey(on: boolean, tell = true): void {
   settings = { ...settings, holdKey: on }
   saveSettings(expand(home), settings)
   if (on) startHoldHook()
   else stopHoldHook()
   refreshTray()
+  if (tell) reportPrefs()
 }
 
 function startHoldHook(): void {
@@ -682,20 +793,26 @@ function toPage(channel: string, ...args: unknown[]): void {
   for (const window of BrowserWindow.getAllWindows()) window.webContents.send(channel, ...args)
 }
 
-ipcMain.handle('config', (): BodyConfig => ({ mode, platform: process.platform, pack, her: herSize(), debug, mute }))
+ipcMain.handle('config', (event): BodyConfig => (petWin !== undefined && petPack !== undefined && event.sender === petWin.webContents
+  ? { mode: 'overlay', platform: process.platform, pack: petPack, her: herSize(petPack, look === undefined ? undefined : cleanPlace(look.place?.pet)), debug, mute: true, pet: true }
+  : { mode, platform: process.platform, pack, her: herSize(), debug, mute, ...(petWin !== undefined ? { bubble: false } : {}), ...(unseen() ? { unseen: true } : {}) }))
+/** The floating window beside the wallpaper one only shows and is touched: the other one speaks, listens and answers the brain. */
+const fromPet = (sender: Electron.WebContents) => petWin !== undefined && !petWin.isDestroyed() && sender === petWin.webContents
+const PET_SENDS = new Set(['touch', 'interrupt'])
 ipcMain.handle('say', (_event, text: string) => (lastTalkAt = Date.now(), link?.send({ t: 'user.text', ...(cid === undefined ? {} : { cid }), text }) ?? false))
-ipcMain.handle('send', (_event, message: BodyMessage) => {
+ipcMain.handle('send', (event, message: BodyMessage) => {
+  if (fromPet(event.sender) && !PET_SENDS.has(message.t)) return false
   const withCid = 'cid' in message && typeof message.cid === 'string' && message.cid !== '' ? message : { ...message, cid: cid ?? '' }
   return link?.send(withCid as BodyMessage) ?? false
 })
-ipcMain.handle('utterance', (_event, uttId: string, pcm: ArrayBuffer, durationMs: number) =>
-  (lastTalkAt = Date.now(), link?.sendWithAudio(new Uint8Array(pcm), stream => ({ t: 'user.utterance', ...(cid === undefined ? {} : { cid }), uttId, format: 'pcm16@16k', durationMs, stream })) ?? false))
+ipcMain.handle('utterance', (event, uttId: string, pcm: ArrayBuffer, durationMs: number) =>
+  fromPet(event.sender) ? false : (lastTalkAt = Date.now(), link?.sendWithAudio(new Uint8Array(pcm), stream => ({ t: 'user.utterance', ...(cid === undefined ? {} : { cid }), uttId, format: 'pcm16@16k', durationMs, stream })) ?? false))
 ipcMain.on('hit', (event, onHer: boolean) => {
   BrowserWindow.fromWebContents(event.sender)?.setIgnoreMouseEvents(!onHer, { forward: true })
 })
 ipcMain.on('interactive', (event, on: boolean) => {
   const target = BrowserWindow.fromWebContents(event.sender)
-  if (target === null || mode !== 'overlay') return
+  if (target === null || (mode !== 'overlay' && target !== petWin)) return
   target.setIgnoreMouseEvents(!on, { forward: true })
   if (on) {
     if (process.platform === 'darwin') app.focus({ steal: true })
@@ -704,7 +821,7 @@ ipcMain.on('interactive', (event, on: boolean) => {
 })
 ipcMain.on('drag', (event, delta: { dx: number; dy: number }) => {
   const target = BrowserWindow.fromWebContents(event.sender)
-  if (target === undefined || target === null || mode !== 'overlay') return
+  if (target === undefined || target === null || (mode !== 'overlay' && target !== petWin)) return
   const [x = 0, y = 0] = target.getPosition()
   target.setPosition(Math.round(x + delta.dx), Math.round(y + delta.dy))
   overlayPos = { x: x + delta.dx, y: y + delta.dy }
@@ -743,8 +860,9 @@ if (!app.requestSingleInstanceLock()) {
       await systemPreferences.askForMediaAccess('microphone').catch(() => false)
     }
     // macOS shows "她" as the tray title; Windows and Linux need a picture.
-    tray = new Tray(process.platform === 'darwin' ? nativeImage.createEmpty() : trayIcon())
+    if (settings.noTray !== true) tray = new Tray(process.platform === 'darwin' ? nativeImage.createEmpty() : trayIcon())
     refreshTray()
+    if (places !== undefined) mode = unseen() ? 'overlay' : modeFor(places)
     if (look !== undefined) {
       // Started again later: in the scene the rules want now, unless she was told to stay.
       const prefs = lookPrefs()
@@ -754,6 +872,7 @@ if (!app.requestSingleInstanceLock()) {
       pack = loadOrNothing(packPath, screenAspect())
     }
     win = off && !SMOKE ? undefined : createWindow()
+    if (!SMOKE) syncPet()
     if (SMOKE && win !== undefined) {
       const timer = setTimeout(() => app.exit(1), 60_000)
       win.webContents.once('did-finish-load', () => {
@@ -791,9 +910,14 @@ if (!app.requestSingleInstanceLock()) {
           micMode = message.config.mic
           focus = message.config.focus === true
           setOff(message.config.off === true, false)
+          // What her page chose while this body was away.
+          if (message.config.places !== undefined) setPlaces(message.config.places, false)
+          if (message.config.tray !== undefined && message.config.tray !== (settings.noTray !== true)) setTray(message.config.tray)
+          if (message.config.holdKey !== undefined && message.config.holdKey !== (settings.holdKey === true)) setHoldKey(message.config.holdKey, false)
           refreshTray()
           reportPacks()
           reportMode()
+          reportPrefs()
           reportLook()
           reportPresence()
         } else if (message.t === 'config') {
@@ -802,6 +926,10 @@ if (!app.requestSingleInstanceLock()) {
             refreshTray()
           }
           if (message.off !== undefined) setOff(message.off, false)
+          if (message.places !== undefined) setPlaces(message.places, false)
+          if (message.tray !== undefined) setTray(message.tray)
+          if (message.holdKey !== undefined) setHoldKey(message.holdKey, false)
+          if (message.places !== undefined || message.tray !== undefined || message.holdKey !== undefined) reportPrefs()
           return
         } else if (message.t === 'intro') {
           playIntro(message.path)

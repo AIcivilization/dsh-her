@@ -46,6 +46,10 @@ export interface FloatGuest {
   tap(x: number, y: number): void
   /** The talk bar's button or key: listen while held. */
   hold(on: boolean): void
+  /** The talk bar on the page opened or closed: her answer shows there then, not over her head. */
+  bar(open: boolean): void
+  /** What the brain says as it happens, for the talk bar on the page; returns how to stop. */
+  listen(listener: (message: BrainMessage) => void): () => void
 }
 
 declare global {
@@ -93,6 +97,7 @@ const statusListeners: Array<(status: LinkStatus, detail?: string) => void> = []
 const talkListeners: Array<() => void> = []
 const inputListeners: Array<() => void> = []
 const holdListeners: Array<(on: boolean) => void> = []
+const barListeners: Array<(open: boolean) => void> = []
 let events: EventSource | undefined
 
 function decodeBase64(text: string): Uint8Array {
@@ -166,8 +171,13 @@ window.her = {
   onMicMode: (_listener: (mode: MicMode) => void) => {},
   onFadeOut: () => {},
   openBar: () => host()?.openBar(),
-  // Held from the bar on the page outside: it calls `__herGuest.hold`, which lands in onHold.
-  hold: () => {},
+  // Held from the bar on the page outside (`__herGuest.hold`) or from the button at her feet: both land in onHold.
+  hold: on => {
+    for (const listener of holdListeners) listener(on)
+  },
+  onBar: listener => {
+    barListeners.push(listener)
+  },
   onHold: listener => {
     holdListeners.push(listener)
   },
@@ -194,5 +204,15 @@ window.__herGuest = {
   tap: (x, y) => window.__herTap?.(x, y),
   hold: on => {
     for (const listener of holdListeners) listener(on)
+  },
+  bar: open => {
+    for (const listener of barListeners) listener(open)
+  },
+  listen: listener => {
+    brainListeners.push(listener)
+    return () => {
+      const at = brainListeners.indexOf(listener)
+      if (at >= 0) brainListeners.splice(at, 1)
+    }
   },
 }

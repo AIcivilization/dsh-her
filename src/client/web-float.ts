@@ -54,11 +54,15 @@ function chatBox(): Element | undefined {
   return undefined
 }
 
-const backgroundStyle = (scope: Scope) => `
+/** The veil over her as a background: how much of the page's own colour covers her (%), how soft she is (px). */
+type Veil = { dim: number; blur: number }
+const DEFAULT_VEIL: Veil = { dim: 45, blur: 0 }
+const soft = (blur: number) => (blur > 0 ? `-webkit-backdrop-filter: blur(${blur}px); backdrop-filter: blur(${blur}px);` : '')
+const backgroundStyle = (scope: Scope, veil: Veil) => `
 body { --her-base: var(--dsw-alias-bg-base); }
 #root { position: relative; z-index: 1; --dsw-alias-bg-base: transparent; --dsh-boot-bg: transparent; }
-${CHAT_COLUMN} { background: color-mix(in srgb, var(--her-base) 45%, transparent); }
-${scope === 'chat' ? '' : `[class*="_sidebarCol"] { background: color-mix(in srgb, var(--her-base) 62%, transparent) !important; }
+${CHAT_COLUMN} { background: color-mix(in srgb, var(--her-base) ${veil.dim}%, transparent); ${soft(veil.blur)} }
+${scope === 'chat' ? '' : `[class*="_sidebarCol"] { background: color-mix(in srgb, var(--her-base) ${Math.min(96, veil.dim + 17)}%, transparent) !important; ${soft(veil.blur)} }
 [class*="_sidebarCol"] > *, [class*="_sidebarCol"] > * > * { background: transparent !important; }`}`
 
 function stored<T>(key: string, fallback: T): T {
@@ -94,6 +98,10 @@ export function mountWebFloat(): () => void {
   let pos = stored<Pos>(POS_KEY, DEFAULT_POS)
   let size = { width: 300, height: 490 }
   let shown = false
+  /** Her small picture on the chat box: a place of its own, there whether or not she floats on this page. */
+  let pillOn = false
+  let veil: Veil = DEFAULT_VEIL
+  let veilTimer: ReturnType<typeof setTimeout> | undefined
   let wanted: Place = 'pet'
   let scope: Scope = 'page'
   let style: HTMLStyleElement | undefined
@@ -222,6 +230,30 @@ export function mountWebFloat(): () => void {
         void post('/web/send', { message: { t: 'focus.set', on: focus } }).catch(() => {})
       })
       item(background() ? '暂时关掉背景' : '藏起来', () => hostApi.setHidden(true))
+      // As a background: how clear the page reads over her, changed while looking at it.
+      if (background()) {
+        const slider = (label: string, key: keyof Veil, max: number) => {
+          const row = document.createElement('label')
+          row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 10px;font-size:12px'
+          const name = document.createElement('span')
+          name.textContent = label
+          name.style.cssText = 'flex:none;width:3em'
+          const range = document.createElement('input')
+          range.type = 'range'
+          range.min = '0'
+          range.max = String(max)
+          range.value = String(veil[key])
+          range.style.cssText = 'flex:1;min-width:0;accent-color:#5b8def'
+          range.oninput = () => setVeil({ ...veil, [key]: Number(range.value) })
+          row.append(name, range)
+          menu!.appendChild(row)
+        }
+        const rule = document.createElement('div')
+        rule.style.cssText = 'height:1px;margin:4px 6px;background:rgba(127,127,127,.3)'
+        menu.appendChild(rule)
+        slider('遮罩', 'dim', 95)
+        slider('朦胧', 'blur', 30)
+      }
       document.body.appendChild(menu)
       // Pressing outside closes it; a press on an item must live to become its click.
       const outside = (event: MouseEvent) => {
@@ -261,16 +293,30 @@ export function mountWebFloat(): () => void {
     openBar: () => openTyping(),
   }
 
+  /** The veil, changed here: seen at once, saved a moment later (for every browser). */
+  const setVeil = (next: Veil) => {
+    veil = next
+    arrange()
+    clearTimeout(veilTimer)
+    veilTimer = setTimeout(() => {
+      veilTimer = undefined
+      void post('/web/veil', veil).catch(() => {})
+    }, 400)
+  }
+
   /**
    * The talk bar (docs/对话入口设计.md), over the page: above her small picture
    * when it is there, else at the bottom. It sends through the brain directly,
    * so it works whether or not her window is on this page; holding to talk
    * needs her window (the microphone is in it).
    */
-  let bar: { element: HTMLElement; view?: TalkView; timer: ReturnType<typeof setInterval>; outside: (event: MouseEvent) => void } | undefined
+  let bar: { element: HTMLElement; view?: TalkView; timer: ReturnType<typeof setInterval>; outside: (event: MouseEvent) => void; unlisten?: () => void } | undefined
   const closeBar = () => {
     if (bar === undefined) return
     if (frame !== undefined) guest()?.hold(false)
+    // Her answers go back over her head.
+    guest()?.bar?.(false)
+    bar.unlisten?.()
     clearInterval(bar.timer)
     window.removeEventListener('mousedown', bar.outside, true)
     bar.element.remove()
@@ -323,7 +369,10 @@ export function mountWebFloat(): () => void {
       if (ui.idle) closeBar()
     }
     window.addEventListener('mousedown', outside, true)
-    bar = { element: holder, timer: setInterval(() => void refreshBar(), BAR_EVERY_MS), outside }
+    // While the bar is open the conversation is here: her window shows nothing over her head, and what she says comes in as she says it.
+    guest()?.bar?.(true)
+    const unlisten = guest()?.listen?.(message => ui.live(message))
+    bar = { element: holder, timer: setInterval(() => void refreshBar(), BAR_EVERY_MS), outside, ...(unlisten === undefined ? {} : { unlisten }) }
     void refreshBar()
     ui.focus()
   }
@@ -375,7 +424,7 @@ export function mountWebFloat(): () => void {
     if (frame === undefined) return
     frame.style.zIndex = background() ? '0' : '1000'
     if (background()) frame.style.pointerEvents = 'none'
-    const css = background() ? backgroundStyle(scope) : undefined
+    const css = background() ? backgroundStyle(scope, veil) : undefined
     if (css === undefined) {
       style?.remove()
       style = undefined
@@ -505,7 +554,8 @@ export function mountWebFloat(): () => void {
       style?.remove()
       style = undefined
     }
-    showPill(shown)
+    showPill(pillOn)
+    if (!pillOn && frame === undefined) closeBar()
     window.dispatchEvent(new Event('dsh-her:float'))
   }
 
@@ -513,7 +563,7 @@ export function mountWebFloat(): () => void {
     if (document.hidden) return
     try {
       const res = await fetch('/api/dsh-her/web/status', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ screen: { w: screen.width, h: screen.height, scale: devicePixelRatio }, remote: isRemotePage(location.protocol, location.hostname) }) })
-      const value = await res.json() as { ok: boolean; show?: boolean; place?: Place; scope?: Scope; avatar?: AvatarView; focus?: boolean; open?: string; page?: SettingsPage; skin?: { id: string; rev: number }; intro?: { url: string; when: 'every' | 'daily' } }
+      const value = await res.json() as { ok: boolean; show?: boolean; pill?: boolean; veil?: Veil; place?: Place; scope?: Scope; avatar?: AvatarView; focus?: boolean; open?: string; page?: SettingsPage; skin?: { id: string; rev: number }; intro?: { url: string; when: 'every' | 'daily' } }
       if (value.ok) {
         void wearSaved(value.skin)
         if (value.intro !== undefined) playIntroOnce(value.intro)
@@ -523,6 +573,9 @@ export function mountWebFloat(): () => void {
         // "设置…" from the desktop's menu: this page shows her settings.
         if (value.page !== undefined) window.__herOpenPage?.(value.page)
         shown = value.show === true
+        // A brain from before the places were separate: the picture goes with her, as it did.
+        pillOn = value.pill ?? shown
+        if (value.veil !== undefined && veilTimer === undefined) veil = value.veil
         avatar = value.avatar
         wanted = value.place === 'background' ? 'background' : 'pet'
         scope = value.scope === 'chat' ? 'chat' : 'page'

@@ -23,6 +23,10 @@ export interface BodySettings {
   holdKey?: boolean
   /** Switched off (the brain says so; kept here so she does not flash up at the next start). */
   off?: boolean
+  /** Where she shows on the desktop, each on its own (both: two windows). Not set: one window, by `mode`. */
+  places?: { wallpaper: boolean; overlay: boolean }
+  /** No icon in the menu bar / tray (her settings are in dsh). */
+  noTray?: boolean
 }
 
 export function loadSettings(home: string): BodySettings {

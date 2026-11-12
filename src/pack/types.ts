@@ -90,4 +90,10 @@ export interface BodyConfig {
   debug: boolean
   /** Development: play her voice silently (everything else as usual). */
   mute: boolean
+  /** The second window of two (she floats on top while the scene is in the wallpaper): it shows and is touched, the other one speaks and listens. */
+  pet?: boolean
+  /** False: no bubble here (the floating window beside this one shows it). */
+  bubble?: boolean
+  /** Nothing to see: this window only speaks and listens (both desktop places are off). */
+  unseen?: boolean
 }

@@ -32,14 +32,14 @@
 
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { basename, dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { buildSystemPrompt, cardText, DEFAULT_VOICE, extractCues, extractSounds, FALLBACK_LINES, herPaths, initiativePrompt, invalidCharacter, judgeBargeIn, loadCharacter, memoryContext, OWN_PREFIX, parseOpening, parsePersonaCard, parseTouchLines, performanceSection, personaCardPrompt, readingMs, saveCharacter, SentenceSplitter, serviceOf, SOUND_SECTION, speakable, touchClip, touchLinesPrompt, TouchTracker, withSounds, cleanSplit, lastLines, sizeText, splitReason, type Character, type Moment, type SplitSettings, type TalkLine, type TouchLines } from '../core/index.ts'
 import { digestPrompt, notePrompt, parseDigest, transcriptOf } from '../memory/digest.ts'
 import { dayOf, FileMemory } from '../memory/store.ts'
-import { PROTOCOL_VERSION, SETTINGS_PAGES, type BodyMessage, type BrainMessage, type LookView, type PackSummary, type SettingsPage, type TalkView, type WindowMode } from '../protocol/index.ts'
+import { PROTOCOL_VERSION, SETTINGS_PAGES, type BodyMessage, type BrainMessage, type DeskPlaces, type LookView, type PackSummary, type SettingsPage, type TalkView, type WindowMode } from '../protocol/index.ts'
 import { saveClipUses } from '../pack/load.ts'
 import { listPacks, loadSettings } from '../pack/settings.ts'
 import { listLooks } from '../pack/looks.ts'
@@ -54,6 +54,7 @@ import { cleanVoices, ExternalVoices, SECRET_FIELDS, type PluginVoice } from '..
 import { cleanIntro, type IntroSettings } from '../core/intro.ts'
 import { checkMaterial } from '../pack/material-check.ts'
 import { StageStore } from './stage-store.ts'
+import { Characters } from './characters.ts'
 import { BrainServer } from '../server/brain-server.ts'
 import { type AvatarView, API_BASE, apiHandlers, handle, type ApiRuntime } from './api.ts'
 import { bodyRunning, findDevBody, launchBody, type LaunchPlan } from './body-launcher.ts'
@@ -181,10 +182,34 @@ interface ReplyTrace {
   outcome?: string
 }
 
+/**
+ * Several characters (src/dsh/characters.ts): the brain runs for the one
+ * chosen, as a plugin of its own inside this one; choosing another closes
+ * it (her session, voice, server, timers: everything hangs off its context)
+ * and starts it again for her. The bodies find the new server by themselves.
+ */
 export function apply(ctx: Context, config: HerConfig): void {
   const paths = herPaths(config.home)
+  const people = new Characters(paths.root, paths.characters, { cid: config.character.id, name: config.character.name })
+  let fiber: { dispose: () => Promise<void> } | undefined
+  let changing: Promise<void> = Promise.resolve()
+  const start = () => {
+    fiber = ctx.plugin({ name: 'dsh-her-character', apply: (inner: Context) => run(inner, config, people, switchTo) })
+  }
+  const switchTo = (cid: string) => {
+    people.use(cid)
+    changing = changing.then(async () => {
+      await fiber?.dispose()
+      start()
+    }).catch((error: Error) => ctx.logger.warn(`dsh-her: could not change character (${error.message})`))
+  }
+  start()
+}
+
+function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid: string) => void): void {
+  const paths = herPaths(config.home)
   setMirrors(config.body.mirrors)
-  const cid = config.character.id
+  const cid = people.active()
   const dir = join(paths.characters, cid)
   let services: DshServices | undefined
   let session: HerSession | undefined
@@ -370,6 +395,39 @@ export function apply(ctx: Context, config: HerConfig): void {
     server?.broadcast({ t: 'config', off: next })
     log({ event: 'off', off: next })
   }
+
+  /**
+   * Where she appears (docs/设置页与编排设计.md §13), each on its own: in the
+   * wallpaper, floating on the desktop, in dsh's page, on dsh's chat box.
+   * The two desktop places (and the tray icon, the hold key) are the desktop
+   * body's to show; what was chosen is kept here for when it connects.
+   */
+  const placesFile = join(paths.root, 'places.json')
+  interface PlacePrefs { wallpaper?: boolean; overlay?: boolean; avatar?: boolean; tray?: boolean; holdKey?: boolean }
+  let placePrefs: PlacePrefs = (() => {
+    try {
+      const value = JSON.parse(readFileSync(placesFile, 'utf8')) as Record<string, unknown>
+      const out: PlacePrefs = {}
+      for (const key of ['wallpaper', 'overlay', 'avatar', 'tray', 'holdKey'] as const) if (typeof value[key] === 'boolean') out[key] = value[key]
+      return out
+    } catch {
+      return {}
+    }
+  })()
+  const savePlaces = (change: PlacePrefs) => {
+    placePrefs = { ...placePrefs, ...change }
+    mkdirSync(paths.root, { recursive: true })
+    writeFileSync(placesFile, `${JSON.stringify(placePrefs)}\n`)
+  }
+  const deskPlaces = (): DeskPlaces | undefined => (placePrefs.wallpaper === undefined || placePrefs.overlay === undefined ? undefined : { wallpaper: placePrefs.wallpaper, overlay: placePrefs.overlay })
+  /** For a body's welcome: what was chosen for it. */
+  const bodyPrefs = () => ({
+    ...(deskPlaces() === undefined ? {} : { places: deskPlaces()! }),
+    ...(placePrefs.tray === undefined ? {} : { tray: placePrefs.tray }),
+    ...(placePrefs.holdKey === undefined ? {} : { holdKey: placePrefs.holdKey }),
+  })
+  /** The small picture on dsh's chat box: there unless switched away (or she is off). */
+  const pillShown = () => !herOff && placePrefs.avatar !== false
 
   /** Say one sentence of hers: her sound marks and performance tags are taken out, the rest goes to the voice. */
   const saySentence = (uid: string, seq: number, text: string) => {
@@ -572,8 +630,20 @@ export function apply(ctx: Context, config: HerConfig): void {
   /** What she can do now: a desktop body speaks for her, else the web page. */
   const refreshBodyPack = () => {
     bodyPack = server?.bodies.at(-1)?.hello.packs[0] ?? (webBody.connected ? webBody.summary() : undefined)
+    if (!desktopConnected()) rememberLook(webBody.activeId(), 'web')
   }
   const desktopConnected = () => (server?.bodies.length ?? 0) > 0
+  /**
+   * What she wears is hers (several characters): remembered when it changes,
+   * put on again when she is chosen. Not while a body still wears the one before.
+   */
+  let dressingUntil = 0
+  const rememberLook = (id: string | undefined, from: 'desktop' | 'web', force = false) => {
+    if (id === undefined || id === STAGE_LOOK_ID || id.startsWith(`${STAGE_LOOK}-`) || id === character.look) return
+    if (!force && (people.needsDress(from) || Date.now() < dressingUntil)) return
+    character = { ...character, look: id }
+    saveCharacter(dir, character)
+  }
   /** What the body reports about itself, for the "她" page. */
   let bodyPacks: PackSummary[] = []
   let activePack: string | undefined
@@ -930,10 +1000,18 @@ export function apply(ctx: Context, config: HerConfig): void {
       case 'pack.list':
         bodyPacks = message.packs
         activePack = message.active
+        // Just chosen, and she has no look of her own while the body shows the other one's 编排: any other look.
+        if (Date.now() < dressingUntil && message.active === STAGE_LOOK_ID && !readPlay(dir).on) {
+          const other = message.packs.find(p => p.packId !== STAGE_LOOK_ID && !p.packId.startsWith(`${STAGE_LOOK}-`))
+          if (other !== undefined) broadcast({ t: 'pack.use', packId: other.packId })
+        } else rememberLook(message.active, 'desktop')
         bodyPack = message.packs.find(p => p.packId === message.active) ?? bodyPack
         break
       case 'mode.changed':
         bodyMode = message.mode
+        break
+      case 'body.prefs':
+        savePlaces({ wallpaper: message.places.wallpaper, overlay: message.places.overlay, tray: message.tray, holdKey: message.holdKey })
         break
       case 'folder.picked':
         folderPicks.get(message.id)?.(message.path)
@@ -1002,7 +1080,15 @@ export function apply(ctx: Context, config: HerConfig): void {
   }
   const uploadsDir = join(paths.root, 'uploads')
   const library = new Library(paths.root)
-  const stages = new StageStore(paths.root)
+  // 编排 goes with the character. The one made before there were several is the first character's.
+  if (cid === people.first && !existsSync(join(dir, 'stages')) && existsSync(join(paths.root, 'stages'))) {
+    try {
+      cpSync(join(paths.root, 'stages'), join(dir, 'stages'), { recursive: true })
+    } catch {
+      // she starts a new one
+    }
+  }
+  const stages = new StageStore(dir)
   /**
    * 编排 as the page shows it. The first time, it is made from what she
    * wears now (a look or a pack, §3.11), and saved; the old files stay.
@@ -1023,7 +1109,7 @@ export function apply(ctx: Context, config: HerConfig): void {
       ...missingMaterials(stage, Object.fromEntries(Object.entries(materials).map(([row, list]) => [row, list.map(m => m.name)]))),
       ...stage.scenes.flatMap(scene => Object.values(scene.cells).flatMap(cell => cell.use.filter(u => u.startsWith('pack:') && !packs.some(p => `pack:${p.id}` === u)).map(u => `${scene.name}那一格用的外形 ${u.slice(5)} 已经不在了`))),
     ]
-    return { ...(stage === undefined ? {} : { stage }), problems, library: materials, missing, packs: packs.filter(p => !p.id.startsWith(`${STAGE_LOOK}-`)), versions: stages.versions(), playing: readPlay(paths.root).on, playNotes }
+    return { ...(stage === undefined ? {} : { stage }), problems, library: materials, missing, packs: packs.filter(p => !p.id.startsWith(`${STAGE_LOOK}-`)), versions: stages.versions(), playing: readPlay(dir).on, playNotes }
   }
   const skins = new Skins(paths.root)
   /** Voices and listening from outside services; their keys in the keychain (or secrets.json). */
@@ -1101,7 +1187,7 @@ export function apply(ctx: Context, config: HerConfig): void {
   }
   /** Put the stage on her (when she plays it): its look is written again and shown. */
   const applyStage = () => {
-    if (!readPlay(paths.root).on) return
+    if (!readPlay(dir).on) return
     const { stage, problems } = stages.load()
     if (stage === undefined) {
       playNotes = problems
@@ -1122,7 +1208,7 @@ export function apply(ctx: Context, config: HerConfig): void {
   const chosenNow = () => [...chosenUntil].filter(([, until]) => until > Date.now()).map(([id]) => id)
   /** The stage's scenes she can go into with play_action (stage_<id>), with how. */
   const stageChoices = (): Array<{ scene: Scene; how: 'she' | 'you' }> => {
-    if (!readPlay(paths.root).on) return []
+    if (!readPlay(dir).on) return []
     const { stage } = stages.load()
     if (stage === undefined) return []
     return stage.scenes.slice(1).filter(s => s.off !== true).flatMap((scene): Array<{ scene: Scene; how: 'she' | 'you' }> => {
@@ -1146,7 +1232,7 @@ export function apply(ctx: Context, config: HerConfig): void {
   }
   /** "隔一会儿随机": every minute, a random scene whose time has come comes up. */
   const stageTick = () => {
-    if (!readPlay(paths.root).on || herOff) return
+    if (!readPlay(dir).on || herOff) return
     const { stage } = stages.load()
     if (stage === undefined) return
     const now = Date.now()
@@ -1171,7 +1257,7 @@ export function apply(ctx: Context, config: HerConfig): void {
   let avatarShown: { key: string; name: string; until: number } | undefined
   /** Her small picture from the avatar row of the stage, when she plays it and it has one now. */
   const stageAvatar = (): AvatarView | undefined => {
-    if (!readPlay(paths.root).on) return undefined
+    if (!readPlay(dir).on) return undefined
     const { stage } = stages.load()
     if (stage === undefined) return undefined
     const now = Date.now()
@@ -1204,6 +1290,14 @@ export function apply(ctx: Context, config: HerConfig): void {
   /** A message from the page, as main fills in the character id for the desktop page. */
   const withCid = (message: BodyMessage): BodyMessage => ('cid' in message && typeof message.cid === 'string' && message.cid !== '' ? message : { ...message, cid } as BodyMessage)
 
+  /** Her 三视图 for 总览: the one chosen, else the only one there is. */
+  const sheetView = (): { name: string; url: string; chosen: boolean } | null => {
+    const all = library.list('sheet').filter(m => m.kind === 'image')
+    const picked = all.find(m => m.name === character.sheet) ?? (all.length === 1 ? all[0] : undefined)
+    if (picked === undefined) return null
+    return { name: picked.name, url: `/api/dsh-her/web/library-file?row=sheet&name=${encodeURIComponent(picked.name)}&v=${Math.floor(picked.addedAt).toString(36)}`, chosen: picked.name === character.sheet }
+  }
+
   /** The "她" page's view of everything, and what it can change. */
   const api: ApiRuntime = {
     state: () => {
@@ -1230,7 +1324,7 @@ export function apply(ctx: Context, config: HerConfig): void {
           // With no desktop body the brain itself knows her packs (docs/网页身体设计.md).
           packs: body === undefined ? webBody.packList() : bodyPacks,
           ...((body === undefined ? webBody.activeId() : activePack) === undefined ? {} : { activePack: body === undefined ? webBody.activeId()! : activePack! }),
-          web: { mode: webBody.mode, connected: webBody.connected, show: webShown(), ...webBody.place(), ...(webAvatar() === undefined ? {} : { avatar: webAvatar()! }) },
+          web: { mode: webBody.mode, connected: webBody.connected, show: webShown(), ...webBody.place(), veil: webBody.veil(), ...(webAvatar() === undefined ? {} : { avatar: webAvatar()! }) },
           ...(bodyMode === undefined ? {} : { mode: bodyMode }),
           ...(bodyLook === undefined ? {} : { look: bodyLook }),
           ...(body === undefined ? {} : { screens: body.hello.caps.screens.map(({ w, h, scale }) => ({ w, h, scale })) }),
@@ -1241,9 +1335,20 @@ export function apply(ctx: Context, config: HerConfig): void {
         initiative: initiative.view(),
         talk: { ...talkView(), split: talk.split, current: session?.sessionId ?? null },
         presets: { list: presetList, ...(presetState === undefined ? {} : { active: presetState }) },
+        cid,
+        characters: people.list(),
+        sheet: sheetView(),
+        show: webBody.showcase(),
+        places: {
+          // Not heard from a desktop body yet: as a new one starts, both on.
+          wallpaper: placePrefs.wallpaper ?? (bodyMode === undefined || bodyMode === 'wallpaper'),
+          overlay: placePrefs.overlay ?? (bodyMode === undefined || bodyMode !== 'wallpaper'),
+          web: webBody.mode !== 'off', webAlways: webBody.mode === 'on',
+          avatar: placePrefs.avatar !== false, tray: placePrefs.tray !== false, holdKey: placePrefs.holdKey === true,
+        },
         off: herOff,
         skin: (() => { const id = skins.current(); return id === undefined ? null : skins.get(id)?.skin.name ?? null })(),
-        stagePlaying: readPlay(paths.root).on,
+        stagePlaying: readPlay(dir).on,
         memory: { facts, episodes, diary, lastDigestDay: memory.lastDigestDay() ?? null },
       }
     },
@@ -1347,15 +1452,47 @@ export function apply(ctx: Context, config: HerConfig): void {
       if (bodies.length === 0) throw new Error('桌面程序没连上；网页里打开 dsh 时会播')
       for (const body of bodies) playIntro(message => body.send(message), true)
     },
+    characterNew: ({ name, copy }) => {
+      const list = people.list()
+      if (list.length >= 12) throw new Error('最多 12 个人物')
+      const next: Character = {
+        name: name.trim() === '' ? `新人物 ${list.length + 1}` : name.trim(),
+        persona: copy ? character.persona : config.character.persona,
+        callYou: character.callYou, pronoun: character.pronoun,
+        voice: { ...character.voice },
+        ...(copy && character.model !== undefined ? { model: character.model } : {}),
+        ...(copy && character.look !== undefined ? { look: character.look } : {}),
+        onboarded: true,
+      }
+      const problem = invalidCharacter(next)
+      if (problem !== undefined) throw new Error(problem)
+      const made = people.create(next)
+      log({ event: 'character', action: 'new', made })
+      return made
+    },
+    characterUse: next => {
+      if (next === cid) return
+      if (!people.list().some(c => c.cid === next)) throw new Error('没有这个人物')
+      // What is on now is hers, when she never chose: she comes back to it.
+      if (character.look === undefined) rememberLook(desktopConnected() ? activePack : webBody.activeId(), 'desktop', true)
+      cut()
+      log({ event: 'character', action: 'use', next })
+      // After the answer is out: the brain closes and starts again for her.
+      setTimeout(() => switchTo(next), 200)
+    },
+    characterRemove: gone => {
+      people.remove(gone)
+      log({ event: 'character', action: 'remove', gone })
+    },
     stagePlay: on => {
-      const play = readPlay(paths.root)
+      const play = readPlay(dir)
       if (on === play.on) return stageView()
       if (on) {
         const before = desktopConnected() ? activePack : webBody.activeId()
-        writePlay(paths.root, { on: true, ...(before === undefined || before === STAGE_LOOK_ID ? {} : { before }) })
+        writePlay(dir, { on: true, ...(before === undefined || before === STAGE_LOOK_ID ? {} : { before }) })
         applyStage()
       } else {
-        writePlay(paths.root, { on: false })
+        writePlay(dir, { on: false })
         playNotes = []
         avatarShown = undefined
         if (play.before !== undefined) {
@@ -1392,6 +1529,19 @@ export function apply(ctx: Context, config: HerConfig): void {
       library.remove(row, name)
       applyStage()
       return stageView()
+    },
+    libraryKey: async (row, name) => {
+      if (!await findFfmpeg(paths.root)) await ensureFfmpeg(paths.root, () => {})
+      const made = await library.keyOut(row, name)
+      void library.examine(row as LibraryRow, made).catch(() => undefined)
+      log({ event: 'library', action: 'key', row, name })
+      return { ...stageView(), made }
+    },
+    sheetSet: name => {
+      if (name !== undefined && library.path('sheet', name) === undefined) throw new Error('素材库的三视图里没有这一张')
+      const { sheet: _sheet, ...rest } = character
+      character = name === undefined ? rest : { ...rest, sheet: name }
+      saveCharacter(dir, character)
     },
     initiativeTry: () => initiative.tryNow(),
     presetsRefresh: async () => {
@@ -1488,7 +1638,7 @@ export function apply(ctx: Context, config: HerConfig): void {
         ? `/api/dsh-her/web/skin-file?id=${encodeURIComponent(skinId ?? '')}&f=${encodeURIComponent(introAt.split(/[/\\]/).pop() ?? '')}`
         : `/api/dsh-her/web/library-file?row=intro&name=${encodeURIComponent(intro.source)}`
       return {
-        show: webShown(remote), mode: webBody.mode, place, scope, focus: initiative.focused,
+        show: webShown(remote), pill: pillShown(), veil: webBody.veil(), mode: webBody.mode, place, scope, focus: initiative.focused,
         ...(open === undefined ? {} : { open }), ...(page === undefined ? {} : { page }), ...(avatar === undefined ? {} : { avatar }),
         ...(skin === undefined ? {} : { skin }), ...(introClip === undefined ? {} : { intro: { url: introClip, when: intro.when } }),
       }
@@ -1537,6 +1687,28 @@ export function apply(ctx: Context, config: HerConfig): void {
     webSetPlace: change => {
       webBody.setPlace(change)
       refreshBodyPack()
+    },
+    webSetVeil: change => webBody.setVeil(change),
+    placesSet: change => {
+      const desk = { ...(change.wallpaper === undefined ? {} : { wallpaper: change.wallpaper }), ...(change.overlay === undefined ? {} : { overlay: change.overlay }) }
+      if (Object.keys(desk).length > 0) {
+        // Both are sent: the one not named stays as the body shows it now.
+        const now = deskPlaces() ?? { wallpaper: bodyMode === undefined || bodyMode === 'wallpaper', overlay: bodyMode === undefined || bodyMode !== 'wallpaper' }
+        savePlaces({ ...now, ...desk })
+        server?.broadcast({ t: 'config', places: deskPlaces()! })
+      }
+      if (change.tray !== undefined) {
+        savePlaces({ tray: change.tray })
+        server?.broadcast({ t: 'config', tray: change.tray })
+      }
+      if (change.holdKey !== undefined) {
+        savePlaces({ holdKey: change.holdKey })
+        server?.broadcast({ t: 'config', holdKey: change.holdKey })
+      }
+      if (change.avatar !== undefined) savePlaces({ avatar: change.avatar })
+      if (change.web !== undefined) webBody.mode = change.web ? (webBody.mode === 'off' ? 'auto' : webBody.mode) : 'off'
+      if (change.webAlways !== undefined && webBody.mode !== 'off') webBody.mode = change.webAlways ? 'on' : 'auto'
+      log({ event: 'places', ...change })
     },
     workshopList: () => listProjects(),
     workshopNew: name => {
@@ -1804,6 +1976,13 @@ export function apply(ctx: Context, config: HerConfig): void {
         bodyPack = client.hello.packs[0] ?? bodyPack
         // She comes out: her opening clip, when there is one (a body that shows her, not a text client).
         if (client.hello.packs.length > 0) setTimeout(() => playIntro(message => client.send(message)), 1500)
+        // Another character was chosen since this body last dressed: what she wears.
+        if (client.hello.packs.length > 0 && people.needsDress('desktop')) {
+          const id = readPlay(dir).on ? STAGE_LOOK_ID : character.look
+          dressingUntil = Date.now() + 8000
+          if (id !== undefined) setTimeout(() => client.send({ t: 'pack.use', packId: id }), 300)
+          people.dressed('desktop')
+        }
         // The talk bar's lines follow the welcome.
         setTimeout(refreshTalkSoon, 0)
         return {
@@ -1811,7 +1990,7 @@ export function apply(ctx: Context, config: HerConfig): void {
           v: PROTOCOL_VERSION,
           sessionId: session?.sessionId ?? '',
           characters: [{ cid, name: character.name, mode: 'overlay' }],
-          config: { mic: config.voice.mic, bargeIn: true, focus: initiative.focused, off: herOff },
+          config: { mic: config.voice.mic, bargeIn: true, focus: initiative.focused, off: herOff, ...bodyPrefs() },
         }
       },
       message: (_client, message, audio) => onBodyMessage(message, audio),
@@ -1858,6 +2037,22 @@ export function apply(ctx: Context, config: HerConfig): void {
     const stageTimer = setInterval(stageTick, 60_000)
     // 素材库 checks and pictures made into clips need ffmpeg: found once now, not on the first click.
     void findFfmpeg(paths.root).catch(() => false)
+    // Another character was chosen: the page wears what she wears (a desktop body when it connects).
+    if (people.needsDress('web')) {
+      try {
+        if (readPlay(dir).on) applyStage()
+        else {
+          const list = webBody.packList()
+          const id = character.look !== undefined && list.some(p => p.packId === character.look) ? character.look
+            : webBody.activeId() === STAGE_LOOK_ID ? list.find(p => p.packId !== STAGE_LOOK_ID && !p.packId.startsWith(`${STAGE_LOOK}-`))?.packId : undefined
+          if (id !== undefined) webBody.use(id)
+        }
+      } catch (error) {
+        ctx.logger.warn(`dsh-her: her look not put on (${(error as Error).message})`)
+      }
+      people.dressed('web')
+      refreshBodyPack()
+    }
     stageTimer.unref()
     noteTimer.unref()
     digestTimer.unref()

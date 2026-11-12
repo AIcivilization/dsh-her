@@ -36,7 +36,30 @@ interface WebSettings {
   mode?: WebMode
   place?: WebPlace
   scope?: WebScope
+  /** As a background: how much of the page's own colour lies over her (%), and how soft she is (px of blur). */
+  dim?: number
+  blur?: number
 }
+
+/** A picture or clip of hers the page can show as it is. */
+export interface ShowMedia {
+  url: string
+  kind: 'video' | 'image'
+  /** `stacked`: colour above, mask below (drawn through a canvas); `alpha`: its own transparency. */
+  layout: 'stacked' | 'alpha' | 'opaque'
+  name: string
+}
+
+/** The veil over a background, so what you type reads clearly. */
+export interface WebVeil {
+  dim: number
+  blur: number
+}
+export const DEFAULT_VEIL: WebVeil = { dim: 45, blur: 0 }
+export const cleanVeil = (value: { dim?: unknown; blur?: unknown }): WebVeil => ({
+  dim: typeof value.dim === 'number' && Number.isFinite(value.dim) ? Math.max(0, Math.min(95, Math.round(value.dim))) : DEFAULT_VEIL.dim,
+  blur: typeof value.blur === 'number' && Number.isFinite(value.blur) ? Math.max(0, Math.min(30, Math.round(value.blur))) : DEFAULT_VEIL.blur,
+})
 
 export const WEB_BASE = '/api/dsh-her/web'
 const KEEPALIVE_MS = 20_000
@@ -203,6 +226,15 @@ export class WebBody {
     this.reload()
   }
 
+  veil(): WebVeil {
+    return cleanVeil(this.settings())
+  }
+
+  /** The page reads it the next time it asks (no reload: the picture is the same). */
+  setVeil(change: Partial<WebVeil>): void {
+    this.saveSettings(cleanVeil({ ...this.veil(), ...change }))
+  }
+
   /** The chosen look (or pack), else the first there is. */
   private chosen(): { look?: Look; packId?: string } {
     const looks = listLooks(this.home, this.packsDir)
@@ -248,6 +280,38 @@ export class WebBody {
 
   private urls(id: string): PackUrl {
     return (dir, file) => `${WEB_BASE}/file?p=${encodeURIComponent(id)}&f=${encodeURIComponent(file)}${versionOf(join(dir, file))}`
+  }
+
+  /**
+   * What she shows now in each place, for the picture on 总览: the scene of
+   * the wallpaper and the figure that floats, as files the page can play.
+   */
+  showcase(): { desktop?: ShowMedia; pet?: ShowMedia } {
+    const { look, packId } = this.chosen()
+    const media = (id: string | undefined): ShowMedia | undefined => {
+      if (id === undefined) return undefined
+      try {
+        const pack = this.load(id)
+        const clip = pack.clips.find(c => c.name === 'idle') ?? pack.clips.find(c => c.id === pack.start) ?? pack.clips[0]
+        // A photo with her clips over one part of it: the photo is the scene.
+        if (pack.scene !== undefined && pack.plateUrl !== undefined) return { url: pack.plateUrl, kind: 'image', layout: 'opaque', name: pack.name }
+        if (clip !== undefined) return { url: clip.url, kind: 'video', layout: pack.layout, name: pack.name }
+        return pack.plateUrl === undefined ? undefined : { url: pack.plateUrl, kind: 'image', layout: 'opaque', name: pack.name }
+      } catch {
+        return undefined
+      }
+    }
+    if (look !== undefined) {
+      const chosen = loadSettings(this.home).looks?.[look.id]?.scene
+      const scene = look.scenes.find(s => s.id === chosen) ?? look.scenes.find(s => s.id === look.default) ?? look.scenes[0]
+      const desk = scene?.desk ?? look.desk
+      const desktop = scene === undefined || scene.pack === desk ? undefined : media(scene.pack)
+      const pet = media(desk)
+      return { ...(desktop === undefined ? {} : { desktop }), ...(pet === undefined ? {} : { pet }) }
+    }
+    const one = media(packId)
+    if (one === undefined) return {}
+    return listPacks(this.packsDir).find(p => p.packId === packId)?.layer === 'scene' ? { desktop: one } : { pet: one }
   }
 
   /** The pack she shows in the page now (in a look: the scene or desk pet on screen). */

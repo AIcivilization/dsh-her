@@ -39,3 +39,11 @@ test('an SVG keeps its drawing and loses what could run', () => {
   for (const kept of ['<rect id="衣服" fill="#2a6"/>', '<use href="#衣服"/>']) assert.ok(svg.includes(kept), kept)
   assert.equal(cleanSvg('<svg><circle r="3"/></svg>').removed, false)
 })
+
+test('a three-view is a picture big enough to work from; an opening clip is short', () => {
+  assert.deepEqual(checkMaterial('sheet', { kind: 'image', width: 2048, height: 1152, bytes: 900_000 }), [])
+  assert.ok(checkMaterial('sheet', { kind: 'image', width: 800, height: 450, bytes: 100_000 }).some(w => w.includes('1200')))
+  assert.ok(checkMaterial('sheet', { kind: 'video', width: 2048, height: 1152, durationMs: 4000, bytes: 100_000 }).some(w => w.includes('不是视频')))
+  assert.deepEqual(checkMaterial('intro', { kind: 'video', width: 1280, height: 800, durationMs: 4000, bytes: 100_000 }), [])
+  assert.ok(checkMaterial('intro', { kind: 'video', width: 1280, height: 800, durationMs: 12_000, bytes: 100_000 }).some(w => w.includes('8 秒')))
+})

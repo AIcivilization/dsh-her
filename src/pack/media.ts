@@ -149,7 +149,7 @@ export async function ssim(a: string, b: string): Promise<number> {
 /** Average colour of a still's border, as 0xRRGGBB, to recognise a green screen. */
 export async function borderColor(still: string): Promise<{ r: number; g: number; b: number }> {
   // Sample the top strip: a background, whatever the subject does.
-  const { stdout } = await run(FFMPEG, ['-hide_banner', '-v', 'error', '-i', still, '-vf', 'crop=iw:ih/12:0:0,scale=1:1,format=rgb24', '-f', 'rawvideo', '-'], { encoding: 'buffer' })
+  const { stdout } = await run(FFMPEG, ['-hide_banner', '-v', 'error', '-i', still, '-vf', 'crop=iw:ih/12:0:0,scale=1:1,format=rgb24', '-frames:v', '1', '-f', 'rawvideo', '-'], { encoding: 'buffer' })
   const bytes = stdout as unknown as Buffer
   return { r: bytes[0] ?? 0, g: bytes[1] ?? 0, b: bytes[2] ?? 0 }
 }
@@ -169,6 +169,22 @@ export async function keyToStacked(input: string, output: string, key: { r: numb
     `[0]scale='min(${width},iw)':-2,chromakey=${hex(key)}:0.13:0.06,despill=type=green,format=rgba,split[c][a];` +
     '[a]alphaextract,format=yuv420p[m];[c]format=yuv420p[rgb];[rgb][m]vstack,format=yuv420p',
     '-an', ...await h264(20), '-movflags', '+faststart', '-map_metadata', '-1', output])
+}
+
+/**
+ * Take a plain background out of a clip or a picture (素材库's "抠掉背景"):
+ * a WebM with transparency (VP9), or a PNG. A coloured background (green,
+ * blue) is keyed by its hue; a white or grey one by its colour.
+ */
+export async function keyToAlpha(input: string, output: string, key: { r: number; g: number; b: number }): Promise<void> {
+  const plain = Math.max(key.r, key.g, key.b) - Math.min(key.r, key.g, key.b) < 40
+  const spill = isGreenScreen(key) ? ',despill=type=green' : key.b > key.r + 50 && key.b > key.g + 40 ? ',despill=type=blue' : ''
+  const filter = plain ? `colorkey=${hex(key)}:0.1:0.05` : `chromakey=${hex(key)}:0.13:0.06${spill}`
+  if (/\.png$/i.test(output)) await ffmpeg(['-y', '-i', input, '-vf', `${filter},format=rgba`, '-frames:v', '1', output])
+  else {
+    await ffmpeg(['-y', '-i', input, '-vf', `scale=trunc(iw/2)*2:trunc(ih/2)*2,${filter},format=yuva420p`, '-an',
+      '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-b:v', '0', '-crf', '30', '-auto-alt-ref', '0', '-map_metadata', '-1', output])
+  }
 }
 
 /** Re-encode a clip as it is (scene packs). */

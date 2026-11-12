@@ -10,6 +10,7 @@ import { choiceClass, choiceNote, SERVICE_SHORT, voiceLabel } from './choice.tsx
 import { desktopHere, desktopOffered, herApi, modelCatalog, playAudio, remotePage, type ModelGroup, type Result, type StateView } from './api.ts'
 import { BodyManual } from './BodyManual.tsx'
 import { MingSection } from './MingVoice.tsx'
+import { VeilSliders } from './Places.tsx'
 import { insideFolder, uploadFiles, worthSending, type UploadProgress } from './upload.ts'
 import { cardFromPng } from '../core/persona-card.ts'
 
@@ -741,6 +742,7 @@ export function WebPlaceCard({ state, apply }: { state: StateView; apply: Apply 
           <button className={choiceClass('chat', web.scope)} onClick={() => void choose({ scope: 'chat' })}>只在对话窗口<small>{choiceNote('chat', web.scope, '左边的列表不变')}</small></button>
         </div>
       )}
+      {web.place === 'background' && <VeilSliders state={state} apply={apply} />}
       {web.place === 'background' && <p className="her-muted">背景不能点：对话框上的她（或者"她"按钮）可以打字、说话或者暂时关掉。</p>}
     </div>
   )

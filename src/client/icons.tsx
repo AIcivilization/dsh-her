@@ -28,6 +28,9 @@ const PATHS: Record<string, ReactNode> = {
   alert: <><path d="M10 3.5 17 16H3z" /><path d="M10 8.5v3.5" /><circle cx="10" cy="14" r=".6" fill="currentColor" /></>,
   moon: <path d="M15.5 11.5A6 6 0 0 1 8.5 4.5a6 6 0 1 0 7 7z" />,
   play: <path d="M7 4.5v11l9-5.5z" />,
+  plus: <path d="M10 4.5v11M4.5 10h11" />,
+  copy: <><rect x="7" y="7" width="9.5" height="9.5" rx="1.5" /><path d="M13 7V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v6.5A1.5 1.5 0 0 0 5 13h2" /></>,
+  guide: <><path d="M10 5.5C8.5 4.3 6.5 4 4 4v11c2.5 0 4.5.3 6 1.5 1.5-1.2 3.5-1.5 6-1.5V4c-2.5 0-4.5.3-6 1.5z" /><path d="M10 5.5v11" /></>,
   eye: <><path d="M2.5 10S5.5 5 10 5s7.5 5 7.5 5-3 5-7.5 5-7.5-5-7.5-5z" /><circle cx="10" cy="10" r="2" /></>,
 }
 

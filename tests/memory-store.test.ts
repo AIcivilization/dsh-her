@@ -77,6 +77,7 @@ test('the transcript keeps the day, drops context notes and tags', () => {
     { type: 'user/message', time: start - 1, data: { content: [{ type: 'text', text: '昨天的话' }] } },
     { type: 'user/message', time: start + 10, data: { content: [{ type: 'text', text: '我下周三面试' }], source: { kind: 'dsh-her' } } },
     { type: 'user/message', time: start + 11, data: { content: [{ type: 'text', text: '（备注：你被打断了）' }], source: { kind: 'dsh-her-context' } } },
+    { type: 'user/message', time: start + 12, data: { content: [{ type: 'text', text: 'Current runtime context: cwd …' }], source: { kind: 'runtime-context' } } },
     { type: 'assistant/message', time: start + 20, data: { message: { content: [{ type: 'reasoning', text: '想想' }, { type: 'text', text: '〔开心〕加油呀！' }] } } },
   ], start, end)
   assert.deepEqual(lines.map(l => `${l.who}:${l.text}`), ['you:我下周三面试', 'her:加油呀！'])

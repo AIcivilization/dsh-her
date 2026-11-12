@@ -24,7 +24,8 @@ export function transcriptOf(events: Array<{ type: string; time?: number; data: 
     if (event.type === 'user/message') {
       const data = event.data as { content?: Array<{ type: string; text?: string }>; source?: { kind?: string } }
       // Barge-in notes and other context she was given are not things you said.
-      if (data.source?.kind === 'dsh-her-context') continue
+      // Nor is what dsh itself tells the model about where it runs (a newer dsh keeps it in the conversation).
+      if (data.source?.kind === 'dsh-her-context' || data.source?.kind === 'runtime-context') continue
       const text = (data.content ?? []).filter(b => b.type === 'text').map(b => b.text ?? '').join('').trim()
       if (text !== '') lines.push({ who: 'you', text, time })
     } else if (event.type === 'assistant/message') {

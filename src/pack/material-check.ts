@@ -34,6 +34,13 @@ export function checkMaterial(row: string, info: MaterialInfo): string[] {
     if (shape !== undefined && (shape < 1.3 || shape > 2.4)) out.push('比例和电脑屏幕差很多：铺满屏幕时会裁掉一大块')
     if (width !== undefined && width < 1280) out.push('宽不到 1280 像素：铺满屏幕会糊；建议和屏幕一样大，比如 2560×1600')
   }
+  if (row === 'sheet') {
+    if (info.kind === 'video') out.push('三视图是一张图片，不是视频')
+    if (width !== undefined && width < 1200) out.push('有点小（宽不到 1200 像素）：当参考图时细节不够；建议 2048×1152')
+  }
+  if (row === 'intro') {
+    if (info.kind === 'video' && (info.durationMs ?? 0) > 8000) out.push('超过 8 秒：开机动画 3–5 秒就好，太长会挡着你做事')
+  }
   if (info.bytes > 200 * MB) out.push(`文件很大（${Math.round(info.bytes / MB)} MB），加载会慢`)
   return out
 }

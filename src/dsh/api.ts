@@ -17,7 +17,8 @@ import type { IntroSettings } from '../core/intro.ts'
 import type { VoicesConfig } from '../voice/external.ts'
 import type { LibraryRow, Material } from './library.ts'
 import type { StageVersion } from './stage-store.ts'
-import type { WebConfig, WebMode, WebPlace, WebScope } from './web-body.ts'
+import type { CharacterCard } from './characters.ts'
+import type { ShowMedia, WebConfig, WebMode, WebPlace, WebScope, WebVeil } from './web-body.ts'
 
 /** 编排 for the page: the stage, what is wrong in it, the 素材库, the looks it can use whole, the versions to go back to. */
 export interface StageView {
@@ -109,7 +110,7 @@ export interface StateView {
     /** The look on screen, with its scenes (when a look rather than a single pack is chosen). */
     look?: LookView
     /** The web body: she in DSH's own page (no desktop needed). */
-    web: { mode: WebMode; connected: boolean; show: boolean; place: WebPlace; scope: WebScope; canBackground: boolean; avatar?: AvatarView }
+    web: { mode: WebMode; connected: boolean; show: boolean; place: WebPlace; scope: WebScope; canBackground: boolean; veil: WebVeil; avatar?: AvatarView }
     /** The body's screens (logical size, scale), for advice on sizes. */
     screens?: Array<{ w: number; h: number; scale: number }>
   }
@@ -121,6 +122,15 @@ export interface StateView {
   initiative: InitiativeView
   /** Ready-made looks offered on the release, and the one being fetched. */
   presets: { list: Preset[]; active?: { id: string; state: 'downloading' | 'failed'; done: number; total: number; error?: string } }
+  /** Where she appears, each on its own (§13). The desktop ones are the desktop body's; `holdKey`: hold a key in any program to talk. */
+  places: { wallpaper: boolean; overlay: boolean; web: boolean; webAlways: boolean; avatar: boolean; tray: boolean; holdKey: boolean }
+  /** What she shows now in the wallpaper and floating on top, for the picture on 总览. */
+  show: { desktop?: ShowMedia; pet?: ShowMedia }
+  /** Her 三视图 (素材库's `sheet` row): what every other picture and clip of her is made from. */
+  sheet: { name: string; url: string; chosen: boolean } | null
+  /** Who the brain runs for now, and everyone there is (several characters). */
+  cid: string
+  characters: CharacterCard[]
   /** She is switched off: not shown, not listening, not speaking (the big button on her page). */
   off: boolean
   /** The skin dsh wears (its name), and whether she plays 编排 — for the picture on 主界面. */
@@ -147,6 +157,10 @@ export interface ApiRuntime {
   initiativeFocus(choice: FocusChoice): void
   /** Switch her off, or call her back. */
   setOff(off: boolean): void
+  /** Several characters: a new one (her id), choosing who is here (the brain starts again for her), removing one. */
+  characterNew(input: { name: string; copy: boolean }): string
+  characterUse(cid: string): void
+  characterRemove(cid: string): void
   /** 编排 and 素材库 (docs/设置页与编排设计.md §2, §3). */
   stageGet(): StageView
   /** "+AI": the design session, told what to change; its id to open in dsh. */
@@ -169,6 +183,10 @@ export interface ApiRuntime {
   stageRestore(id: string): StageView
   libraryRename(row: string, from: string, to: string): StageView
   libraryRemove(row: string, name: string): StageView
+  /** "抠掉背景": a transparent copy of a material; its name. */
+  libraryKey(row: string, name: string): Promise<StageView & { made: string }>
+  /** Which picture of the `sheet` row is her 三视图 (undefined: none chosen). */
+  sheetSet(name: string | undefined): void
   /** Have her say something now; what she said. */
   initiativeTry(): Promise<string>
   /** Read the list of ready-made looks, with their pictures. */
@@ -185,7 +203,7 @@ export interface ApiRuntime {
   bodyOpenFolder(): void
   /** The web body: whether to show, her config, a message from the page, the setting. */
   /** `remote`: the page is open on another device than the one running dsh. */
-  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; mode: WebMode; place: WebPlace; scope: WebScope; focus: boolean; open?: string; page?: SettingsPage; avatar?: AvatarView; skin?: { id: string; rev: number }; intro?: { url: string; when: 'every' | 'daily' } }
+  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; pill: boolean; veil: WebVeil; mode: WebMode; place: WebPlace; scope: WebScope; focus: boolean; open?: string; page?: SettingsPage; avatar?: AvatarView; skin?: { id: string; rev: number }; intro?: { url: string; when: 'every' | 'daily' } }
   /** A new folder for files coming from the browser, and importing it as a pack (with no desktop body). */
   webNewBatch(): string
   importBatch(batch: string, name?: string): Promise<void>
@@ -195,6 +213,8 @@ export interface ApiRuntime {
   webConfig(remote: boolean): WebConfig
   webSend(message: BodyMessage): void
   webSetPlace(change: { place?: WebPlace; scope?: WebScope }): void
+  webSetVeil(change: Partial<WebVeil>): void
+  placesSet(change: { wallpaper?: boolean; overlay?: boolean; web?: boolean; webAlways?: boolean; avatar?: boolean; tray?: boolean; holdKey?: boolean }): void
   webSetMode(mode: WebMode): void
   /** The newest plugin on npm, for hosts without dshmarket (which otherwise answers this). */
   pluginLatest(): Promise<{ latest: string; updateAvailable: boolean }>
@@ -339,6 +359,24 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
     '/stage/restore': async body => ({ ...rt.stageRestore(str(body.id, '版本')) }),
     '/library/rename': async body => ({ ...rt.libraryRename(str(body.row, '行'), str(body.from, '素材'), str(body.to, '新名字')) }),
     '/library/remove': async body => ({ ...rt.libraryRemove(str(body.row, '行'), str(body.name, '素材')) }),
+    '/library/key': async body => ({ ...await rt.libraryKey(str(body.row, '行'), str(body.name, '素材')) }),
+    '/library/sheet': async body => {
+      rt.sheetSet(typeof body.name === 'string' && body.name !== '' ? body.name : undefined)
+      return withState()
+    },
+    '/characters/new': async body => {
+      const cid = rt.characterNew({ name: typeof body.name === 'string' ? body.name : '', copy: body.copy === true })
+      if (body.use !== false) rt.characterUse(cid)
+      return { cid, characters: rt.state().characters }
+    },
+    '/characters/use': async body => {
+      rt.characterUse(str(body.cid, '人物'))
+      return {}
+    },
+    '/characters/remove': async body => {
+      rt.characterRemove(str(body.cid, '人物'))
+      return withState()
+    },
     '/off': async body => {
       if (typeof body.off !== 'boolean') throw new ApiError('缺少 off')
       rt.setOff(body.off)
@@ -413,6 +451,17 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
       if (place !== undefined && place !== 'pet' && place !== 'background') throw new ApiError('放置方式不对')
       if (scope !== undefined && scope !== 'page' && scope !== 'chat') throw new ApiError('背景范围不对')
       rt.webSetPlace({ ...(place === undefined ? {} : { place }), ...(scope === undefined ? {} : { scope }) })
+      return withState()
+    },
+    '/web/veil': async body => {
+      rt.webSetVeil({ ...(typeof body.dim === 'number' ? { dim: body.dim } : {}), ...(typeof body.blur === 'number' ? { blur: body.blur } : {}) })
+      return withState()
+    },
+    '/places': async body => {
+      const change: Record<string, boolean> = {}
+      for (const key of ['wallpaper', 'overlay', 'web', 'webAlways', 'avatar', 'tray', 'holdKey']) if (typeof body[key] === 'boolean') change[key] = body[key] as boolean
+      if (Object.keys(change).length === 0) throw new ApiError('没有要改的')
+      rt.placesSet(change)
       return withState()
     },
     '/web/set': async body => {

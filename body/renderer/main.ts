@@ -56,6 +56,8 @@ let speech: SpeechPlayer | undefined
 let linkStatus: LinkStatus = 'connecting'
 let bargeIn = true
 let micMode: MicMode = 'push-to-talk'
+/** The floating window beside the wallpaper one: it shows her and is touched; the other window listens and speaks. */
+let companion = false
 let lastHeard: string | undefined
 /** When the last barge-in happened, until its utterance is understood (or not). */
 let bargedAt: number | undefined
@@ -320,9 +322,59 @@ function wireTouch(config: BodyConfig, hitTest: (x: number, y: number) => boolea
   }
 }
 
+/**
+ * The two small buttons at her feet while the pointer is on her: hold the
+ * microphone to talk (her answer comes over her head), or open the talk bar
+ * to type (her answer comes there).
+ */
+function wireControls(): (x: number, y: number) => boolean {
+  const box = document.getElementById('ctl')!
+  const micButton = document.getElementById('ctl-mic') as HTMLButtonElement
+  const typeButton = document.getElementById('ctl-type') as HTMLButtonElement
+  // A page without HTTPS has no microphone.
+  if (!window.isSecureContext) micButton.style.display = 'none'
+  let hideTimer: number | undefined
+  let held = false
+  const over = (x: number, y: number): boolean => {
+    if (!box.classList.contains('show')) return false
+    const b = box.getBoundingClientRect()
+    return x >= b.left - 8 && x <= b.right + 8 && y >= b.top - 8 && y <= b.bottom + 8
+  }
+  const release = () => {
+    if (!held) return
+    held = false
+    micButton.classList.remove('on')
+    window.her.hold(false)
+  }
+  micButton.addEventListener('pointerdown', event => {
+    event.preventDefault()
+    event.stopPropagation()
+    micButton.setPointerCapture(event.pointerId)
+    held = true
+    micButton.classList.add('on')
+    window.her.hold(true)
+  })
+  for (const end of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) micButton.addEventListener(end, release)
+  typeButton.addEventListener('click', event => {
+    event.stopPropagation()
+    openInput()
+  })
+  // A press on a button is not a press on her: no drag, no touch.
+  for (const type of ['mousedown', 'mouseup', 'dblclick'] as const) box.addEventListener(type, event => event.stopPropagation())
+  showControls = () => {
+    window.clearTimeout(hideTimer)
+    box.classList.add('show')
+    hideTimer = window.setTimeout(() => { if (!held) box.classList.remove('show') }, 1800)
+  }
+  return over
+}
+let showControls = (): void => {}
+
 function wireOverlay(config: BodyConfig): void {
-  const hitTest = makeHitTest(config.pack.layout)
-  wireTouch(config, hitTest)
+  const figure = makeHitTest(config.pack.layout)
+  const overControls = wireControls()
+  const hitTest = (x: number, y: number) => overControls(x, y) || figure(x, y)
+  wireTouch(config, figure)
   let onHer = false
   let lastCheck = 0
   let drag: { x: number; y: number; moved: boolean } | undefined
@@ -345,6 +397,7 @@ function wireOverlay(config: BodyConfig): void {
     if (now - lastCheck < HIT_EVERY_MS) return
     lastCheck = now
     setOnHer(hitTest(event.clientX, event.clientY))
+    if (onHer) showControls()
   })
   window.addEventListener('mouseleave', () => { if (drag === undefined) setOnHer(false) })
   window.addEventListener('mousedown', event => {
@@ -378,6 +431,7 @@ function holdEnd(): void {
 }
 
 function setMicMode(mode: MicMode): void {
+  if (companion) return
   micMode = mode
   mic.setAlways(mode === 'always').catch(error => bubble.note(`（打不开麦克风：${(error as Error).message}）`, 6000))
 }
@@ -519,6 +573,8 @@ function installDebugHooks(): void {
 // Listeners first: the shortcut may fire while the config loads.
 window.her.onShowInput(openInput)
 window.her.onHold(on => { if (on) holdStart(); else holdEnd() })
+// "Answer where you asked": with the talk bar open the conversation is there, so nothing over her head.
+window.her.onBar(open => document.body.classList.toggle('bar-open', open))
 window.her.onTalk(talk)
 window.her.onMicMode(setMicMode)
 window.her.onBrain(onBrain)
@@ -566,7 +622,10 @@ async function main(): Promise<void> {
   document.documentElement.style.setProperty('--her-h', `${config.her.height}px`)
   document.documentElement.style.setProperty('--her-aspect', String(config.her.width / config.her.height))
   muted = config.mute
-  if (config.pack.clips.length === 0) document.body.classList.add('empty')
+  companion = config.pet === true
+  if (config.bubble === false) document.body.classList.add('no-bubble')
+  // Nobody sees this window (both desktop places are off): no clips to decode, only her voice and the microphone.
+  if (config.pack.clips.length === 0 || config.unseen === true) document.body.classList.add('empty')
   else player = new Player(stage, config.pack, { started: clipStarted })
   speech = new SpeechPlayer({
     sentence: (uid, seq, text, durationMs, cues) => {

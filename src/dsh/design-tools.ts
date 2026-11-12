@@ -54,7 +54,7 @@ const text = (v: unknown, what: string) => {
   if (typeof v !== 'string' || v.trim() === '') throw new Error(`缺少 ${what}`)
   return v.trim()
 }
-const ROWS = ['avatar', 'desktop', 'pet', 'intro']
+const ROWS = ['avatar', 'desktop', 'pet', 'intro', 'sheet']
 
 /** Keep the SVG as it is now before it is written over, so it can be taken back. */
 export function keepSvgVersion(home: string, row: string, file: string, path: string): void {

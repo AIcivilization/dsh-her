@@ -15,6 +15,9 @@ import type { Cell, Hold, Scene, Stage, When, WhenKind } from '../pack/stage.ts'
 type Row = 'skin' | 'avatar' | 'desktop' | 'pet'
 const ROW_LABEL: Record<Row, string> = { skin: '皮肤', avatar: '头像', desktop: '桌面', pet: '宠物' }
 const LIBRARY: Array<Exclude<Row, 'skin'>> = ['avatar', 'desktop', 'pet']
+/** A row of the 素材库: the three of 编排, and her 三视图 (reference pictures). */
+type LibRow = Exclude<Row, 'skin'> | 'sheet'
+const LIB_LABEL: Record<LibRow, string> = { avatar: '头像', desktop: '桌面', pet: '宠物', sheet: '三视图' }
 
 const WHEN_LABEL: Record<WhenKind, string> = {
   'her-speaking': '她开口', 'you-speaking': '你在说', thinking: '她在想', touched: '被碰', back: '你回来了', opening: '她先开口时',
@@ -37,7 +40,7 @@ const holdText = (hold: Hold | undefined) => hold === 'once' ? '播一遍' : hol
 const fileUrl = (row: string, name: string) => `/api/dsh-her/web/library-file?row=${encodeURIComponent(row)}&name=${encodeURIComponent(name)}`
 
 /** `part`: the table of scenes (编排), or the 素材库; each is a page of its own. */
-export function StageEditor({ part = 'table', onLibrary }: { part?: 'table' | 'library'; onLibrary?: () => void }) {
+export function StageEditor({ part = 'table', onLibrary, onGuide, sheet, onSheet }: { part?: 'table' | 'library'; onLibrary?: () => void; onGuide?: () => void; sheet?: string; onSheet?: (name: string | null) => void }) {
   const [view, setView] = useState<StageView>()
   const [draft, setDraft] = useState<Stage>()
   const [dirty, setDirty] = useState(false)
@@ -92,13 +95,22 @@ export function StageEditor({ part = 'table', onLibrary }: { part?: 'table' | 'l
           <p className="her-muted">文件名就是素材的名字（"打麻将.mp4"就叫"打麻将"）。可以一次选好多个，也可以选一整个文件夹。传上来的每个文件都会对照规格看一遍，不合适的地方标出来，但照样能用。</p>
           <details className="her-more"><summary>每一行要什么样的文件</summary>
             <ul>
+              <li><b>三视图</b>：她的正面、侧面、背面在一张图里，2048×1152 左右。别的图和视频都拿它当参考来做。</li>
               <li><b>头像</b>：正方形，512×512 左右；图片（PNG、WebP、SVG）或 15 秒以内的视频。</li>
               <li><b>桌面</b>：和屏幕一样的横版比例（16:9 或 16:10），宽 1920 以上，最好和屏幕一样大；视频或图片。</li>
-              <li><b>宠物</b>：透明背景（带透明的 WebM 视频，或 PNG 图片），竖版，高 1280 左右；视频 5–10 秒，首尾能接上就能无缝循环。</li>
+              <li><b>宠物</b>：透明背景，竖版，高 1280 左右；视频 5–10 秒，首尾能接上就能无缝循环。纯绿背景的传上来点"抠掉背景"。</li>
               <li>SVG 里能运行的东西（脚本、点击事件、外部链接）上传时会去掉，画面不受影响。</li>
             </ul>
           </details>
+          {onGuide !== undefined && (
+            <button className="her-linkrow" onClick={onGuide}>
+              <Icon name="guide" />
+              <span><b>不知道该做哪些、怎么做？</b><small>「素材指南」里每一样都写了尺寸、要求，和能直接复制的提示词。</small></span>
+              <Icon name="arrow" size={16} />
+            </button>
+          )}
         </section>
+        <LibraryRow row="sheet" view={view} stage={draft} onView={r => take(r)} {...(sheet === undefined ? {} : { sheet })} {...(onSheet === undefined ? {} : { onSheet })} />
         {LIBRARY.map(row => <LibraryRow key={row} row={row} view={view} stage={draft} onView={r => take(r)} />)}
       </div>
     )
@@ -401,13 +413,23 @@ function ColumnEditor({ scene, index, count, onChange, onMove, onRemove, onClose
   )
 }
 
-function LibraryRow({ row, view, stage, onView }: { row: Exclude<Row, 'skin'>; view: StageView; stage: Stage; onView: (result: Awaited<ReturnType<typeof herApi.stageGet>>) => void }) {
+function LibraryRow({ row, view, stage, onView, sheet, onSheet }: { row: LibRow; view: StageView; stage: Stage; onView: (result: Awaited<ReturnType<typeof herApi.stageGet>>) => void; sheet?: string; onSheet?: (name: string | null) => void }) {
+  const [keying, setKeying] = useState<string>()
   const files = useRef<HTMLInputElement>(null)
   const folder = useRef<HTMLInputElement>(null)
   const [progress, setProgress] = useState<UploadProgress>()
   const [error, setError] = useState<string>()
-  const materials = view.library[row]
-  const usedIn = (name: string) => stage.scenes.filter(s => s.cells[row]?.use.includes(name)).map(s => s.name)
+  const materials = view.library[row] ?? []
+  const usedIn = (name: string) => (row === 'sheet' ? [] : stage.scenes.filter(s => s.cells[row]?.use.includes(name)).map(s => s.name))
+  /** "抠掉背景": a transparent copy beside the original. */
+  const keyOut = async (name: string) => {
+    setKeying(name)
+    setError(undefined)
+    const result = await herApi.libraryKey(row, name)
+    setKeying(undefined)
+    if (result.ok) onView(result)
+    else setError(result.message)
+  }
   const send = async (list: FileList | null) => {
     const chosen = [...(list ?? [])].filter(f => /\.(mp4|webm|mov|m4v|png|jpe?g|webp|gif|svg)$/i.test(f.name) && !f.name.startsWith('.'))
     if (chosen.length === 0) return setError('没有能用的文件：素材库只收图片（png、jpg、webp、gif、svg）和视频（mp4、webm、mov）')
@@ -423,7 +445,7 @@ function LibraryRow({ row, view, stage, onView }: { row: Exclude<Row, 'skin'>; v
   return (
     <div className="her-card">
       <div className="her-row">
-        <h2 style={{ flex: 1, margin: 0 }}>{ROW_LABEL[row]}（{materials.length}）</h2>
+        <h2 style={{ flex: 1, margin: 0 }}>{LIB_LABEL[row]}（{materials.length}）</h2>
         <button className="her-btn small" onClick={() => files.current?.click()}>上传文件…</button>
         <button className="her-btn small" onClick={() => folder.current?.click()}>上传文件夹…</button>
         <input ref={files} type="file" multiple accept="video/*,image/*,.svg" hidden onChange={e => { void send(e.target.files); e.target.value = '' }} />
@@ -431,6 +453,7 @@ function LibraryRow({ row, view, stage, onView }: { row: Exclude<Row, 'skin'>; v
       </div>
       {progress !== undefined && <p className="her-muted">正在上传 {progress.file}（{Math.round(progress.done / Math.max(progress.total, 1) * 100)}%）</p>}
       {error !== undefined && <p className="her-danger">{error}</p>}
+      {row === 'sheet' && <p className="her-muted">她的正面、侧面、背面。它显示在「总览」里；做别的图和视频时，把它传给工具当参考，她才一直是同一个人。定妆照、表情表也可以放这儿存着。</p>}
       {materials.length === 0 ? <p className="her-faint">还没有。</p> : (
         <div className={`her-clips ${row}`}>
           {materials.map(m => {
@@ -442,13 +465,19 @@ function LibraryRow({ row, view, stage, onView }: { row: Exclude<Row, 'skin'>; v
                   : <img src={fileUrl(row, m.name)} alt={m.name} className="her-clip-img" />}
                 <div><b>{m.name}</b></div>
                 <div className="her-faint">{m.info === undefined ? '正在看规格…' : [m.info.width === undefined ? undefined : `${m.info.width}×${m.info.height}`, m.info.durationMs === undefined ? undefined : `${(m.info.durationMs / 1000).toFixed(1)} 秒`, m.info.alpha === true ? '透明背景' : undefined].filter(Boolean).join(' · ')}</div>
-                <div className="her-faint">{used.length === 0 ? '还没用上' : `用在：${used.join('、')}`} · {(m.size / 1024 / 1024).toFixed(1)} MB</div>
+                <div className="her-faint">{row === 'sheet' ? (sheet === m.name ? <span className="her-tag ok">她的三视图</span> : '参考图') : used.length === 0 ? '还没用上' : `用在：${used.join('、')}`} · {(m.size / 1024 / 1024).toFixed(1)} MB</div>
                 {(m.warnings ?? []).map(w => <div key={w} className="her-warn" style={{ fontSize: 12 }}>⚠ {w}</div>)}
                 <div className="her-row">
                   <button className="her-btn small" onClick={() => {
                     const to = window.prompt('新名字', m.name)
                     if (to !== null && to.trim() !== '' && to.trim() !== m.name) void herApi.libraryRename(row, m.name, to.trim()).then(onView)
                   }}>改名</button>
+                  {row === 'sheet' && m.kind === 'image' && onSheet !== undefined && (sheet === m.name
+                    ? <button className="her-btn small" onClick={() => onSheet(null)}>不用这张</button>
+                    : <button className="her-btn small primary" onClick={() => onSheet(m.name)}>设为她的三视图</button>)}
+                  {row !== 'sheet' && row !== 'desktop' && !m.file.endsWith('.svg') && m.info !== undefined && m.info.alpha !== true && (
+                    <button className="her-btn small" disabled={keying !== undefined} title="把纯色背景（绿幕、蓝幕、白底）去掉，另存一个带透明的；原来的留着" onClick={() => void keyOut(m.name)}>{keying === m.name ? '正在抠…' : '抠掉背景'}</button>
+                  )}
                   {m.file.endsWith('.svg') && <button className="her-btn small her-ai" title="让 dsh 的模型改这张图：比如把衣服换成墨绿色" onClick={() => void openDesign(`素材库 ${row} 里的「${m.name}」（${m.file}）`)}>+AI</button>}
                   {m.file.endsWith('.svg') && <button className="her-btn small" onClick={() => void herApi.libraryUndo(row, m.name).then(r => onView(r))}>退回上一版</button>}
                   <button className="her-btn small" onClick={() => {

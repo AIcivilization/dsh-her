@@ -5,7 +5,7 @@
  * and every change shows the state the brain answers with.
  */
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { desktopHere, desktopOffered, herApi, remotePage, type StateView } from './api.ts'
 import { serviceOf } from '../core/voices.ts'
 import { UpdateBar } from './UpdateBar.tsx'
@@ -14,8 +14,11 @@ import { Icon } from './icons.tsx'
 import { ClipsCard } from './ClipsCard.tsx'
 import { StageEditor } from './StageEditor.tsx'
 import { SkinCard } from './SkinCard.tsx'
-import { StageMap } from './StageMap.tsx'
+import { Showcase, SheetCard } from './Showcase.tsx'
 import { VoiceServices } from './VoiceServices.tsx'
+import { CharacterStrip, onChanging, switchCharacter, type Changing } from './Characters.tsx'
+import { PlacesCard } from './Places.tsx'
+import { MaterialGuide } from './MaterialGuide.tsx'
 import { onPageRequest, takePage } from './open-page.ts'
 import type { SettingsPage } from '../protocol/index.ts'
 import { SERVICE_SHORT, voiceLabel } from './choice.tsx'
@@ -28,12 +31,29 @@ export function HerPage() {
   const [error, setError] = useState<string>()
   const [wizard, setWizard] = useState<boolean>()
 
+  // Another character was chosen: the brain is away for a moment, then comes back as her.
+  const [changing, setChanging] = useState<Changing>()
+  const changingRef = useRef<Changing>()
+  useEffect(() => onChanging(next => {
+    changingRef.current = next
+    setChanging(next)
+  }), [])
+
   const refresh = useCallback(async () => {
     const result = await herApi.state()
+    const waiting = changingRef.current
     if (result.ok) {
       setState(result.state)
       setError(undefined)
-    } else setError(result.message)
+      if (waiting !== undefined && (result.state.cid === waiting.cid || Date.now() - waiting.at > 20_000)) {
+        changingRef.current = undefined
+        setChanging(undefined)
+      }
+    } else if (waiting === undefined || Date.now() - waiting.at > 20_000) {
+      changingRef.current = undefined
+      setChanging(undefined)
+      setError(result.message)
+    }
   }, [])
   useEffect(() => {
     void refresh()
@@ -58,6 +78,7 @@ export function HerPage() {
   const showWizard = wizard ?? !state.character.onboarded
   return (
     <div className="her-page">
+      {changing !== undefined && <div className="her-changing" role="status"><i />正在换成 <b>{changing.name}</b>：她的声音、形象和记忆一起换过来，几秒就好。</div>}
       {state.off && (
         <div className="her-banner off">
           <Icon name="power" />
@@ -67,7 +88,7 @@ export function HerPage() {
       )}
       {showWizard
         ? <div className="her-wizard"><Wizard state={state} apply={apply} onDone={() => setWizard(false)} /></div>
-        : <Manage state={state} apply={apply} onWizard={() => setWizard(true)} />}
+        : <Manage key={state.cid} state={state} apply={apply} onWizard={() => setWizard(true)} />}
       {error !== undefined && <p className="her-error">{error}</p>}
     </div>
   )
@@ -174,13 +195,13 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
  * on top, a list on the left in four groups, one thing on the right at a
  * time. Nothing folds; what needs doing shows on 总览 and as a dot in the list.
  */
-type Section = 'home' | 'persona' | 'voice' | 'memory' | 'look' | 'stage' | 'library' | 'skin' | 'workshop' | 'speak' | 'initiative' | 'talk' | 'model' | 'body' | 'voices' | 'about'
+type Section = 'home' | 'persona' | 'voice' | 'memory' | 'look' | 'stage' | 'library' | 'guide' | 'skin' | 'workshop' | 'speak' | 'initiative' | 'talk' | 'model' | 'body' | 'voices' | 'about'
 type Tone = 'ok' | 'warn' | 'bad' | 'off'
 
 const GROUPS: Array<{ title?: string; items: Array<{ id: Section; label: string; icon: string }> }> = [
   { items: [{ id: 'home', label: '总览', icon: 'home' }] },
   { title: '她', items: [{ id: 'persona', label: '人设', icon: 'persona' }, { id: 'voice', label: '声音', icon: 'voice' }, { id: 'memory', label: '记忆', icon: 'memory' }] },
-  { title: '外观', items: [{ id: 'look', label: '形象', icon: 'look' }, { id: 'stage', label: '编排', icon: 'stage' }, { id: 'library', label: '素材库', icon: 'library' }, { id: 'skin', label: '皮肤', icon: 'skin' }, { id: 'workshop', label: '形象工坊', icon: 'workshop' }] },
+  { title: '外观', items: [{ id: 'look', label: '形象', icon: 'look' }, { id: 'stage', label: '编排', icon: 'stage' }, { id: 'library', label: '素材库', icon: 'library' }, { id: 'guide', label: '素材指南', icon: 'guide' }, { id: 'skin', label: '皮肤', icon: 'skin' }, { id: 'workshop', label: '形象工坊', icon: 'workshop' }] },
   { title: '相处', items: [{ id: 'speak', label: '说话和聆听', icon: 'speak' }, { id: 'initiative', label: '主动说话', icon: 'initiative' }, { id: 'talk', label: '对话', icon: 'talk' }] },
   { title: '系统', items: [{ id: 'model', label: '模型', icon: 'model' }, { id: 'body', label: '住在哪儿', icon: 'body' }, { id: 'voices', label: '外接语音', icon: 'voices' }, { id: 'about', label: '关于', icon: 'about' }] },
 ]
@@ -188,12 +209,13 @@ const GROUPS: Array<{ title?: string; items: Array<{ id: Section; label: string;
 /** What each page is for, in one line under its title. */
 const ABOUT: Record<Section, string> = {
   home: '',
-  persona: '她叫什么、是谁、怎么说话、怎么称呼你。保存后从她的下一句话开始生效。',
+  persona: '可以设好几个人物，想用哪个点哪个。下面是现在这位：叫什么、是谁、怎么说话、怎么称呼你。',
   voice: '她用哪个声音说话、说多快。',
   memory: '她记得的关于你的事。聊天时她会自己记；这里可以确认、让她忘掉。',
   look: '她长什么样：选一个现成的形象，或者导入你自己做的。',
   stage: '什么时候显示什么：一行一类东西，一列一个场景。',
-  library: '编排用的图片、视频和 SVG 都放在这里。',
+  library: '编排用的图片、视频和 SVG 都放在这里，还有她的三视图。',
+  guide: '要做哪些图和视频、多大、有什么要求，每一样都有能直接复制的提示词。',
   skin: '换整个 dsh 的样子，和她出场时播的开机动画。',
   workshop: '从头做一个自己的形象：照着每一步准备图片和视频，再导入。',
   speak: '怎么叫她、怎么跟她说话，还有麦克风好不好用。',
@@ -205,14 +227,24 @@ const ABOUT: Record<Section, string> = {
   about: '版本、更新，和重新走一遍向导。',
 }
 
+/** The pages that are one character's own (the others are shared by all of them). */
+const OWN = new Set<Section>(['voice', 'memory', 'look', 'stage', 'initiative', 'talk', 'model'])
+
 /** "设置…" on the body's menu names one of the four old pages: where each lands now. */
 const FROM_MENU: Record<SettingsPage, Section> = { home: 'home', engine: 'model', her: 'persona', stage: 'stage' }
 
+/** The page open now: kept when the whole page starts over for another character. */
+let lastSection: Section = 'home'
+
 function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; onWizard: () => void }) {
-  const [section, setSection] = useState<Section>(() => {
+  const [section, setSectionState] = useState<Section>(() => {
     const asked = takePage()
-    return asked === undefined ? 'home' : FROM_MENU[asked]
+    return asked === undefined ? lastSection : FROM_MENU[asked]
   })
+  const setSection = (next: Section) => {
+    lastSection = next
+    setSectionState(next)
+  }
   // "设置…" on the desktop body's menu.
   useEffect(() => onPageRequest(() => {
     const asked = takePage()
@@ -260,14 +292,19 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
         <main className="her-main">
           {section !== 'home' && (
             <header className="her-title">
-              <h1>{title.label}</h1>
+              <h1>{title.label}{state.characters.length > 1 && OWN.has(section) && <span className="her-title-who">{c.name} 的</span>}</h1>
               <p>{ABOUT[section]}</p>
             </header>
           )}
 
           {section === 'home' && <Home state={state} apply={apply} go={go} />}
 
-          {section === 'persona' && <Card><PersonaEditor state={state} apply={apply} /></Card>}
+          {section === 'persona' && (
+            <>
+              <CharacterStrip state={state} apply={apply} />
+              <Card title={`${c.name} 的人设`}><PersonaEditor state={state} apply={apply} /></Card>
+            </>
+          )}
           {section === 'voice' && (
             <>
               <Card><VoicePicker state={state} apply={apply} saveLabel="用这个声音" /></Card>
@@ -286,7 +323,8 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
             </>
           )}
           {section === 'stage' && <StageEditor part="table" onLibrary={() => go('library')} />}
-          {section === 'library' && <StageEditor part="library" />}
+          {section === 'library' && <StageEditor part="library" onGuide={() => go('guide')} {...(state.sheet?.chosen === true ? { sheet: state.sheet.name } : {})} onSheet={name => void apply(herApi.sheetSet(name))} />}
+          {section === 'guide' && <MaterialGuide cid={state.cid} onLibrary={() => go('library')} onSkin={() => go('skin')} />}
           {section === 'skin' && <SkinCard />}
           {section === 'workshop' && <Workshop state={state} apply={apply} />}
 
@@ -296,8 +334,21 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
                 <ul className="her-ways">
                   <li><Keys keys={state.platform === 'darwin' ? ['⌃', '⌥', '↩'] : ['Ctrl', 'Alt', 'Enter']} /><div><b>对话小条</b><span>在哪儿都能叫出来：打字，或按住 🎙 说。双击她、点 dsh 对话框上她的小头像也行。</span></div></li>
                   <li><Keys keys={state.platform === 'darwin' ? ['⌃', '⌥', '空格'] : ['Ctrl', 'Alt', '空格']} /><div><b>说一句</b><span>按一下开始说，说完自动发出去。她说话时你开口，就能打断她。</span></div></li>
-                  <li><Keys keys={[state.platform === 'darwin' ? '右 ⌥' : '右 Alt']} /><div><b>按住说话</b><span>小条打开时按住就能说。想在任何程序里都能按住说：右键她（或托盘）勾上那一项。</span></div></li>
+                  <li><Keys keys={[state.platform === 'darwin' ? '右 ⌥' : '右 Alt']} /><div><b>按住说话</b><span>小条打开时按住就能说；鼠标移到她身上，脚边的话筒按住也能说。</span></div></li>
                   <li><span className="her-keys"><kbd>右键她</kbd></span><div><b>一直在听</b><span>在她的右键菜单里勾上，戴耳机长聊时用。</span></div></li>
+                </ul>
+                {desktopOffered(body) && (
+                  <div className="her-setrow">
+                    <div><b>在任何程序里按住{state.platform === 'darwin' ? '右边的 Option' : '右 Alt'} 说话</b><span>不用先叫出小条。{state.platform === 'darwin' ? '第一次打开，macOS 会让你在"隐私与安全性 → 辅助功能"里允许 dsh-her；她只听这一个键。' : '她只听这一个键。'}{body.connected ? '' : '桌面程序连上后生效。'}</span></div>
+                    <input type="checkbox" aria-label="在任何程序里按住说话" checked={state.places.holdKey} onChange={e => void apply(herApi.places({ holdKey: e.target.checked }))} />
+                  </div>
+                )}
+              </Card>
+              <Card title="她在哪儿回答">
+                <ul className="her-ways">
+                  <li><span className="her-keys"><kbd>说话</kbd></span><div><b>在她头顶回答</b><span>用快捷键、按住话筒或"一直在听"说的话，她出声回答，字幕在头顶的气泡里，上面一小行是她听到的。</span></div></li>
+                  <li><span className="her-keys"><kbd>打字</kbd></span><div><b>在小条里回答</b><span>小条开着的时候，对话都在小条里（她照样出声），头顶不再重复显示。关掉小条，回到头顶。</span></div></li>
+                  <li><span className="her-keys"><kbd>她先开口</kbd></span><div><b>在她头顶</b><span>她自己想说的、被你碰到时说的，都在头顶。看完整的对话：小条里点"完整对话"。</span></div></li>
                 </ul>
               </Card>
               <Card title="听你说话" badge={<><Dot tone={toneOf(state.voice.status)} />{listeningText(state.voice.status)}</>}>
@@ -320,8 +371,7 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
               <Card title="桌面程序" badge={<><Dot tone={here ? 'ok' : body.running ? 'warn' : 'off'} />{desktopHere(body) ? '已连上' : body.web.connected ? '她在网页里' : body.running ? '正在连' : '没连上'}</>}>
                 <BodyStatus state={state} apply={apply} />
               </Card>
-              {desktopOffered(body) && <Card title="在桌面上怎么待着">{body.connected ? <ModePicker state={state} apply={apply} /> : <p className="her-muted">桌面程序连上之后才能切换。</p>}</Card>}
-              <Card title="在 dsh 网页里"><WebModePicker state={state} apply={apply} /></Card>
+              <PlacesCard state={state} apply={apply} />
               <WebPlaceCard state={state} apply={apply} />
             </>
           )}
@@ -340,7 +390,7 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
                 <p className="her-muted">跑在 {platformName(state.platform)} 上{remotePage ? '，你是从别的设备打开这个网页的' : ''}。</p>
                 <div className="her-row">
                   <a className="her-btn" href="https://github.com/AIcivilization/dsh-her#readme" target="_blank" rel="noreferrer">使用说明</a>
-                  <a className="her-btn" href="https://github.com/AIcivilization/dsh-her/blob/main/docs/素材生成提示词.md" target="_blank" rel="noreferrer">素材规格</a>
+                  <a className="her-btn" href="https://github.com/AIcivilization/dsh-her/blob/main/docs/素材规格与提示词.md" target="_blank" rel="noreferrer">素材规格</a>
                   <a className="her-btn" href="https://github.com/AIcivilization/dsh-her/issues" target="_blank" rel="noreferrer">反馈问题</a>
                 </div>
               </Card>
@@ -375,7 +425,17 @@ function Hero({ state, apply }: { state: StateView; apply: Apply }) {
           : <span>{[...c.name][0] ?? '她'}</span>}
       </div>
       <div className="her-hero-text">
-        <h1>{c.name}</h1>
+        <h1>
+          <span className="her-hero-name">{c.name}</span>
+          {state.characters.length > 1 && (
+            <select className="her-hero-who" aria-label="换一个人物" title="换一个人物" value={state.cid} onChange={e => {
+              const next = state.characters.find(p => p.cid === e.target.value)
+              if (next !== undefined && next.cid !== state.cid) void switchCharacter(next.cid, next.name)
+            }}>
+              {state.characters.map(p => <option key={p.cid} value={p.cid}>{p.cid === state.cid ? `换人物（${state.characters.length}）` : p.name}</option>)}
+            </select>
+          )}
+        </h1>
         <p><Dot tone={where.tone} />{where.text}{state.initiative.focus.on && !state.off ? ' · 专注中' : ''}</p>
       </div>
       <label className="her-power" title={state.off ? '叫她出来' : '关掉她：桌面上、网页里都收起来，不听、不说话；重启后也还关着'}>
@@ -437,8 +497,9 @@ function Home({ state, apply, go }: { state: StateView; apply: Apply; go: (secti
           ))}
         </section>
       )}
-      <div className="her-home-top">
-        <StageMap state={state} onGo={target => go(target === 'skin' ? 'skin' : target === 'voice' ? 'voice' : target === 'talk' ? 'speak' : target === 'model' ? 'model' : target === 'stage' ? 'look' : 'body')} />
+      <Showcase state={state} onGo={go} />
+      <SheetCard state={state} onGo={go} />
+      <div>
         <section className="her-card her-quick">
           <h2>顺手的事</h2>
           <div className="her-setrow">

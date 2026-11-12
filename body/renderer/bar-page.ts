@@ -26,7 +26,7 @@ const bar = new TalkBar({
 document.body.append(bar.element)
 bar.focus()
 window.her.onBrain(message => {
-  if (message.t === 'talk') bar.show(message)
+  bar.live(message)
   if (message.t === 'bubble' && message.text.startsWith('（新开了一段')) bar.showNote(message.text.slice(1, -1))
 })
 void window.her.send({ t: 'talk.get' })

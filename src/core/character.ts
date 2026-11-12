@@ -21,6 +21,10 @@ export interface Character {
   voice: { id: string; speed: number }
   /** Her model; undefined = the plugin config's, else DSH's default. `effort` empty = the route's default. */
   model?: { provider: string; model: string; effort?: string }
+  /** What she wears: a pack id or `look:<id>`, chosen on her page; undefined = whatever is on. */
+  look?: string
+  /** Her 三视图: a picture in 素材库's `sheet` row, shown on 总览; everything else is made from it. */
+  sheet?: string
   /** The wizard has been completed once. */
   onboarded: boolean
 }

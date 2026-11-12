@@ -19,6 +19,7 @@ const bridge: HerBridge = {
   openBar: () => ipcRenderer.send('bar'),
   hold: on => ipcRenderer.send('hold', on),
   onHold: listener => { ipcRenderer.on('hold', (_event, on: boolean) => listener(on)) },
+  onBar: listener => { ipcRenderer.on('bar-open', (_event, open: boolean) => listener(open)) },
   openDsh: () => ipcRenderer.send('open-dsh'),
 }
 

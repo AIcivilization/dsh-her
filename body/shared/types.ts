@@ -43,6 +43,8 @@ export interface HerBridge {
   hold(on: boolean): void
   /** Her window: listen while held. */
   onHold(listener: (on: boolean) => void): void
+  /** The talk bar opened or closed: while it is open her answer shows there, not over her head. */
+  onBar(listener: (open: boolean) => void): void
   /** Bring dsh to the front (its page then opens her conversation). */
   openDsh(): void
 }
