@@ -1,6 +1,6 @@
 {
   "name": "dsh-her",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "description": "A desktop companion for DeepSeek Harness (dsh): she lives on your real desktop (on top of your windows, in the wallpaper, or in dsh's own page), talks with you by voice, speaks first and remembers you. · DSH 桌面女友：住在桌面上、壁纸里或 dsh 网页里，语音聊天，会先开口，记得你；形象和编排都能自己定。",
   "type": "module",
   "icon": "./lib/icon.png",
