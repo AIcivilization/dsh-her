@@ -17,7 +17,7 @@ import { SkinCard } from './SkinCard.tsx'
 import { Showcase, SheetCard } from './Showcase.tsx'
 import { VoiceServices } from './VoiceServices.tsx'
 import { CharacterStrip, onChanging, switchCharacter, type Changing } from './Characters.tsx'
-import { PlacesCard } from './Places.tsx'
+import { PlacesRow } from './Places.tsx'
 import { MaterialGuide } from './MaterialGuide.tsx'
 import { onPageRequest, takePage } from './open-page.ts'
 import type { SettingsPage } from '../protocol/index.ts'
@@ -222,7 +222,7 @@ const ABOUT: Record<Section, string> = {
   initiative: '她什么时候可以先开口，什么时候不要打扰你。',
   talk: '你们的对话存在哪儿、什么时候新开一段。',
   model: '她的大脑用哪个模型。',
-  body: '她住在桌面上，还是住在 dsh 的网页里。',
+  body: '桌面程序的安装和运行，和她在 dsh 网页里的样子。',
   voices: '接讯飞、OpenAI 兼容的服务、你自己的 GPT-SoVITS，或别的 dsh 插件。',
   about: '版本、更新，和重新走一遍向导。',
 }
@@ -371,7 +371,7 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
               <Card title="桌面程序" badge={<><Dot tone={here ? 'ok' : body.running ? 'warn' : 'off'} />{desktopHere(body) ? '已连上' : body.web.connected ? '她在网页里' : body.running ? '正在连' : '没连上'}</>}>
                 <BodyStatus state={state} apply={apply} />
               </Card>
-              <PlacesCard state={state} apply={apply} />
+              <LinkRow icon="home" title="她出现在哪儿" text="壁纸里、桌面上、dsh 中、dsh 对话框上、菜单栏图标，五个开关在「总览」那张图的下面。" onClick={() => go('home')} />
               <WebPlaceCard state={state} apply={apply} />
             </>
           )}
@@ -497,8 +497,9 @@ function Home({ state, apply, go }: { state: StateView; apply: Apply; go: (secti
           ))}
         </section>
       )}
-      <Showcase state={state} onGo={go} />
-      <SheetCard state={state} onGo={go} />
+      <Showcase state={state} onGo={target => (target === 'places' ? document.querySelector('.her-places')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) : go(target))} />
+      <PlacesRow state={state} apply={apply} />
+      <SheetCard state={state} onGo={target => { if (target !== 'places') go(target) }} />
       <div>
         <section className="her-card her-quick">
           <h2>顺手的事</h2>

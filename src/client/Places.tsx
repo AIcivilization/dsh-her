@@ -5,7 +5,7 @@
  */
 
 import type { ReactNode } from 'react'
-import { desktopOffered, herApi, type StateView } from './api.ts'
+import { desktopHere, desktopOffered, herApi, type StateView } from './api.ts'
 import type { Apply } from './parts.tsx'
 
 const frame = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
@@ -25,36 +25,45 @@ const PICTURES: Record<string, ReactNode> = {
 }
 const Picture = ({ name }: { name: string }) => <svg className="her-place-pic" viewBox="0 0 56 40" aria-hidden="true">{PICTURES[name]}</svg>
 
-export function PlacesCard({ state, apply }: { state: StateView; apply: Apply }) {
+/** The five switches as the page shows them, in this order. */
+type PlaceKey = 'wallpaper' | 'overlay' | 'web' | 'avatar' | 'tray'
+
+/**
+ * Where she appears, a row of switches under the picture on 总览: switch one
+ * on and that place shows her in the picture above (and on your screen), off
+ * and it is gone. "dsh中" is shown when on, also beside a desktop body.
+ */
+export function PlacesRow({ state, apply }: { state: StateView; apply: Apply }) {
   const p = state.places
   const body = state.body
   const offered = desktopOffered(body)
+  const desk = desktopHere(body)
   const set = (change: Partial<StateView['places']>) => void apply(herApi.places(change)).then(() => window.__herFloat?.refresh())
-  const row = (key: 'wallpaper' | 'overlay' | 'web' | 'avatar' | 'tray', title: string, text: string, extra?: { disabled?: boolean; note?: string }) => (
-    <div className={`her-setrow her-place${p[key] ? ' on' : ''}`}>
-      <Picture name={key} />
-      <div><b>{title}</b><span>{text}</span>{extra?.note !== undefined && <span className="her-place-note">{extra.note}</span>}</div>
-      <input type="checkbox" aria-label={title} checked={p[key]} disabled={extra?.disabled === true} onChange={e => set({ [key]: e.target.checked })} />
-    </div>
-  )
-  const waiting = offered && !body.connected ? '桌面程序连上后生效。' : undefined
+  /** In dsh: on means she is really in the page, beside a desktop body too. */
+  const webOn = p.web && (p.webAlways || !desk)
+  const tiles: Array<{ key: PlaceKey; label: string; on: boolean; disabled: boolean; note?: string; change: (on: boolean) => Partial<StateView['places']> }> = [
+    { key: 'wallpaper', label: '壁纸里', on: offered && p.wallpaper, disabled: !offered, change: on => ({ wallpaper: on }) },
+    { key: 'overlay', label: '桌面上', on: offered && p.overlay, disabled: !offered, change: on => ({ overlay: on }) },
+    { key: 'web', label: 'dsh中', on: webOn, disabled: false, change: on => (on ? { web: true, webAlways: true } : { web: false }) },
+    { key: 'avatar', label: 'dsh对话框上', on: p.avatar, disabled: false, change: on => ({ avatar: on }) },
+    { key: 'tray', label: state.platform === 'win32' ? '托盘图标' : '菜单栏图标', on: offered && p.tray, disabled: !offered, change: on => ({ tray: on }) },
+  ]
+  const waiting = offered && !body.connected
   return (
-    <section className="her-card">
-      <h2>她出现在哪儿</h2>
-      <p className="her-muted">四个地方，各管各的：想让她在哪儿就开哪儿。</p>
-      {offered && row('wallpaper', '壁纸里', '场景铺在桌面壁纸的位置，在所有窗口后面。', waiting === undefined ? undefined : { note: waiting })}
-      {offered && row('overlay', '浮在桌面上', '她浮在所有窗口上面，能拖动、能点。和「壁纸里」一起开，就是场景在后、她在前（形象或编排里要有宠物）。', waiting === undefined ? undefined : { note: waiting })}
-      {row('web', 'dsh 网页里', offered ? '在 dsh 的每个页面上：桌宠或背景。默认只在桌面程序没运行时出现。' : '在 dsh 的每个页面上：桌宠或背景。')}
-      {offered && p.web && (
-        <div className="her-setrow her-place sub">
-          <span className="her-place-pic" />
-          <div><b>桌面上有她时，网页里也显示</b><span>两边都看得见她；网页里的她不出声。</span></div>
-          <input type="checkbox" aria-label="桌面上有她时，网页里也显示" checked={p.webAlways} onChange={e => set({ webAlways: e.target.checked })} />
-        </div>
-      )}
-      {row('avatar', '对话框上的小头像', '坐在 dsh 对话框上沿的她。点一下打开对话小条。')}
-      {offered && row('tray', state.platform === 'darwin' ? '菜单栏上的「她」' : '托盘图标', '点它出菜单：换外形、专注、退出。关掉以后，右键她也是同一个菜单。', waiting === undefined ? undefined : { note: waiting })}
-      {offered && !p.wallpaper && !p.overlay && <p className="her-warn">桌面上两处都关了：桌面上看不到她，但她还在听、还会说话，快捷键也能叫出对话小条。想让她完全安静，用右上角的开关。</p>}
+    <section className="her-card her-places">
+      <div className="her-places-row" role="group" aria-label="她出现在哪儿">
+        {tiles.map(t => (
+          <label key={t.key} className={`her-place-tile${t.on ? ' on' : ''}${t.disabled ? ' disabled' : ''}`} title={t.disabled ? '这台设备上没有桌面程序' : undefined}>
+            <Picture name={t.key} />
+            <span>{t.label}</span>
+            <input type="checkbox" aria-label={t.label} checked={t.on} disabled={t.disabled || state.off} onChange={e => set(t.change(e.target.checked))} />
+          </label>
+        ))}
+      </div>
+      {state.off && <p className="her-faint">她关着：右上角打开后，这几个开关才起作用。</p>}
+      {!state.off && !offered && <p className="her-faint">这台设备上没有桌面程序：壁纸里、桌面上、菜单栏图标用不了。</p>}
+      {!state.off && waiting && <p className="her-faint">桌面程序还没连上：壁纸里、桌面上、菜单栏图标在它连上后生效。</p>}
+      {!state.off && offered && !p.wallpaper && !p.overlay && <p className="her-warn">桌面上两处都关了：桌面上看不到她，但她还在听、还会出声，快捷键也能叫出对话小条。</p>}
     </section>
   )
 }
