@@ -114,6 +114,7 @@ export const herApi = {
   stageSave: (stage: unknown) => post<StageView>('/stage/save', { stage }),
   stagePlay: (on: boolean) => post<StageView>('/stage/play', { on }),
   designOpen: (focus: string) => post<{ sessionId: string }>('/design/open', { focus }),
+  designSkin: (id?: string) => post<{ sessionId: string }>('/design/skin', id === undefined ? {} : { id }),
   libraryUndo: (row: string, name: string) => post<StageView>('/library/undo', { row, name }),
   skinsGet: () => post<SkinsView>('/skins/get'),
   voicesGet: () => post<VoicesView>('/voices/get'),

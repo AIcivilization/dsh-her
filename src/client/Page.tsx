@@ -195,7 +195,7 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
  * on top, a list on the left in four groups, one thing on the right at a
  * time. Nothing folds; what needs doing shows on 总览 and as a dot in the list.
  */
-type Section = 'home' | 'persona' | 'voice' | 'memory' | 'look' | 'stage' | 'library' | 'guide' | 'skin' | 'workshop' | 'speak' | 'initiative' | 'talk' | 'model' | 'body' | 'voices' | 'about'
+type Section = 'home' | 'persona' | 'voice' | 'memory' | 'look' | 'stage' | 'library' | 'guide' | 'skin' | 'workshop' | 'speak' | 'initiative' | 'talk' | 'model' | 'voices' | 'about'
 type Tone = 'ok' | 'warn' | 'bad' | 'off'
 
 const GROUPS: Array<{ title?: string; items: Array<{ id: Section; label: string; icon: string }> }> = [
@@ -203,7 +203,7 @@ const GROUPS: Array<{ title?: string; items: Array<{ id: Section; label: string;
   { title: '她', items: [{ id: 'persona', label: '人设', icon: 'persona' }, { id: 'voice', label: '声音', icon: 'voice' }, { id: 'memory', label: '记忆', icon: 'memory' }] },
   { title: '外观', items: [{ id: 'look', label: '形象', icon: 'look' }, { id: 'stage', label: '编排', icon: 'stage' }, { id: 'library', label: '素材库', icon: 'library' }, { id: 'guide', label: '素材指南', icon: 'guide' }, { id: 'skin', label: '皮肤', icon: 'skin' }, { id: 'workshop', label: '形象工坊', icon: 'workshop' }] },
   { title: '相处', items: [{ id: 'speak', label: '说话和聆听', icon: 'speak' }, { id: 'initiative', label: '主动说话', icon: 'initiative' }, { id: 'talk', label: '对话', icon: 'talk' }] },
-  { title: '系统', items: [{ id: 'model', label: '模型', icon: 'model' }, { id: 'body', label: '住在哪儿', icon: 'body' }, { id: 'voices', label: '外接语音', icon: 'voices' }, { id: 'about', label: '关于', icon: 'about' }] },
+  { title: '系统', items: [{ id: 'model', label: '模型', icon: 'model' }, { id: 'voices', label: '外接语音', icon: 'voices' }, { id: 'about', label: '关于', icon: 'about' }] },
 ]
 
 /** What each page is for, in one line under its title. */
@@ -222,9 +222,8 @@ const ABOUT: Record<Section, string> = {
   initiative: '她什么时候可以先开口，什么时候不要打扰你。',
   talk: '你们的对话存在哪儿、什么时候新开一段。',
   model: '她的大脑用哪个模型。',
-  body: '桌面程序的安装和运行，和她在 dsh 网页里的样子。',
   voices: '接讯飞、OpenAI 兼容的服务、你自己的 GPT-SoVITS，或别的 dsh 插件。',
-  about: '版本、更新，和重新走一遍向导。',
+  about: '版本和更新、桌面程序，和重新走一遍向导。',
 }
 
 /** The pages that are one character's own (the others are shared by all of them). */
@@ -265,7 +264,7 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
   const dots: Partial<Record<Section, Tone>> = {
     ...(state.model === null || state.problem !== undefined ? { model: 'bad' as const } : {}),
     ...(speaking === 'no-key' || speaking === 'no-quota' || speaking === 'failed' ? { voice: 'bad' as const } : {}),
-    ...(!here && !state.off && !tucked ? { body: 'warn' as const } : {}),
+    ...(!here && !state.off && !tucked ? { about: 'warn' as const } : {}),
     ...(here && pack === undefined ? { look: 'warn' as const } : {}),
     ...(state.voice.status === 'failed' ? { speak: 'warn' as const } : {}),
   }
@@ -317,6 +316,7 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
             <>
               {state.stagePlaying && <Banner tone="ok" text="她现在按「编排」来。这里选的形象，在关掉编排以后才用。" action="去编排" onClick={() => go('stage')} />}
               <Card title="选一个形象"><PackPicker state={state} apply={apply} /></Card>
+              <WebPlaceCard state={state} apply={apply} />
               {body.look !== undefined && <Card title="场景"><ScenePicker state={state} apply={apply} /></Card>}
               <Card title="每段画面用在哪里" fold><ClipsCard /></Card>
               <LinkRow icon="workshop" title="想要一个自己的形象？" text="形象工坊带你一步步准备图片和视频，再导入。" onClick={() => go('workshop')} />
@@ -366,19 +366,14 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
               <Card><ModelPicker state={state} apply={apply} /></Card>
             </>
           )}
-          {section === 'body' && (
-            <>
-              <Card title="桌面程序" badge={<><Dot tone={here ? 'ok' : body.running ? 'warn' : 'off'} />{desktopHere(body) ? '已连上' : body.web.connected ? '她在网页里' : body.running ? '正在连' : '没连上'}</>}>
-                <BodyStatus state={state} apply={apply} />
-              </Card>
-              <LinkRow icon="home" title="她出现在哪儿" text="壁纸里、桌面上、dsh 中、dsh 对话框上、菜单栏图标，五个开关在「总览」那张图的下面。" onClick={() => go('home')} />
-              <WebPlaceCard state={state} apply={apply} />
-            </>
-          )}
           {section === 'voices' && <Card><VoiceServices state={state} apply={apply} /></Card>}
           {section === 'about' && (
             <>
               <Card title="版本和更新"><UpdateBar state={state} apply={apply} /></Card>
+              <Card title="桌面程序" badge={<><Dot tone={here ? 'ok' : body.running ? 'warn' : 'off'} />{desktopHere(body) ? '已连上' : body.web.connected ? '她在网页里' : body.running ? '正在连' : '没连上'}</>}>
+                <BodyStatus state={state} apply={apply} />
+                <p className="her-faint">她出现在哪儿（壁纸里、桌面上、dsh中、dsh对话框上、菜单栏图标），在「总览」那张图下面的开关里选。</p>
+              </Card>
               <Card title="重新设置">
                 <div className="her-setrow">
                   <div><b>重新走一遍向导</b><span>七步：检查、身体、外形、人设、声音、麦克风、放在哪里。现有的设置都留着。</span></div>
@@ -464,7 +459,7 @@ function Home({ state, apply, go }: { state: StateView; apply: Apply; go: (secti
   const todo: Array<{ tone: Tone; text: string; action: string; to: Section }> = [
     ...(state.model === null ? [{ tone: 'bad' as const, text: 'dsh 还没有可用的模型，她没法回答。', action: '选模型', to: 'model' as const }] : []),
     ...(state.problem !== undefined ? [{ tone: 'bad' as const, text: `她刚才没能回答：${state.problem.text}`, action: '换模型', to: 'model' as const }] : []),
-    ...(!here && !state.off && !tuckedAway(state) ? [{ tone: 'warn' as const, text: '她的身体没连上，现在看不到她。', action: '去看看', to: 'body' as const }] : []),
+    ...(!here && !state.off && !tuckedAway(state) ? [{ tone: 'warn' as const, text: '她的身体没连上，现在看不到她。', action: '去看看', to: 'about' as const }] : []),
     ...(here && pack === undefined ? [{ tone: 'warn' as const, text: '她还没有形象。', action: '选一个', to: 'look' as const }] : []),
     ...(speaking === 'no-key' || speaking === 'no-quota' || speaking === 'failed' ? [{ tone: 'bad' as const, text: `她的声音：${speakingText(speaking, state.voice.speaking.service)}`, action: '看声音', to: 'voice' as const }] : []),
     ...(state.voice.status === 'failed' ? [{ tone: 'warn' as const, text: '听你说话出错了，暂时只能打字。', action: '去看看', to: 'speak' as const }] : []),
@@ -477,7 +472,7 @@ function Home({ state, apply, go }: { state: StateView; apply: Apply; go: (secti
     { icon: 'look', label: '形象', value: !here ? '身体没连上' : pack?.name ?? '还没有', to: 'look' },
     { icon: 'stage', label: '编排', value: state.stagePlaying ? '她按编排来' : '没开', to: 'stage' },
     { icon: 'skin', label: '皮肤', value: state.skin ?? 'dsh 原样', to: 'skin' },
-    { icon: 'body', label: '住在哪儿', value: desktopHere(body) ? (body.mode === undefined ? '桌面上' : MODE_TEXT[body.mode]?.title ?? body.mode) : body.web.connected ? 'dsh 网页里' : '没连上', to: 'body' },
+    { icon: 'body', label: '桌面程序', value: desktopHere(body) ? '已连上' : body.running ? '正在连' : desktopOffered(body) ? '没在运行' : '这台设备上没有', to: 'about' },
     { icon: 'initiative', label: '主动说话', value: initiativeText(state), to: 'initiative' },
     { icon: 'talk', label: '对话', value: `${state.talk.segment?.title ?? '还没有'}${state.talk.size === undefined ? '' : ` · ${state.talk.size}`}`, to: 'talk' },
     { icon: 'model', label: '模型', value: state.model === null ? '没有可用的' : state.model.model, to: 'model' },

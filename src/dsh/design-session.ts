@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { NativeTool } from './design-tools.ts'
+import { SKIN_INTERVIEW } from '../core/skin-guide.ts'
 import type { DshServices, ModelRoute, ScopedContext } from './her-session.ts'
 
 export interface DesignSessionDeps {
@@ -33,9 +34,18 @@ const PROMPT = `你是 dsh-her 的设计助手。dsh-her 是 dsh 里的一个虚
 - 你只能改编排、皮肤和素材库里的 SVG；位图和视频改不了，可以帮用户写提示词让他们拿去别的工具生成。
 - 用中文，简短。`
 
+interface DesignHandle {
+  agent: {
+    session: unknown
+    followup?(message: { id: string; role: 'user'; content: Array<{ type: 'text'; text: string }>; source: { kind: string } }): void
+  }
+}
+
 export class DesignSession {
   private readonly deps: DesignSessionDeps
-  private handle: { agent: { session: unknown } } | undefined
+  private handle: DesignHandle | undefined
+  /** The "做一套皮肤" conversations started here (each its own session), kept alive while the brain runs. */
+  private readonly skinHandles: DesignHandle[] = []
   /** What was clicked "+AI" on, said to the session each turn. */
   private focus = ''
 
@@ -56,11 +66,11 @@ export class DesignSession {
     }
   }
 
-  private setup = (agentCtx: ScopedContext) => {
-    agentCtx.systemPrompt?.section({
-      name: 'dsh-her:design', order: 0, complete: true, interpolate: false,
-      text: () => this.focus === '' ? PROMPT : `${PROMPT}\n\n用户这次点了"+AI"的是：${this.focus}。先读它，再问用户想怎么改（如果用户已经说了，就直接改）。`,
-    })
+  private setup = (agentCtx: ScopedContext) => this.prepare(agentCtx, () => (this.focus === '' ? PROMPT : `${PROMPT}\n\n用户这次点了"+AI"的是：${this.focus}。先读它，再问用户想怎么改（如果用户已经说了，就直接改）。`))
+
+  /** Her design prompt and tools only (DSH's own tools hidden). */
+  private prepare(agentCtx: ScopedContext, prompt: () => string): void {
+    agentCtx.systemPrompt?.section({ name: 'dsh-her:design', order: 0, complete: true, interpolate: false, text: prompt })
     agentCtx.systemPrompt?.suppressRuntimeContext?.()
     try {
       const names = agentCtx.tools.schemas().map(schema => schema.name).filter(name => name !== 'run_code')
@@ -69,6 +79,36 @@ export class DesignSession {
       this.deps.logger.warn(`dsh-her: design session keeps DSH's tools (${(error as Error).message})`)
     }
     for (const tool of this.deps.tools()) agentCtx.tools.register(tool)
+  }
+
+  /**
+   * "AI 做一套" on the 皮肤 page (§18): a new conversation each time, in her
+   * workspace, where the AI asks one question at a time and then writes the
+   * skin. Its first line is sent for you, so it opens already asking. `base`:
+   * a skin of yours to change instead of a new one.
+   */
+  async startSkin(base?: { id: string; name: string }): Promise<string> {
+    const services = this.deps.services()
+    if (services === undefined) throw new Error('DSH 的 agents 服务还不可用')
+    const edit = base === undefined ? '' : `\n\n这一次不是做新的，而是改用户已有的皮肤「${base.name}」（id ${base.id}）：先用 skin_get 读出来，用一两句话告诉他现在是什么样，再问他想改哪里（给编号选项：色系、深浅、强调色、装饰、字体、名字），改完用同一个 id 写回去。`
+    const sessionId = `dsh-her-skin-${randomUUID()}`
+    mkdirSync(this.deps.room, { recursive: true })
+    const workspace = await services.workspaceRegistry?.create(this.deps.room, this.deps.title)
+    const handle = await services.agents.create({
+      sessionId, meta: { cwd: this.deps.room }, agentOptions: this.deps.route(),
+      setup: (agentCtx: ScopedContext) => this.prepare(agentCtx, () => `${PROMPT}\n\n${SKIN_INTERVIEW}${edit}`),
+    }) as DesignHandle
+    this.skinHandles.push(handle)
+    try {
+      await workspace?.attachSession(sessionId)
+      services.sessionTitle?.rename(handle.agent.session, base === undefined ? '做一套皮肤（+AI）' : `改皮肤「${base.name}」（+AI）`)
+    } catch (error) {
+      this.deps.logger.warn(`dsh-her: skin session not attached/titled (${(error as Error).message})`)
+    }
+    const first = base === undefined ? '帮我做一套新皮肤，一步一步问我。' : `帮我改一改皮肤「${base.name}」。`
+    handle.agent.followup?.({ id: randomUUID(), role: 'user', content: [{ type: 'text', text: first }], source: { kind: 'dsh-her-design' } })
+    this.deps.logger.info(`dsh-her: started a skin conversation (${sessionId})`)
+    return sessionId
   }
 
   /** The session, ready (made the first time, resumed after); its id to open in dsh. */
@@ -81,7 +121,7 @@ export class DesignSession {
     if (this.handle !== undefined && recorded !== undefined) return recorded
     if (recorded !== undefined) {
       try {
-        this.handle = await services.agents.resume({ resumeSessionId: recorded, agentOptions: route, setup: this.setup }) as typeof this.handle
+        this.handle = await services.agents.resume({ resumeSessionId: recorded, agentOptions: route, setup: this.setup }) as DesignHandle
         return recorded
       } catch (error) {
         this.deps.logger.warn(`dsh-her: design session not resumed (${(error as Error).message}); making a new one`)
@@ -90,7 +130,7 @@ export class DesignSession {
     const sessionId = `dsh-her-design-${randomUUID()}`
     mkdirSync(this.deps.room, { recursive: true })
     const workspace = await services.workspaceRegistry?.create(this.deps.room, this.deps.title)
-    this.handle = await services.agents.create({ sessionId, meta: { cwd: this.deps.room }, agentOptions: route, setup: this.setup }) as typeof this.handle
+    this.handle = await services.agents.create({ sessionId, meta: { cwd: this.deps.room }, agentOptions: route, setup: this.setup }) as DesignHandle
     try {
       await workspace?.attachSession(sessionId)
       services.sessionTitle?.rename(this.handle!.agent.session, '设计（+AI）')

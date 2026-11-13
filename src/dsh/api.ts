@@ -165,6 +165,8 @@ export interface ApiRuntime {
   stageGet(): StageView
   /** "+AI": the design session, told what to change; its id to open in dsh. */
   designOpen(focus: string): Promise<{ sessionId: string }>
+  /** "AI 做一套" (§18): a new guided skin conversation (or one changing skin `id`); its id to open in dsh. */
+  designSkin(id: string | undefined): Promise<{ sessionId: string }>
   /** An SVG back to the one before its last change. */
   libraryUndo(row: string, name: string): StageView
   /** Outside voices (§7): the services, which keys are set (never the keys), who listens. */
@@ -331,6 +333,7 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
     },
     '/stage/get': async () => ({ ...rt.stageGet() }),
     '/design/open': async body => rt.designOpen(typeof body.focus === 'string' ? body.focus : ''),
+    '/design/skin': async body => rt.designSkin(typeof body.id === 'string' && body.id !== '' ? body.id : undefined),
     '/library/undo': async body => ({ ...rt.libraryUndo(str(body.row, '行'), str(body.name, '素材')) }),
     '/voices/get': async () => ({ ...await rt.voicesGet() }),
     '/voices/save': async body => ({ ...await rt.voicesSave(body.config) }),

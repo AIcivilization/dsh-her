@@ -9,24 +9,31 @@ export interface UploadProgress {
   file: string
 }
 
-function sendOne(url: string, file: File, onBytes: (sent: number) => void): Promise<void> {
+function sendOne(url: string, file: File, onBytes: (sent: number) => void): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('POST', new URL(url, document.baseURI).href)
     xhr.upload.onprogress = event => onBytes(event.loaded)
     xhr.onload = () => {
       let message: string | undefined
+      let value: unknown
       try {
-        message = (JSON.parse(xhr.responseText) as { message?: string }).message
+        value = JSON.parse(xhr.responseText)
+        message = (value as { message?: string }).message
       } catch {
         // not JSON: the status says enough
       }
-      if (xhr.status >= 200 && xhr.status < 300) resolve()
+      if (xhr.status >= 200 && xhr.status < 300) resolve(value)
       else reject(new Error(message ?? `上传 ${file.name} 失败（HTTP ${xhr.status}）`))
     }
     xhr.onerror = () => reject(new Error(`上传 ${file.name} 时网络断了`))
     xhr.send(file)
   })
+}
+
+/** Upload one file; what the brain answered. */
+export function uploadFile(file: File, url: string, onProgress: (progress: UploadProgress) => void): Promise<unknown> {
+  return sendOne(url, file, sent => onProgress({ done: sent, total: file.size, file: file.name }))
 }
 
 /** Upload `files` to the place `urlFor` names for each; progress in bytes over all of them. */

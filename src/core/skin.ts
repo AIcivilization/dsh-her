@@ -20,8 +20,13 @@ export interface Skin {
   author?: string
   /** dsh's colour tokens (`--dsw-alias-…`), each for light and dark. */
   colors?: Record<string, Pair>
-  /** A picture behind the whole page (a file in the skin's folder), and how dark a veil over it is (0–0.9). */
-  background?: { file: string; dim?: number }
+  /**
+   * A picture behind the whole page (a file in the skin's folder, an SVG too),
+   * and how dark a veil over it is (0–0.9). `dark`: another picture (or veil)
+   * for dark mode. The skin's page colour lies under it, so a transparent
+   * pattern works in both modes.
+   */
+  background?: { file: string; dim?: number; dark?: { file?: string; dim?: number } }
   /** A font: a file in the folder (woff2, woff, ttf, otf) or the name of one installed on the computer. */
   font?: { file?: string; name?: string }
   /** Her talk bar and bubble. */
@@ -99,8 +104,16 @@ export function parseSkin(raw: unknown, id: string, files: readonly string[]): {
   }
   const bg = v.background as { file?: unknown; dim?: unknown } | undefined
   if (bg !== undefined) {
-    if (safeFile(bg.file, /\.(png|jpe?g|webp|gif|avif)$/i) && has(bg.file as string)) skin.background = { file: bg.file as string, ...(typeof bg.dim === 'number' ? { dim: Math.min(0.9, Math.max(0, bg.dim)) } : {}) }
-    else problems.push('背景图要是这个文件夹里的一张图片（png、jpg、webp、gif、avif）')
+    const picture = (file: unknown) => safeFile(file, /\.(png|jpe?g|webp|gif|avif|svg)$/i) && has(file as string)
+    const dim = (value: unknown) => (typeof value === 'number' ? { dim: Math.min(0.9, Math.max(0, value)) } : {})
+    if (picture(bg.file)) {
+      skin.background = { file: bg.file as string, ...dim(bg.dim) }
+      const dark = (bg as { dark?: { file?: unknown; dim?: unknown } }).dark
+      if (dark !== undefined) {
+        if (dark.file !== undefined && !picture(dark.file)) problems.push('background.dark.file 要是这个文件夹里的一张图片')
+        else skin.background.dark = { ...(dark.file === undefined ? {} : { file: dark.file as string }), ...dim(dark.dim) }
+      }
+    } else problems.push('背景图要是这个文件夹里的一张图片（png、jpg、webp、gif、avif、svg）')
   }
   const font = v.font as { file?: unknown; name?: unknown } | undefined
   if (font !== undefined) {
@@ -143,8 +156,13 @@ export function skinTokens(skin: Skin): Record<string, Pair> {
 export function skinCss(skin: Skin, file: (name: string) => string, extra = ''): string {
   const out: string[] = []
   if (skin.background !== undefined) {
-    const dim = skin.background.dim ?? 0.35
-    out.push(`body{background-image:linear-gradient(rgba(0,0,0,${dim}),rgba(0,0,0,${dim})),url("${file(skin.background.file)}")!important;background-size:cover!important;background-position:center!important;background-attachment:fixed!important}`)
+    const bg = skin.background
+    const base = skin.colors?.['--dsw-alias-bg-base']
+    const layer = (picture: string, dim: number, colour: string | undefined) =>
+      `background-image:linear-gradient(rgba(0,0,0,${dim}),rgba(0,0,0,${dim})),url("${file(picture)}")!important;${colour === undefined ? '' : `background-color:${colour}!important;`}`
+    out.push(`body{${layer(bg.file, bg.dim ?? 0.35, base?.light)}background-size:cover!important;background-position:center!important;background-attachment:fixed!important}`)
+    // Dark mode: its own picture or veil, and the skin's dark page colour under it.
+    if (bg.dark !== undefined || base !== undefined) out.push(`body[data-ds-dark-theme]{${layer(bg.dark?.file ?? bg.file, bg.dark?.dim ?? bg.dim ?? 0.35, base?.dark)}}`)
     // The page's own layers let the picture through.
     out.push('body{--dsw-alias-bg-base:transparent!important}')
   }

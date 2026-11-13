@@ -76,6 +76,7 @@ body[data-ds-dark-theme] .her-page{--her-ink:var(--her-bar-accent,#86b4ff);--her
   .her-show-label.left b{flex-direction:row!important}
   .her-show-head{flex-direction:column!important;align-items:flex-start!important;gap:2px}
   .her-sheet{grid-template-columns:1fr!important}
+  .her-make{grid-template-columns:1fr!important}
   .her-places-row{grid-template-columns:repeat(3,minmax(0,1fr))!important}
   .her-show-head .her-seg{align-self:flex-start}
   .her-range input{width:110px!important}
@@ -328,6 +329,19 @@ body[data-ds-dark-theme] .her-page{--her-ink:var(--her-bar-accent,#86b4ff);--her
 .her-hero-who{flex:none;max-width:150px;height:24px;padding:0 22px 0 9px;border:1px solid ${LINE};border-radius:999px;background:${FIELD} ${CHEVRON} no-repeat right 7px center;color:${MUTED};font:inherit;font-size:12px;font-weight:500;appearance:none;-webkit-appearance:none;cursor:pointer}
 .her-hero-who:hover{border-color:${INK};color:${INK}}
 .her-title-who{margin-left:10px;padding:1px 9px;border-radius:999px;background:${tint(INK, 12)};color:${INK};font-size:12px;font-weight:600;vertical-align:middle}
+.her-make{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:14px;margin-top:6px}
+.her-make-way{padding:14px 16px;border:1px solid ${LINE};border-radius:14px;background:${FIELD}}
+.her-make-way.ai{border-color:${tint(INK, 45)};background:${tint(INK, 7)}}
+.her-make-way h3{display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:14.5px}
+.her-make-way h3 .her-icon{color:${INK}}
+.her-make-way p{margin:6px 0}
+.her-make-asks{margin:6px 0 8px;padding-left:1.3em}
+.her-make-asks li{margin:3px 0}
+.her-flow.her-flow-one{grid-template-columns:1fr;margin:4px 0 10px}
+.her-table{width:100%;border-collapse:collapse;margin:8px 0;font-size:12.5px}
+.her-table th,.her-table td{padding:6px 8px;border-bottom:1px solid ${LINE};text-align:left;vertical-align:top}
+.her-table th{color:${MUTED};font-weight:600}
+.her-table code{white-space:nowrap}
 .her-people-box{margin-bottom:16px}
 .her-people{display:flex;gap:10px;overflow-x:auto;padding:3px 3px 8px;scrollbar-width:thin}
 .her-person{position:relative;flex:none;width:132px;border:1px solid ${LINE};border-radius:14px;background:${LAYER1};transition:border-color .12s,background .12s}

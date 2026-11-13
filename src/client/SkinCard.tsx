@@ -8,8 +8,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { herApi, type SkinsView } from './api.ts'
 import { stopTrying, tryOn } from './skin-wear.ts'
-import { uploadFiles, type UploadProgress } from './upload.ts'
-import { openDesign } from './design.ts'
+import { uploadFile, uploadFiles, type UploadProgress } from './upload.ts'
+import { openSkinDesign } from './design.ts'
+import { SKIN_STEPS, SKIN_TOKENS } from '../core/skin-guide.ts'
+import { Icon } from './icons.tsx'
 
 export function SkinCard() {
   const [view, setView] = useState<SkinsView>()
@@ -17,7 +19,9 @@ export function SkinCard() {
   const [note, setNote] = useState<{ kind: 'ok' | 'error'; text: string }>()
   const [progress, setProgress] = useState<UploadProgress>()
   const folder = useRef<HTMLInputElement>(null)
+  const zip = useRef<HTMLInputElement>(null)
   const clip = useRef<HTMLInputElement>(null)
+  const [starting, setStarting] = useState(false)
 
   const take = useCallback((result: Awaited<ReturnType<typeof herApi.skinsGet>>, text?: string) => {
     if (!result.ok) return setNote({ kind: 'error', text: result.message })
@@ -63,6 +67,27 @@ export function SkinCard() {
     }
     setProgress(undefined)
   }
+  const sendZip = async (list: FileList | null) => {
+    const file = [...(list ?? [])].find(f => /\.zip$/i.test(f.name))
+    if (file === undefined) return setNote({ kind: 'error', text: '要选一个 .zip 文件' })
+    try {
+      const answer = await uploadFile(file, `/api/dsh-her/web/upload?skinzip=1&path=${encodeURIComponent(file.name)}`, setProgress) as { id?: string; skipped?: string[] }
+      const skipped = answer.skipped ?? []
+      const result = await herApi.skinsGet()
+      take(result, `传好了：「${result.ok ? result.skins.find(s => s.id === answer.id)?.name ?? answer.id : answer.id}」在上面的列表里，点它试试。${skipped.length > 0 ? `没收的文件：${skipped.join('、')}。` : ''}`)
+    } catch (error) {
+      setNote({ kind: 'error', text: (error as Error).message })
+    }
+    setProgress(undefined)
+  }
+  /** "AI 做一套" (or change this one): a conversation in dsh where the AI asks, one question at a time. */
+  const startAi = async (id?: string) => {
+    setStarting(true)
+    setNote(undefined)
+    const message = await openSkinDesign(id)
+    setStarting(false)
+    if (message !== undefined) setNote({ kind: message.startsWith('对话开好了') ? 'ok' : 'error', text: message })
+  }
   const sendClip = async (list: FileList | null) => {
     const files = [...(list ?? [])].filter(f => /\.(mp4|webm|mov|m4v)$/i.test(f.name))
     if (files.length === 0) return setNote({ kind: 'error', text: '开机动画要是视频（mp4、webm；透明背景用 webm）' })
@@ -100,10 +125,11 @@ export function SkinCard() {
         <div className="her-card-head">
           <h2>皮肤</h2>
           <span className="her-row" style={{ margin: 0 }}>
-            <button className="her-btn small" onClick={() => folder.current?.click()}>上传皮肤文件夹…</button>
-            <button className="her-btn small her-ai" title="让 dsh 的模型做一套：说你想要的样子" onClick={() => void openDesign(`皮肤（现在选的：${skin?.name ?? 'dsh 原样'}${skin === undefined ? '' : `，id ${skin.id}`}）`).then(m => m !== undefined && setNote({ kind: 'error', text: m }))}>+AI 做一套</button>
+            <button className="her-btn small" onClick={() => zip.current?.click()}>上传 zip…</button>
+            <button className="her-btn small" onClick={() => folder.current?.click()}>上传文件夹…</button>
           </span>
           <input ref={folder} type="file" hidden {...{ webkitdirectory: '' }} onChange={e => { void sendSkin(e.target.files); e.target.value = '' }} />
+          <input ref={zip} type="file" accept=".zip,application/zip" hidden onChange={e => { void sendZip(e.target.files); e.target.value = '' }} />
         </div>
         <p className="her-muted">一整套样子：dsh 的颜色、背景图、字体、她的对话小条。点一个，整个 dsh 马上换给你看；保存才算数。</p>
         <div className="her-grid her-skins">
@@ -123,23 +149,54 @@ export function SkinCard() {
         )}
         {skin !== undefined && skin.problems.length > 0 && <ul className="her-warnlist">{skin.problems.map(p => <li key={p}>{p}</li>)}</ul>}
         {skin !== undefined && skin.builtin !== true && !trying && (
-          <div className="her-row"><button className="her-btn small" onClick={() => {
-            if (window.confirm(`移走皮肤「${skin.name}」？文件夹会放进 skins/.removed，不会直接删掉。`)) void herApi.skinsRemove(skin.id).then(r => take(r, '移走了。'))
-          }}>移走「{skin.name}」</button></div>
+          <div className="her-row">
+            <a className="her-btn small" href={`/api/dsh-her/web/skin-zip?id=${encodeURIComponent(skin.id)}`} download={`${skin.name}.zip`}>下载「{skin.name}」（zip）</a>
+            <button className="her-btn small her-ai" disabled={starting} onClick={() => void startAi(skin.id)}>让 AI 改这套</button>
+            <button className="her-btn small" onClick={() => {
+              if (window.confirm(`移走皮肤「${skin.name}」？文件夹会放进 skins/.removed，不会直接删掉。`)) void herApi.skinsRemove(skin.id).then(r => take(r, '移走了。'))
+            }}>移走</button>
+          </div>
         )}
-        <details className="her-more"><summary>自己做一套皮肤</summary>
-          <p>一个文件夹，里面一个 <code>skin.json</code>，再放要用的图片、字体、视频。文件夹名就是皮肤的名字。<code>skin.json</code> 可以写：</p>
-          <ul>
-            <li><code>name</code>：显示的名字；<code>author</code>：作者。</li>
-            <li><code>colors</code>：dsh 的颜色，比如 <code>{'{"--dsw-alias-bg-base": {"light": "#f3f8fe", "dark": "#0b1626"}}'}</code>，每个颜色写浅色和深色两个值。</li>
-            <li><code>background</code>：<code>{'{"file": "背景.webp", "dim": 0.35}'}</code>，dim 是盖在上面的暗度（0–0.9）。</li>
-            <li><code>font</code>：<code>{'{"file": "字体.woff2"}'}</code>，或 <code>{'{"name": "霞鹜文楷"}'}</code>（电脑上装好的）。要分享的皮肤，只放可以自由分发的字体。</li>
-            <li><code>bar</code>：对话小条的 <code>background</code>、<code>text</code>、<code>accent</code>，也是浅色、深色各一个。</li>
-            <li><code>intro</code>：开机动画，文件夹里的一段视频；<code>css</code>：再加一个 .css 文件（dsh 改版时可能要改）。</li>
-          </ul>
-        </details>
         {progress !== undefined && <p className="her-muted">正在上传 {progress.file}（{Math.round(progress.done / Math.max(progress.total, 1) * 100)}%）</p>}
         {note !== undefined && <p className={note.kind === 'ok' ? 'her-ok' : 'her-danger'}>{note.text}</p>}
+      </section>
+
+      <section className="her-card">
+        <h2>做一套新皮肤</h2>
+        <div className="her-make">
+          <div className="her-make-way ai">
+            <h3><Icon name="workshop" />让 AI 带你做</h3>
+            <p>在 dsh 里开一段对话，AI 一次问你一件事，你回个数字或一句话就行：</p>
+            <ol className="her-make-asks">
+              <li>整体色系：海蓝、樱粉、薄荷、暖杏、墨夜……或者"像夏天的海边"</li>
+              <li>浅色、深色都要，还是偏哪一边</li>
+              <li>强调色：按钮、选中、她的对话小条</li>
+              <li>要不要装饰：淡淡的波浪、气泡、星点、花瓣……（AI 画成 SVG）</li>
+              <li>字体，和这套皮肤的名字</li>
+            </ol>
+            <p className="her-muted">问完它先复述一遍，你说好它才做。做好后可以让它<b>直接换上</b>，或者给你<b>下载链接</b>（zip，能发给别人）；之后说"再深一点""强调色换紫的"它接着改。</p>
+            <button className="her-btn primary" disabled={starting} onClick={() => void startAi()}>{starting ? '正在打开对话…' : 'AI 做一套'}</button>
+          </div>
+          <div className="her-make-way">
+            <h3><Icon name="skin" />自己动手做</h3>
+            <ol className="her-flow her-flow-one">
+              {SKIN_STEPS.map(step => <li key={step.title}><b>{step.title}</b><span>{step.text}</span></li>)}
+            </ol>
+            <div className="her-row">
+              <a className="her-btn primary" href="/api/dsh-her/web/skin-template" download="dsh-her 皮肤模板.zip">下载模板（zip）</a>
+              <button className="her-btn" onClick={() => zip.current?.click()}>上传 zip…</button>
+              <button className="her-btn" onClick={() => folder.current?.click()}>上传文件夹…</button>
+            </div>
+          </div>
+        </div>
+        <details className="her-more" open>
+          <summary>颜色对照表：skin.json 的 colors 里每个名字管哪一块</summary>
+          <table className="her-table">
+            <thead><tr><th>颜色名</th><th>管哪一块</th></tr></thead>
+            <tbody>{SKIN_TOKENS.map(t => <tr key={t.name}><td><code>{t.name}</code></td><td>{t.what}</td></tr>)}</tbody>
+          </table>
+          <p className="her-faint">每个颜色写 <code>{'{"light": "#…", "dark": "#…"}'}</code>，浅色模式和深色模式各一个；没写的保持 dsh 原样。对话小条的颜色在 <code>bar</code> 里（background、text、accent）。</p>
+        </details>
       </section>
 
       <section className="her-card">

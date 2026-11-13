@@ -13,7 +13,7 @@ import type { ShowMedia } from '../dsh/web-body.ts'
 import { desktopHere, desktopOffered, type StateView } from './api.ts'
 
 type Tone = 'ok' | 'warn' | 'off'
-export type ShowTarget = 'body' | 'places' | 'stage' | 'look' | 'library' | 'skin' | 'voice' | 'speak' | 'guide'
+export type ShowTarget = 'places' | 'stage' | 'look' | 'library' | 'skin' | 'voice' | 'speak' | 'guide'
 
 /** A clip whose transparency is a mask below the colour: drawn through a canvas. */
 function Stacked({ url, className }: { url: string; className: string }) {
@@ -118,7 +118,7 @@ export function Showcase({ state, onGo }: { state: StateView; onGo: (target: Sho
     : { tone: voiceOk ? 'ok' : 'warn', text: voiceOk ? '说话时：出声，字在她头顶' : '说话时：声音没准备好，只出字' }
 
   const all: Callout[] = [
-    { key: 'web', n: 1, title: 'dsh 中的她', side: 'top', pos: px(54), at: webBackground ? { x: 38, y: 40 } : { x: 54, y: 48 }, to: 'body', shown: webOn,
+    { key: 'web', n: 1, title: 'dsh 中的她', side: 'top', pos: px(54), at: webBackground ? { x: 38, y: 40 } : { x: 54, y: 48 }, to: 'look', shown: webOn,
       ...status(webOn, pet !== undefined || desktop !== undefined, body.web.place === 'background' ? '作背景，铺在页面后面' : '桌宠，能拖、能点', '还没有形象') },
     { key: 'tray', n: 2, title: mac ? '菜单栏图标' : '托盘图标', side: 'top', pos: px(90), at: { x: 90, y: 2.4 }, to: 'places', shown: trayOn,
       ...(offered ? { tone: trayOn ? 'ok' as const : 'off' as const, text: trayOn ? '点它出菜单' : '关着，在下面打开' } : noDesk) },

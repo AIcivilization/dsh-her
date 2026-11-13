@@ -12,7 +12,7 @@ import { cleanSvg } from '../pack/material-check.ts'
 import { parseStage, type Stage } from '../pack/stage.ts'
 import { parseSkin } from '../core/skin.ts'
 import type { Library, LibraryRow } from './library.ts'
-import type { Skins } from './skins.ts'
+import { safeSkinCss, type Skins } from './skins.ts'
 import type { StageStore } from './stage-store.ts'
 
 export interface DesignDeps {
@@ -22,6 +22,10 @@ export interface DesignDeps {
   stages: StageStore
   /** After 编排 or the library changed: she shows it (when she plays 编排). */
   applied: () => void
+  /** Put a skin on every dsh page and keep it (undefined: dsh as it is). */
+  wear?: (id: string | undefined) => void
+  /** Where a skin's zip is saved for the user to keep or send (this computer's Downloads). */
+  exportDir?: () => string
   log: (entry: Record<string, unknown>) => void
 }
 
@@ -114,9 +118,14 @@ export function designTools(deps: DesignDeps): NativeTool[] {
       if (typeof args.id !== 'string' || args.id === '') return JSON.stringify(deps.skins.list().map(e => ({ id: e.skin.id, name: e.skin.name, builtin: e.skin.builtin === true })), null, 1)
       const entry = deps.skins.get(args.id)
       if (entry === undefined) throw new Error('没有这套皮肤')
-      return JSON.stringify(entry.skin, null, 1)
+      if (entry.skin.builtin === true) return JSON.stringify({ skin: entry.skin }, null, 1)
+      // Its files too, and the text of its SVGs and CSS, so they can be changed rather than drawn again.
+      const dir = join(deps.home, 'skins', args.id)
+      const files = existsSync(dir) ? readdirSync(dir).filter(name => !name.startsWith('.')) : []
+      const texts = Object.fromEntries(files.filter(name => /\.(svg|css)$/i.test(name)).map(name => [name, readFileSync(join(dir, name), 'utf8').slice(0, 20_000)]))
+      return JSON.stringify({ skin: entry.skin, problems: entry.problems, files, texts }, null, 1)
     }),
-    tool('skin_set', '写一套皮肤的 skin.json（新的或用户自己的；自带的不能改，换个 id 复制一份）。颜色写 dsh 的 --dsw-alias-… 名字，每个给 light 和 dark。写好后用户在「她」页面的「皮肤」里点它试。', {
+    tool('skin_set', '写一套皮肤的 skin.json（新的或用户自己的；自带的不能改，换个 id 复制一份）。颜色写 dsh 的 --dsw-… 名字，每个给 light 和 dark；背景图写 background.file（先用 skin_file_set 写好那个文件）。写好后用户在「她 → 皮肤」里点它试，或者让你用 skin_wear 换上。', {
       id: { type: 'string', description: '文件夹名：字母、数字、中文、-' },
       skin: { type: 'object', description: 'skin.json 的内容：name、colors、bar、background、font…' },
     }, ['id', 'skin'], args => {
@@ -131,6 +140,50 @@ export function designTools(deps: DesignDeps): NativeTool[] {
       writeFileSync(target, `${JSON.stringify(args.skin, null, 2)}\n`)
       deps.log({ event: 'design', what: 'skin', id })
       return `写好了皮肤「${skin.name}」（${id}）。${problems.length > 0 ? `没用上的：${problems.join('；')}。` : ''}用户在「她」页面的「皮肤」里点它就能看。`
+    }),
+    tool('skin_file_set', '往一套皮肤的文件夹里写一个文本文件：SVG 背景或装饰（比如 background.svg），或者一个 .css。SVG 里能运行的东西会去掉；CSS 不能有 url() 和 @import。写完要在 skin.json 里引用它（background.file 或 css）。', {
+      id: { type: 'string', description: '皮肤的 id（文件夹名）' },
+      file: { type: 'string', description: '文件名，比如 background.svg' },
+      text: { type: 'string', description: '文件内容' },
+    }, ['id', 'file', 'text'], args => {
+      const id = text(args.id, 'id')
+      const file = text(args.file, 'file')
+      if (!/\.(svg|css)$/i.test(file)) throw new Error('这里只能写 .svg 和 .css')
+      const target = deps.skins.target(id, file)
+      if (target === undefined) throw new Error('这个 id 或文件名不行（自带的皮肤不能改；只用字母、数字、中文和 -）')
+      const body = typeof args.text === 'string' ? args.text : ''
+      if (body.length > 400_000) throw new Error('文件太大了（超过 400 KB）')
+      mkdirSync(join(target, '..'), { recursive: true })
+      if (/\.svg$/i.test(file)) {
+        if (!/<svg[\s>]/i.test(body)) throw new Error('这不是一张 SVG')
+        writeFileSync(target, cleanSvg(body).svg)
+      } else {
+        if (!safeSkinCss(body)) throw new Error('CSS 里不能有 url()、@import')
+        writeFileSync(target, body)
+      }
+      deps.log({ event: 'design', what: 'skin-file', id, file })
+      return `写好了 ${id}/${file}。记得在 skin.json 里引用它。`
+    }),
+    ...(deps.wear === undefined ? [] : [tool('skin_wear', '把一套皮肤换上并保存（整个 dsh 立刻换）；不给 id 就换回 dsh 原样。用户明确说要换上时才用。', { id: { type: 'string' } }, [], args => {
+      const id = typeof args.id === 'string' && args.id !== '' ? args.id : undefined
+      if (id !== undefined && deps.skins.get(id) === undefined) throw new Error('没有这套皮肤')
+      deps.wear!(id)
+      deps.log({ event: 'design', what: 'skin-wear', id: id ?? null })
+      return id === undefined ? '换回了 dsh 原样。' : `换上并保存了「${deps.skins.get(id)?.skin.name ?? id}」，每个 dsh 页面几秒内都会换。不喜欢就在「她 → 皮肤」里换回去。`
+    })]),
+    tool('skin_export', '把一套皮肤打成 zip，存到这台电脑的"下载"文件夹（用户要下载、要发给别人时用）。别人在「她 → 皮肤」里点"上传 zip"就能用。把存好的位置原样告诉用户。', { id: { type: 'string' } }, ['id'], args => {
+      const id = text(args.id, 'id')
+      const entry = deps.skins.get(id)
+      if (entry === undefined) throw new Error('没有这套皮肤')
+      if (entry.skin.builtin === true) throw new Error('自带的皮肤不用下载')
+      const dir = deps.exportDir?.() ?? join(deps.home, 'exports')
+      mkdirSync(dir, { recursive: true })
+      const base = entry.skin.name.replace(/[/\\:*?"<>|]/g, '').trim() || id
+      let path = join(dir, `${base}.zip`)
+      for (let n = 2; existsSync(path); n++) path = join(dir, `${base}-${n}.zip`)
+      writeFileSync(path, deps.skins.zip(id))
+      deps.log({ event: 'design', what: 'skin-export', id })
+      return `存好了：${path}。也可以在「她 → 皮肤」里选中「${entry.skin.name}」，点"下载"。`
     }),
     tool('svg_get', '读素材库里的一张 SVG（头像、宠物等）。改颜色、改部件前先读，找到对应的 <g id="衣服"> 之类的部分。', { row: { type: 'string', enum: ROWS }, name: { type: 'string' } }, ['row', 'name'], args => {
       const path = deps.library.path(text(args.row, 'row'), text(args.name, 'name'))

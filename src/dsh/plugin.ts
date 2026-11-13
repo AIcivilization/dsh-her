@@ -31,6 +31,7 @@
  */
 
 import { spawn } from 'node:child_process'
+import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -46,13 +47,15 @@ import { listLooks } from '../pack/looks.ts'
 import { emptyStage, missingMaterials, parseStage, Picker, renameMaterial, resolveStage, stageFromLook, stageFromPack, type Scene, type When } from '../pack/stage.ts'
 import { compileStage, readPlay, removeStageLook, STAGE_LOOK, STAGE_LOOK_ID, writePlay } from './stage-play.ts'
 import { Library, type LibraryRow } from './library.ts'
-import { Skins } from './skins.ts'
+import { safeSkinCss, Skins } from './skins.ts'
+import { makeZip } from '../core/zip.ts'
+import { SKIN_TEMPLATE, SKIN_TEMPLATE_SVG, skinReadme } from '../core/skin-guide.ts'
 import { designTools, herLookTools, undoSvg, type DesignDeps } from './design-tools.ts'
 import { DesignSession } from './design-session.ts'
 import { Secrets } from '../voice/secrets.ts'
 import { cleanVoices, ExternalVoices, SECRET_FIELDS, type PluginVoice } from '../voice/external.ts'
 import { cleanIntro, type IntroSettings } from '../core/intro.ts'
-import { checkMaterial } from '../pack/material-check.ts'
+import { checkMaterial, cleanSvg } from '../pack/material-check.ts'
 import { StageStore } from './stage-store.ts'
 import { Characters } from './characters.ts'
 import { BrainServer } from '../server/brain-server.ts'
@@ -1159,7 +1162,11 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     skinIntro: introPath({ ...introSettings(), source: 'skin' }) !== undefined,
   })
   /** "+AI" (§6): the design tools, and the session of their own in her workspace. */
-  const designDeps: DesignDeps = { home: paths.root, library, skins, stages, applied: () => applyStage(), log: entry => log(entry) }
+  const designDeps: DesignDeps = {
+    home: paths.root, library, skins, stages, applied: () => applyStage(), wear: id => skins.use(id), log: entry => log(entry),
+    // The Downloads folder of whoever runs dsh here; a server has none, so her own folder.
+    exportDir: () => (existsSync(join(homedir(), 'Downloads')) ? join(homedir(), 'Downloads') : join(paths.root, 'exports')),
+  }
   const design = new DesignSession({
     home: paths.root, room: join(dir, 'room'), title: session?.title ?? `她 · ${character.name}`,
     services: () => services, route: () => route(), tools: () => designTools(designDeps), logger: ctx.logger,
@@ -1411,6 +1418,13 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     setOff: off => setHerOff(off),
     stageGet: () => stageView(),
     designOpen: async focus => ({ sessionId: await design.open(focus) }),
+    designSkin: async id => {
+      const entry = id === undefined ? undefined : skins.get(id)
+      if (id !== undefined && (entry === undefined || entry.skin.builtin === true)) throw new Error('只能改你自己的皮肤；自带的可以让 AI 照着做一套新的')
+      const sessionId = await design.startSkin(entry === undefined ? undefined : { id: entry.skin.id, name: entry.skin.name })
+      log({ event: 'design', what: 'skin-start', base: id ?? null })
+      return { sessionId }
+    },
     libraryUndo: (row, name) => {
       if (!undoSvg(paths.root, library, row, name)) throw new Error('没有上一版')
       applyStage()
@@ -2128,6 +2142,24 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
         pending.settle({ ok: false, reason: 'no body' })
       }
     }))
+    // A skin of one's own as a zip, to keep or send to someone; and the template for making one by hand.
+    const download = (data: Uint8Array, name: string) => new Response(data, { headers: {
+      'content-type': 'application/zip', 'content-length': String(data.length), 'x-content-type-options': 'nosniff',
+      'content-disposition': `attachment; filename="skin.zip"; filename*=UTF-8''${encodeURIComponent(name)}`,
+    } })
+    get('skin-zip', request => {
+      const id = new URL(request.url).searchParams.get('id') ?? ''
+      try {
+        return download(skins.zip(id), `${skins.get(id)?.skin.name ?? id}.zip`)
+      } catch (error) {
+        return new Response((error as Error).message, { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } })
+      }
+    })
+    get('skin-template', () => download(makeZip([
+      { name: 'my-skin/skin.json', data: new TextEncoder().encode(`${JSON.stringify(SKIN_TEMPLATE, null, 2)}\n`) },
+      { name: 'my-skin/background.svg', data: new TextEncoder().encode(SKIN_TEMPLATE_SVG) },
+      { name: 'my-skin/README.md', data: new TextEncoder().encode(skinReadme()) },
+    ]), 'dsh-her 皮肤模板.zip'))
     // A file of a skin (its background, font, clip, CSS).
     get('skin-file', request => {
       const query = new URL(request.url).searchParams
@@ -2163,11 +2195,33 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
         const row = query.get('library')
         const skin = query.get('skin')
         let target: string | undefined
+        if (query.get('skinzip') !== null) {
+          // A skin as one zip (downloaded from here, or the template filled in): unpacked into a folder of its own.
+          if (!/\.zip$/i.test(file)) return refuse('要是一个 .zip 文件')
+          const temp = join(uploadsDir, `skin-${Date.now().toString(36)}.zip`)
+          mkdirSync(uploadsDir, { recursive: true })
+          try {
+            await saveUpload(request, temp)
+            const { id, skipped } = skins.importZip(readFileSync(temp), file.replace(/\.zip$/i, ''))
+            log({ event: 'skin', action: 'import', id, skipped: skipped.length })
+            return answer(200, { ok: true, id, skipped })
+          } catch (error) {
+            return answer(400, { ok: false, message: (error as Error).message })
+          } finally {
+            rmSync(temp, { force: true })
+          }
+        }
         if (skin !== null) {
-          // A skin's folder: skin.json and its pictures, font, clip, CSS.
+          // A skin's folder: skin.json and its pictures, font, clip, CSS (an SVG loses what could run; CSS may not reach out).
           target = skins.target(skin, file)
-          if (target === undefined) return refuse(`皮肤里只能放 skin.json、图片、字体、视频和 .css，名字只能用字母、数字、中文和 -：${file}`)
-          return answer(200, { ok: true, size: await saveUpload(request, target) })
+          if (target === undefined) return refuse(`皮肤里只能放 skin.json、图片（也可以是 svg）、字体、视频和 .css，名字只能用字母、数字、中文和 -：${file}`)
+          const size = await saveUpload(request, target)
+          if (/\.svg$/i.test(target)) writeFileSync(target, cleanSvg(readFileSync(target, 'utf8')).svg)
+          if (/\.css$/i.test(target) && !safeSkinCss(readFileSync(target, 'utf8'))) {
+            rmSync(target, { force: true })
+            return answer(400, { ok: false, message: `${file}：皮肤的 CSS 里不能有 url() 和 @import，没收` })
+          }
+          return answer(200, { ok: true, size })
         } else if (row !== null) {
           // 素材库: one picture or clip, by its own name, into its row.
           target = library.target(row, file)
