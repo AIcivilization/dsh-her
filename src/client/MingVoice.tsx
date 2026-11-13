@@ -30,7 +30,7 @@ export function MingSection({ state, apply, inUse, trying, playing, onListen }: 
     return (
       <div>
         <label className="her-label">{SERVICE_NAMES.ming}</label>
-        <p className="her-muted">完全在你的电脑上运行，不联网、不花钱，能跟着她的情绪变声，还能设计或克隆她自己的声音。要下载约 2 GB，说话时占约 2 GB 内存。</p>
+        <p className="her-muted">完全在你的电脑上运行，不联网、不花钱，能跟着她的情绪变声，还能设计或克隆她自己的声音。要下载约 2 GB，说话时占约 2 GB 内存。{ming.engine === 'audiocpp' && '装好后会自动试一下用显卡和用 CPU 哪个快，挑快的用；太慢的电脑会告诉你。'}</p>
         {busy && (
           <>
             <p className="her-muted">{ming.step}{ming.total ? `：${Math.round(((ming.done ?? 0) / ming.total) * 100)}%` : '…'}</p>
@@ -50,6 +50,7 @@ export function MingSection({ state, apply, inUse, trying, playing, onListen }: 
     <div>
       <label className="her-label">{SERVICE_NAMES.ming}</label>
       <p className="her-muted">{mingStateText(ming.state)}{ming.state === 'failed' && <> {ming.error} <button className="her-btn small" onClick={() => void apply(herApi.mingRestart())}>重启</button></>}</p>
+      {ming.engine === 'audiocpp' && <AudioCppBackend state={state} apply={apply} />}
       <div className="her-grid">
         {VOICES.filter(v => v.service === 'ming').map(v => (
           <button key={v.id} className={choiceClass(v.id, inUse, trying)} onClick={() => onListen(v.id)}>
@@ -70,10 +71,12 @@ export function MingSection({ state, apply, inUse, trying, playing, onListen }: 
       {make === 'design' && <DesignVoice apply={apply} onDone={() => setMake(undefined)} />}
       {make === 'clone' && <CloneVoice apply={apply} onDone={() => setMake(undefined)} />}
       <div className="her-row">
-        <select className="her-select" style={{ width: 'auto' }} value={settings.quality} onChange={e => void apply(herApi.mingSettings({ quality: e.target.value as 'quality' | 'speed' }))}>
-          <option value="quality">音质优先（一句话约 2–3 秒）</option>
-          <option value="speed">速度优先（约快一倍，音质略差）</option>
-        </select>
+        {ming.engine !== 'audiocpp' && (
+          <select className="her-select" style={{ width: 'auto' }} value={settings.quality} onChange={e => void apply(herApi.mingSettings({ quality: e.target.value as 'quality' | 'speed' }))}>
+            <option value="quality">音质优先（一句话约 2–3 秒）</option>
+            <option value="speed">速度优先（约快一倍，音质略差）</option>
+          </select>
+        )}
         <label><input type="checkbox" checked={settings.moods} onChange={e => void apply(herApi.mingSettings({ moods: e.target.checked }))} /> 跟着她的情绪变声</label>
         <select className="her-select" style={{ width: 'auto' }} value={settings.idleMinutes ?? ''} onChange={e => void apply(herApi.mingSettings({ idleMinutes: e.target.value === '' ? -1 : Number(e.target.value) }))}>
           <option value="">不说话时自动省内存（按内存大小）</option>
@@ -90,12 +93,48 @@ export function MingSection({ state, apply, inUse, trying, playing, onListen }: 
   )
 }
 
+/** audio.cpp: what the self-check picked, how fast, the other ways that worked, and CUDA on request. */
+function AudioCppBackend({ state, apply }: { state: StateView; apply: Apply }) {
+  const ming = state.voice.ming
+  const info = ming.audiocpp
+  if (ming.state === 'installing') {
+    return (
+      <>
+        <p className="her-muted">{ming.step}{ming.total ? `：${Math.round(((ming.done ?? 0) / ming.total) * 100)}%` : '…'}</p>
+        {ming.total !== undefined && <div className="her-progress"><div style={{ width: `${Math.round(((ming.done ?? 0) / ming.total) * 100)}%` }} /></div>}
+      </>
+    )
+  }
+  if (info?.chosen === undefined) return null
+  const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} 秒`
+  const working = info.results.filter(r => r.ms !== undefined && r.error === undefined)
+  const failed = info.results.filter(r => r.error !== undefined)
+  const key = (r: { build: string; backend: string }) => `${r.build}|${r.backend}`
+  return (
+    <>
+      <div className="her-row">
+        <span className="her-muted">正在用{info.chosen.label}，一句约 {seconds(info.chosen.ms)}</span>
+        {working.length > 1 && (
+          <select className="her-select" style={{ width: 'auto' }} value={key(info.chosen)} onChange={e => { const [build, backend] = e.target.value.split('|'); void apply(herApi.mingBackend(build!, backend!)) }}>
+            {working.map(r => <option key={key(r)} value={key(r)}>{r.label}：一句约 {seconds(r.ms!)}</option>)}
+          </select>
+        )}
+        <button className="her-btn small" onClick={() => void apply(herApi.mingRecheck())}>重新测一次</button>
+        {info.cuda === 'available' && <button className="her-btn small" onClick={() => { if (window.confirm(`下载 NVIDIA 的 CUDA 版（约 ${info.cudaMB ?? 900} MB），测一下是不是更快？更快就自动换过去。`)) void apply(herApi.mingAddCuda()) }}>试试 CUDA 版（约 {info.cudaMB ?? 900} MB）</button>}
+      </div>
+      {info.slow && <p className="her-warn">这台电脑跑本机声音比较慢（一句要 {seconds(info.chosen.ms)}，她每次开口前都要等这么久）。建议继续用微软 Edge 的声音。</p>}
+      {failed.length > 0 && <p className="her-faint">用不了的：{failed.map(r => `${r.label}（${r.error}）`).join('；')}</p>}
+    </>
+  )
+}
+
 function mingStateText(state: string): string {
   switch (state) {
     case 'ready': return '已就绪'
     case 'loading': return '正在加载声音模型…'
     case 'stopped': return '已安装（为了省内存现在没在运行，说话时会自动启动）'
     case 'failed': return '出错了：'
+    case 'installing': return '正在测试…'
     default: return ''
   }
 }
