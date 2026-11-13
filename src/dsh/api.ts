@@ -123,7 +123,7 @@ export interface StateView {
   /** Ready-made looks offered on the release, and the one being fetched. */
   presets: { list: Preset[]; active?: { id: string; state: 'downloading' | 'failed'; done: number; total: number; error?: string } }
   /** Where she appears, each on its own (§13). The desktop ones are the desktop body's; `holdKey`: hold a key in any program to talk. */
-  places: { wallpaper: boolean; overlay: boolean; web: boolean; webAlways: boolean; avatar: boolean; tray: boolean; holdKey: boolean }
+  places: { wallpaper: boolean; overlay: boolean; web: boolean; webAlways: boolean; avatar: boolean; tray: boolean; holdKey: boolean; petScale: number }
   /** What she shows now in the wallpaper and floating on top, for the picture on 总览. */
   show: { desktop?: ShowMedia; pet?: ShowMedia }
   /** Her 三视图 (素材库's `sheet` row): what every other picture and clip of her is made from. */
@@ -205,7 +205,7 @@ export interface ApiRuntime {
   bodyOpenFolder(): void
   /** The web body: whether to show, her config, a message from the page, the setting. */
   /** `remote`: the page is open on another device than the one running dsh. */
-  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; pill: boolean; veil: WebVeil; mode: WebMode; place: WebPlace; scope: WebScope; focus: boolean; open?: string; page?: SettingsPage; avatar?: AvatarView; skin?: { id: string; rev: number }; intro?: { url: string; when: 'every' | 'daily' } }
+  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; pill: boolean; veil: WebVeil; mode: WebMode; place: WebPlace; scope: WebScope; focus: boolean; open?: string; page?: SettingsPage; chat?: boolean; avatar?: AvatarView; skin?: { id: string; rev: number }; intro?: { url: string; when: 'every' | 'daily' } }
   /** A new folder for files coming from the browser, and importing it as a pack (with no desktop body). */
   webNewBatch(): string
   importBatch(batch: string, name?: string): Promise<void>
@@ -216,7 +216,9 @@ export interface ApiRuntime {
   webSend(message: BodyMessage): void
   webSetPlace(change: { place?: WebPlace; scope?: WebScope }): void
   webSetVeil(change: Partial<WebVeil>): void
-  placesSet(change: { wallpaper?: boolean; overlay?: boolean; web?: boolean; webAlways?: boolean; avatar?: boolean; tray?: boolean; holdKey?: boolean }): void
+  /** 纯聊模式: her scenes to go round, and her figure. */
+  chatScenes(): { name: string; scenes: ShowMedia[]; pet?: ShowMedia }
+  placesSet(change: { wallpaper?: boolean; overlay?: boolean; web?: boolean; webAlways?: boolean; avatar?: boolean; tray?: boolean; holdKey?: boolean; petScale?: number }): void
   webSetMode(mode: WebMode): void
   /** The newest plugin on npm, for hosts without dshmarket (which otherwise answers this). */
   pluginLatest(): Promise<{ latest: string; updateAvailable: boolean }>
@@ -456,13 +458,15 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
       rt.webSetPlace({ ...(place === undefined ? {} : { place }), ...(scope === undefined ? {} : { scope }) })
       return withState()
     },
+    '/chat/scenes': async () => ({ ...rt.chatScenes() }),
     '/web/veil': async body => {
       rt.webSetVeil({ ...(typeof body.dim === 'number' ? { dim: body.dim } : {}), ...(typeof body.blur === 'number' ? { blur: body.blur } : {}) })
       return withState()
     },
     '/places': async body => {
-      const change: Record<string, boolean> = {}
+      const change: Record<string, boolean | number> = {}
       for (const key of ['wallpaper', 'overlay', 'web', 'webAlways', 'avatar', 'tray', 'holdKey']) if (typeof body[key] === 'boolean') change[key] = body[key] as boolean
+      if (typeof body.petScale === 'number') change.petScale = body.petScale
       if (Object.keys(change).length === 0) throw new ApiError('没有要改的')
       rt.placesSet(change)
       return withState()

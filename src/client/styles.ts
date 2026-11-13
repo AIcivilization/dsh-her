@@ -293,6 +293,7 @@ body[data-ds-dark-theme] .her-page{--her-ink:var(--her-bar-accent,#86b4ff);--her
 .her-place-tile .her-place-pic{width:48px;height:34px}
 .her-place-tile.on .her-place-pic{opacity:1}
 .her-places p{margin:10px 2px 0}
+.her-places-size{margin-top:10px;border-top:1px solid ${LINE};padding-top:10px}
 .her-show-mark{position:absolute;translate:-50% -50%;width:17px;height:17px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${INK};color:${ON_INK};font-size:10.5px;font-weight:700;line-height:1;box-shadow:0 0 0 2px rgba(255,255,255,.9),0 2px 6px rgba(0,0,0,.4);opacity:1!important;filter:none!important}
 .her-show-mark.warn{background:${WARN};color:#fff}
 .her-show-mark.off{background:#8a8f99;color:#fff}

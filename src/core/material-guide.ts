@@ -172,7 +172,7 @@ export const GUIDE: GuideItem[] = [
   },
   {
     id: 'desktop-night', group: 'desktop', title: '桌面·夜晚', where: '晚上自动换成这一段。', tool: '图生视频',
-    size: '同上', format: 'MP4', length: '8–10 秒，循环',
+    size: '和场景图一样：2560×1600 或 2560×1440（工具出不了这么大就 1920×1200 / 1920×1080）', format: 'MP4', length: '8–10 秒，循环',
     rules: ['先用生图把「桌面·场景图」改成夜晚（同样的构图），再用它做首尾帧。', '夜里的画面要暗一些，不晃眼。'],
     how: '第一步（生图）：传「桌面·场景图」，提示词写「同样的构图和人物，改成夜晚：窗外是星空和月光下的海面，屋里亮着一盏暖色的小灯」。第二步（图生视频）：首帧、尾帧都传这张夜晚的图，用下面的提示词。',
     prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n夜晚，很安静：星星微微闪烁，月光下的海面有缓慢的波光，小灯的暖光轻轻晃动。她抱着膝盖坐在窗边看星星，慢慢眨眼，头发微微动。所有动作都很慢。\n${LOOP}${NO_TEXT}不要声音。`,
@@ -180,7 +180,7 @@ export const GUIDE: GuideItem[] = [
   },
   {
     id: 'desktop-away', group: 'desktop', title: '桌面·你不在的时候', where: '你离开电脑一阵子以后。', tool: '图生视频',
-    size: '同上', format: 'MP4', length: '8–10 秒，循环',
+    size: '和场景图一样：2560×1600 或 2560×1440（工具出不了这么大就 1920×1200 / 1920×1080）', format: 'MP4', length: '8–10 秒，循环',
     rules: ['她在做自己的事：看书、趴着睡、玩手机。'],
     how: '先用生图做一张同构图的「她趴在窗台上睡着了」，再用它做首尾帧。',
     prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n她趴在窗台上睡着了：肩膀随着呼吸慢慢起伏，尾巴偶尔轻轻动一下，窗帘缓缓飘动，海面波光缓慢。非常安静。\n${LOOP}${NO_TEXT}不要声音。`,
@@ -188,7 +188,7 @@ export const GUIDE: GuideItem[] = [
   },
   {
     id: 'desktop-play', group: 'desktop', title: '桌面·她自己想去的场景', where: '聊到某件事时，她自己换过去（比如聊到麻将，去「打麻将」）。', tool: '图生视频',
-    size: '同上', format: 'MP4', length: '8–10 秒，循环',
+    size: '和场景图一样：2560×1600 或 2560×1440（工具出不了这么大就 1920×1200 / 1920×1080）', format: 'MP4', length: '8–10 秒，循环',
     rules: ['一个场景一件事：打麻将、喝茶、弹琴、做饭……想做几个做几个。', '给场景写一句「是什么」，她才知道什么时候该去。'],
     how: '先用生图做这个场景的图（传三视图当参考，她仍在画面右侧），再用它做首尾帧。',
     prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n她坐在麻将桌前：摸起一张牌看了看，想了一下，把牌轻轻打出去，然后把手放回桌上。动作从容。\n${LOOP}${NO_TEXT}不要声音。`,
@@ -213,7 +213,7 @@ export const GUIDE: GuideItem[] = [
   },
   {
     id: 'pet-move', group: 'pet', title: '宠物·小动作（多做几段轮换）', where: '和「站着」轮着播，她看起来是活的。', tool: '图生视频',
-    size: '同上', format: 'MP4（纯绿背景）→ 抠掉背景', length: '5–8 秒',
+    size: '1080×1920 或 720×1280（竖版 9:16）', format: 'MP4（纯绿背景）→ 抠掉背景', length: '5–8 秒',
     rules: ['一段一个动作：伸懒腰、看手机、整理头发、踮脚张望、打哈欠。', '脚的位置不变，结束时回到站姿。'],
     how: '首帧、尾帧都传「宠物·站姿图」。每个动作生成一段，换提示词中间那句。',
     prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n她双脚站在原地，伸了一个大大的懒腰：双手举过头顶，踮一下脚，舒服地眯起眼睛，然后把手放下，回到原来的站姿。\n${LOOP}${GREEN}${NO_TEXT}不要声音。`,
@@ -221,7 +221,7 @@ export const GUIDE: GuideItem[] = [
   },
   {
     id: 'pet-sleep', group: 'pet', title: '宠物·夜里睡着', where: '深夜浮在桌面上的样子。', tool: '图生视频',
-    size: '同上', format: 'MP4（纯绿背景）→ 抠掉背景', length: '5–8 秒，循环',
+    size: '1080×1920 或 720×1280（竖版 9:16）', format: 'MP4（纯绿背景）→ 抠掉背景', length: '5–8 秒，循环',
     rules: ['先用生图做一张「坐在地上抱着膝盖睡着」的绿背景图（参考三视图），再用它做首尾帧。'],
     how: '首帧、尾帧都传那张睡着的图。',
     prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n她坐在地上抱着膝盖睡着了：肩膀随着呼吸慢慢起伏，头轻轻点一下，尾巴偶尔动一动。非常安静。\n${LOOP}${GREEN}${NO_TEXT}不要声音。`,
@@ -250,6 +250,23 @@ export const GUIDE: GuideItem[] = [
 /** The prompt with the character's description in it. */
 export function fillPrompt(prompt: string, who: string): string {
   return prompt.split(WHO).join(who.trim() === '' ? DEFAULT_WHO : who.trim())
+}
+
+/** The line in front of a prompt that says what it is for (it helps the tool keep to the brief). */
+export function purposeLine(who: string): string {
+  return who.trim() === '' || who.trim() === DEFAULT_WHO ? '这是为deepseek-harness设计鲸鱼娘的角色之一，要求：' : '这是为deepseek-harness设计的角色素材之一，要求：'
+}
+
+/**
+ * A material's whole prompt, to paste as it is: what it is for (when
+ * `purpose`), the prompt with your character in it, and its size (and, for
+ * a clip, how long), so nothing has to be typed into the tool beside it.
+ */
+export function promptFor(item: GuideItem, who: string, purpose = true): string {
+  const size = item.tool === '图生视频'
+    ? `视频尺寸：${item.size}${item.length === undefined ? '' : `；时长：${item.length}`}。`
+    : `图片尺寸：${item.size}；格式：${item.format}。`
+  return [...(purpose ? [purposeLine(who)] : []), fillPrompt(item.prompt, who), size].join('\n')
 }
 
 /** The whole guide as a document (docs/素材规格与提示词.md). */
@@ -310,7 +327,7 @@ export function guideMarkdown(who: string = DEFAULT_WHO): string {
         `- **要求**：`, ...item.rules.map(rule => `  - ${rule}`),
         `- **怎么做**：${item.how}`,
         `- **做好后**：${item.upload}${item.stage === undefined ? '' : ` 然后：${item.stage}`}`,
-        '', '提示词（直接复制）：', '', '```', fillPrompt(item.prompt, who), '```', '',
+        '', '提示词（直接复制）：', '', '```', promptFor(item, who), '```', '',
       )
     }
   }

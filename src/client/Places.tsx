@@ -4,7 +4,7 @@
  * page, on dsh's chat box — and the icon in the menu bar.
  */
 
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { desktopHere, desktopOffered, herApi, type StateView } from './api.ts'
 import type { Apply } from './parts.tsx'
 
@@ -49,6 +49,18 @@ export function PlacesRow({ state, apply }: { state: StateView; apply: Apply }) 
     { key: 'tray', label: state.platform === 'win32' ? '托盘图标' : '菜单栏图标', on: offered && p.tray, disabled: !offered, change: on => ({ tray: on }) },
   ]
   const waiting = offered && !body.connected
+  // Her size: seen on the slider at once, sent once the hand stops (a new size means a new window on the desktop).
+  const [scale, setScale] = useState(p.petScale)
+  const timer = useRef<ReturnType<typeof setTimeout>>()
+  useEffect(() => { if (timer.current === undefined) setScale(p.petScale) }, [p.petScale])
+  const resize = (value: number) => {
+    setScale(value)
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => {
+      timer.current = undefined
+      set({ petScale: value })
+    }, 450)
+  }
   return (
     <section className="her-card her-places">
       <div className="her-places-row" role="group" aria-label="她出现在哪儿">
@@ -59,6 +71,13 @@ export function PlacesRow({ state, apply }: { state: StateView; apply: Apply }) 
             <input type="checkbox" aria-label={t.label} checked={t.on} disabled={t.disabled || state.off} onChange={e => set(t.change(e.target.checked))} />
           </label>
         ))}
+      </div>
+      <div className="her-setrow her-places-size">
+        <div><b>她的大小</b><span>桌面上浮着的她和 dsh 中的桌宠；桌面上也可以右键她 → 大小。</span></div>
+        <span className="her-range">
+          <input type="range" min={50} max={160} step={10} value={Math.round(scale * 100)} aria-label="她的大小" disabled={state.off} onChange={e => resize(Number(e.target.value) / 100)} />
+          <i>{Math.round(scale * 100)}%</i>
+        </span>
       </div>
       {state.off && <p className="her-faint">她关着：右上角打开后，这几个开关才起作用。</p>}
       {!state.off && !offered && <p className="her-faint">这台设备上没有桌面程序：壁纸里、桌面上、菜单栏图标用不了。</p>}

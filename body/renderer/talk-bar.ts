@@ -91,9 +91,12 @@ export class TalkBar {
   /** Said or heard since the conversation was last read back. */
   private pending: PendingLine[] = []
   private thinking = false
+  /** How many lines it shows: a few in the small bar, many in 纯聊模式. */
+  private readonly keep: number
 
-  constructor(host: BarHost, doc: Document = document) {
+  constructor(host: BarHost, doc: Document = document, options: { lines?: number } = {}) {
     this.host = host
+    this.keep = options.lines ?? 4
     if (doc.getElementById('her-bar-style') === null) {
       const style = doc.createElement('style')
       style.id = 'her-bar-style'
@@ -265,7 +268,7 @@ export class TalkBar {
       ...(this.view?.lines ?? []),
       ...this.fresh().filter(line => line.text !== '').map(line => ({ who: line.who, text: line.text, live: true, ...(line.heard === true ? { heard: true } : {}) })),
     ]
-    const nodes: HTMLElement[] = all.slice(-4).map(line => {
+    const nodes: HTMLElement[] = all.slice(-this.keep).map(line => {
       const el = doc.createElement('div')
       el.className = `her-bar-line ${line.who}${line.live === true && line.who === 'her' ? ' live' : ''}${line.heard === true ? ' heard' : ''}`
       const who = doc.createElement('b')
@@ -284,6 +287,8 @@ export class TalkBar {
       nodes.push(dots)
     }
     this.lines.replaceChildren(...nodes)
+    // The newest line in sight (纯聊模式 scrolls).
+    this.lines.scrollTop = this.lines.scrollHeight
   }
 
   /** Nothing typed and nothing held: clicking elsewhere may close it. */

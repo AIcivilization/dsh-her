@@ -153,15 +153,20 @@ function versionOf(path: string): string {
 }
 
 /** The floating window's size for a pack: a scene shows whole, a figure gets room for her bubble. */
-export function frameFor(pack: PackInfo): { her: { width: number; height: number }; frame: { width: number; height: number } } {
+/** How big she may be made (her page's slider): half to 1.6 times. */
+export const cleanScale = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? Math.min(1.6, Math.max(0.5, Math.round(value * 100) / 100)) : 1)
+
+export function frameFor(pack: PackInfo, scale = 1): { her: { width: number; height: number }; frame: { width: number; height: number } } {
   const aspect = pack.aspect ?? 0.75
+  const s = cleanScale(scale)
   if (pack.layer === 'scene') {
-    const width = 400
+    const width = Math.round(400 * s)
     const height = Math.round(width / aspect)
     return { her: { width, height }, frame: { width, height } }
   }
-  const her = { width: Math.round(HER_HEIGHT * aspect), height: HER_HEIGHT }
-  return { her, frame: { width: Math.max(MIN_WIDTH, her.width), height: HER_HEIGHT + BUBBLE_ROOM } }
+  const height = Math.round(HER_HEIGHT * s)
+  const her = { width: Math.round(height * aspect), height }
+  return { her, frame: { width: Math.max(MIN_WIDTH, her.width), height: height + BUBBLE_ROOM } }
 }
 
 export class WebBody {
@@ -286,9 +291,9 @@ export class WebBody {
    * What she shows now in each place, for the picture on 总览: the scene of
    * the wallpaper and the figure that floats, as files the page can play.
    */
-  showcase(): { desktop?: ShowMedia; pet?: ShowMedia } {
-    const { look, packId } = this.chosen()
-    const media = (id: string | undefined): ShowMedia | undefined => {
+  /** A pack as a picture or clip the page can show as it is: its idle clip, or its photo. */
+  private showcaseMedia(): (id: string | undefined) => ShowMedia | undefined {
+    return id => {
       if (id === undefined) return undefined
       try {
         const pack = this.load(id)
@@ -301,6 +306,19 @@ export class WebBody {
         return undefined
       }
     }
+  }
+
+  /** Every scene of what she wears (a look's scenes, or the one scene pack), for 纯聊模式 to go round. */
+  scenes(): ShowMedia[] {
+    const { look, packId } = this.chosen()
+    const ids = look !== undefined ? look.scenes.map(s => s.pack).filter(id => id !== look.desk) : packId !== undefined && listPacks(this.packsDir).find(p => p.packId === packId)?.layer === 'scene' ? [packId] : []
+    const media = this.showcaseMedia()
+    return [...new Set(ids)].map(media).filter((m): m is ShowMedia => m !== undefined)
+  }
+
+  showcase(): { desktop?: ShowMedia; pet?: ShowMedia } {
+    const { look, packId } = this.chosen()
+    const media = this.showcaseMedia()
     if (look !== undefined) {
       const chosen = loadSettings(this.home).looks?.[look.id]?.scene
       const scene = look.scenes.find(s => s.id === chosen) ?? look.scenes.find(s => s.id === look.default) ?? look.scenes[0]
@@ -363,9 +381,9 @@ export class WebBody {
     this.push?.(JSON.stringify({ m: { t: 'web.reload' } }))
   }
 
-  config(mute: boolean): WebConfig {
+  config(mute: boolean, scale = 1): WebConfig {
     const pack = this.shown()
-    const { her, frame } = frameFor(pack)
+    const { her, frame } = frameFor(pack, scale)
     const mode = this.place().place === 'background' ? 'wallpaper' : pack.layer === 'scene' ? 'window' : 'overlay'
     return { mode, platform: 'web', pack, her, frame, debug: false, mute }
   }

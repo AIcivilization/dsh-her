@@ -68,7 +68,7 @@ import { assignClip, avatarIn, avatarOf, exampleFile, examples, exportProject, f
 import type { HerConfig } from './config.ts'
 import { HerSession, type DshServices, type ModelRoute } from './her-session.ts'
 import { heardText, SpeechQueue } from '../voice/speech-queue.ts'
-import { webShows, fileResponse, packFile, WEB_BASE, WebBody, type WebMode } from './web-body.ts'
+import { cleanScale, webShows, fileResponse, packFile, WEB_BASE, WebBody, type ShowMedia, type WebMode } from './web-body.ts'
 import { saveUpload, uploadAllowed, uploadTarget } from './uploads.ts'
 import { Initiative } from './initiative.ts'
 import { cachePreview, fetchPresets, installPreset, previewPath, type Preset } from './presets.ts'
@@ -406,12 +406,13 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
    * body's to show; what was chosen is kept here for when it connects.
    */
   const placesFile = join(paths.root, 'places.json')
-  interface PlacePrefs { wallpaper?: boolean; overlay?: boolean; avatar?: boolean; tray?: boolean; holdKey?: boolean }
+  interface PlacePrefs { wallpaper?: boolean; overlay?: boolean; avatar?: boolean; tray?: boolean; holdKey?: boolean; petScale?: number }
   let placePrefs: PlacePrefs = (() => {
     try {
       const value = JSON.parse(readFileSync(placesFile, 'utf8')) as Record<string, unknown>
       const out: PlacePrefs = {}
       for (const key of ['wallpaper', 'overlay', 'avatar', 'tray', 'holdKey'] as const) if (typeof value[key] === 'boolean') out[key] = value[key]
+      if (typeof value.petScale === 'number') out.petScale = cleanScale(value.petScale)
       return out
     } catch {
       return {}
@@ -428,6 +429,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     ...(deskPlaces() === undefined ? {} : { places: deskPlaces()! }),
     ...(placePrefs.tray === undefined ? {} : { tray: placePrefs.tray }),
     ...(placePrefs.holdKey === undefined ? {} : { holdKey: placePrefs.holdKey }),
+    ...(placePrefs.petScale === undefined ? {} : { petScale: placePrefs.petScale }),
   })
   /** The small picture on dsh's chat box: there unless switched away (or she is off). */
   const pillShown = () => !herOff && placePrefs.avatar !== false
@@ -563,7 +565,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
   let sessionLines: TalkLine[] = []
   let ownLines: Array<TalkLine & { conversation: string }> = []
   /** "完整对话" or "设置…" asked for on a body: the dsh page that sees it first opens this session, or her settings on this page. */
-  let openRequest: { sessionId?: string; page?: SettingsPage; at: number } | undefined
+  let openRequest: { sessionId?: string; page?: SettingsPage; chat?: boolean; at: number } | undefined
   const talkView = (): TalkView => {
     const id = session?.sessionId
     const segments = session?.segments() ?? []
@@ -954,6 +956,10 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       case 'settings.open':
         openSettings(message.page)
         break
+      case 'chat.open':
+        // 纯聊模式 from the body's menu: the next dsh page that asks opens it.
+        openRequest = { chat: true, at: Date.now() }
+        break
       case 'user.text': {
         voice?.warm()
         const text = message.text.trim()
@@ -1014,7 +1020,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
         bodyMode = message.mode
         break
       case 'body.prefs':
-        savePlaces({ wallpaper: message.places.wallpaper, overlay: message.places.overlay, tray: message.tray, holdKey: message.holdKey })
+        savePlaces({ wallpaper: message.places.wallpaper, overlay: message.places.overlay, tray: message.tray, holdKey: message.holdKey, ...(message.petScale === undefined ? {} : { petScale: cleanScale(message.petScale) }) })
         break
       case 'folder.picked':
         folderPicks.get(message.id)?.(message.path)
@@ -1351,7 +1357,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
           wallpaper: placePrefs.wallpaper ?? (bodyMode === undefined || bodyMode === 'wallpaper'),
           overlay: placePrefs.overlay ?? (bodyMode === undefined || bodyMode !== 'wallpaper'),
           web: webBody.mode !== 'off', webAlways: webBody.mode === 'on',
-          avatar: placePrefs.avatar !== false, tray: placePrefs.tray !== false, holdKey: placePrefs.holdKey === true,
+          avatar: placePrefs.avatar !== false, tray: placePrefs.tray !== false, holdKey: placePrefs.holdKey === true, petScale: placePrefs.petScale ?? 1,
         },
         off: herOff,
         skin: (() => { const id = skins.current(); return id === undefined ? null : skins.get(id)?.skin.name ?? null })(),
@@ -1643,6 +1649,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       openRequest = undefined
       const open = request?.sessionId
       const page = request?.page
+      const chat = request?.chat === true
       // The skin every dsh page wears, and the opening clip it may play once.
       const skinId = skins.current()
       const skin = skinId === undefined ? undefined : { id: skinId, rev: skins.get(skinId)?.rev ?? 0 }
@@ -1653,7 +1660,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
         : `/api/dsh-her/web/library-file?row=intro&name=${encodeURIComponent(intro.source)}`
       return {
         show: webShown(remote), pill: pillShown(), veil: webBody.veil(), mode: webBody.mode, place, scope, focus: initiative.focused,
-        ...(open === undefined ? {} : { open }), ...(page === undefined ? {} : { page }), ...(avatar === undefined ? {} : { avatar }),
+        ...(open === undefined ? {} : { open }), ...(page === undefined ? {} : { page }), ...(chat ? { chat } : {}), ...(avatar === undefined ? {} : { avatar }),
         ...(skin === undefined ? {} : { skin }), ...(introClip === undefined ? {} : { intro: { url: introClip, when: intro.when } }),
       }
     },
@@ -1693,7 +1700,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       return projectStatus(found.project, found.dir)
     },
     // Beside a desktop body she keeps quiet, unless that desktop is on another computer than this page.
-    webConfig: remote => webBody.config(desktopConnected() && !remote),
+    webConfig: remote => webBody.config(desktopConnected() && !remote, placePrefs.petScale ?? 1),
     webSend: message => onBodyMessage(withCid(message), undefined, 'web'),
     webSetMode: (mode: WebMode) => {
       webBody.mode = mode
@@ -1703,6 +1710,18 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       refreshBodyPack()
     },
     webSetVeil: change => webBody.setVeil(change),
+    chatScenes: () => {
+      // 纯聊模式 goes round her scenes: those of what she wears, then every 桌面 picture or clip of the 素材库.
+      const own = webBody.scenes()
+      const library_ = library.list('desktop').map((m): ShowMedia => ({
+        url: `/api/dsh-her/web/library-file?row=desktop&name=${encodeURIComponent(m.name)}&v=${Math.floor(m.addedAt).toString(36)}`,
+        kind: m.kind, layout: 'opaque', name: m.name,
+      }))
+      const seen = new Set<string>()
+      const scenes = [...own, ...library_].filter(m => (seen.has(m.url) ? false : (seen.add(m.url), true)))
+      const pet = webBody.showcase().pet
+      return { name: character.name, scenes, ...(pet === undefined ? {} : { pet }) }
+    },
     placesSet: change => {
       const desk = { ...(change.wallpaper === undefined ? {} : { wallpaper: change.wallpaper }), ...(change.overlay === undefined ? {} : { overlay: change.overlay }) }
       if (Object.keys(desk).length > 0) {
@@ -1720,6 +1739,13 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
         server?.broadcast({ t: 'config', holdKey: change.holdKey })
       }
       if (change.avatar !== undefined) savePlaces({ avatar: change.avatar })
+      if (change.petScale !== undefined) {
+        const petScale = cleanScale(change.petScale)
+        savePlaces({ petScale })
+        server?.broadcast({ t: 'config', petScale })
+        // The page's floating window takes its new size.
+        webBody.reload()
+      }
       if (change.web !== undefined) webBody.mode = change.web ? (webBody.mode === 'off' ? 'auto' : webBody.mode) : 'off'
       if (change.webAlways !== undefined && webBody.mode !== 'off') webBody.mode = change.webAlways ? 'on' : 'auto'
       log({ event: 'places', ...change })

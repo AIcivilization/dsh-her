@@ -344,6 +344,14 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
                   </div>
                 )}
               </Card>
+              <Card title="手机、平板上（触屏）">
+                <ul className="her-ways">
+                  <li><span className="her-keys"><kbd>点她</kbd></span><div><b>脚边出现两个按钮</b><span>话筒：按住说，松开发出去；键盘：打开对话小条。几秒不动就收起来。</span></div></li>
+                  <li><span className="her-keys"><kbd>点小头像</kbd></span><div><b>对话小条</b><span>点对话框上沿的她，小条里能打字，也能按住话筒说。</span></div></li>
+                  <li><span className="her-keys"><kbd>纯聊</kbd></span><div><b>全屏只和她聊</b><span>小条右下角 ⋯ → 纯聊模式，或者打开 dsh 网址时在后面加 <code>#her-chat</code>（存到主屏幕，下次一点就进）。</span></div></li>
+                </ul>
+                <p className="her-faint">快捷键只在有键盘的电脑上用得了。用麦克风要 HTTPS（或在本机打开）。</p>
+              </Card>
               <Card title="她在哪儿回答">
                 <ul className="her-ways">
                   <li><span className="her-keys"><kbd>说话</kbd></span><div><b>在她头顶回答</b><span>用快捷键、按住话筒或"一直在听"说的话，她出声回答，字幕在头顶的气泡里，上面一小行是她听到的。</span></div></li>
@@ -508,6 +516,10 @@ function Home({ state, apply, go }: { state: StateView; apply: Apply; go: (secti
               <input type="checkbox" checked={!float.hidden()} disabled={state.off} onChange={e => float.setHidden(!e.target.checked)} />
             </div>
           )}
+          <div className="her-setrow">
+            <div><b>纯聊模式</b><span>整个屏幕都是她的场景，只和她聊天；场景隔一会儿换一个。手机上也好用：打开 dsh 网址后面加 <code>#her-chat</code>，可以存到主屏幕。</span></div>
+            <button className="her-btn primary" disabled={state.off || window.__herFloat === undefined} onClick={() => window.__herFloat?.openChat()}>进入</button>
+          </div>
           <div className="her-setrow">
             <div><b>让她现在说一句</b><span>{said ?? '看看她的声音和主动说话好不好用。'}</span></div>
             <button className="her-btn" disabled={state.off} onClick={() => void herApi.initiativeTry().then(r => setSaid(r.ok ? `她说：「${r.said}」` : r.message))}>说一句</button>

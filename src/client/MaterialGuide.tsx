@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { DEFAULT_WHO, fillPrompt, GUIDE, GUIDE_GROUPS, guideMarkdown, VIDEO_RULES, type GuideGroup, type GuideItem } from '../core/material-guide.ts'
+import { DEFAULT_WHO, GUIDE, GUIDE_GROUPS, guideMarkdown, promptFor, purposeLine, VIDEO_RULES, type GuideGroup, type GuideItem } from '../core/material-guide.ts'
 import { Icon } from './icons.tsx'
 
 /** Copy text, also on a page without HTTPS (no clipboard API there). */
@@ -59,6 +59,21 @@ export function MaterialGuide({ cid, onLibrary, onSkin }: { cid: string; onLibra
     }
   })
   const [group, setGroup] = useState<GuideGroup>('base')
+  const [purpose, setPurpose] = useState(() => {
+    try {
+      return localStorage.getItem('dsh-her.guide.purpose') !== 'off'
+    } catch {
+      return true
+    }
+  })
+  const choosePurpose = (on: boolean) => {
+    setPurpose(on)
+    try {
+      localStorage.setItem('dsh-her.guide.purpose', on ? 'on' : 'off')
+    } catch {
+      // kept until the page closes
+    }
+  }
   const save = (text: string) => {
     setWho(text)
     try {
@@ -87,6 +102,10 @@ export function MaterialGuide({ cid, onLibrary, onSkin }: { cid: string; onLibra
         <div className="her-row"><h2 style={{ flex: 1, margin: 0 }}>你的人物</h2>{who !== DEFAULT_WHO && <button className="her-btn small" onClick={() => save(DEFAULT_WHO)}>换回默认的鲸鱼娘</button>}</div>
         <p className="her-muted">写一次，下面每条提示词里的人物设定都会换成它。派生的图只写动作和场景，外貌交给参考图，所以这段主要用在定妆照和三视图上。</p>
         <textarea className="her-textarea" rows={4} value={who} onChange={e => save(e.target.value)} aria-label="你的人物设定" />
+        <div className="her-setrow">
+          <div><b>提示词前面加一句用途说明</b><span>「{purposeLine(who)}」：让生图、生视频的工具知道这是做什么用的。每条提示词后面都已经带上了尺寸（视频还有时长）。</span></div>
+          <input type="checkbox" aria-label="提示词前面加一句用途说明" checked={purpose} onChange={e => choosePurpose(e.target.checked)} />
+        </div>
         <div className="her-row">
           <CopyButton text={guideMarkdown(who)} label="复制整份文档（Markdown）" primary={false} />
           <a className="her-btn small" href="https://github.com/AIcivilization/dsh-her/blob/main/docs/素材规格与提示词.md" target="_blank" rel="noreferrer">在网上看这份文档</a>
@@ -102,7 +121,7 @@ export function MaterialGuide({ cid, onLibrary, onSkin }: { cid: string; onLibra
       </div>
       <p className="her-muted her-guide-about">{current.about}</p>
 
-      {GUIDE.filter(item => item.group === group).map(item => <GuideCard key={item.id} item={item} who={who} onGo={item.group === 'skin' || item.group === 'intro' ? onSkin : onLibrary} />)}
+      {GUIDE.filter(item => item.group === group).map(item => <GuideCard key={item.id} item={item} who={who} purpose={purpose} onGo={item.group === 'skin' || item.group === 'intro' ? onSkin : onLibrary} />)}
 
       <section className="her-card">
         <h2>每一段视频都要遵守</h2>
@@ -114,8 +133,8 @@ export function MaterialGuide({ cid, onLibrary, onSkin }: { cid: string; onLibra
   )
 }
 
-function GuideCard({ item, who, onGo }: { item: GuideItem; who: string; onGo: () => void }) {
-  const prompt = fillPrompt(item.prompt, who)
+function GuideCard({ item, who, purpose, onGo }: { item: GuideItem; who: string; purpose: boolean; onGo: () => void }) {
+  const prompt = promptFor(item, who, purpose)
   return (
     <section className="her-card her-guide-item">
       <div className="her-row her-guide-head">

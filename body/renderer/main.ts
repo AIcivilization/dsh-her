@@ -361,20 +361,36 @@ function wireControls(): (x: number, y: number) => boolean {
   })
   // A press on a button is not a press on her: no drag, no touch.
   for (const type of ['mousedown', 'mouseup', 'dblclick'] as const) box.addEventListener(type, event => event.stopPropagation())
-  showControls = () => {
+  showControls = (ms = 1800) => {
     window.clearTimeout(hideTimer)
     box.classList.add('show')
-    hideTimer = window.setTimeout(() => { if (!held) box.classList.remove('show') }, 1800)
+    hideTimer = window.setTimeout(function hide() {
+      if (held) hideTimer = window.setTimeout(hide, 600)
+      else box.classList.remove('show')
+    }, ms)
   }
   return over
 }
-let showControls = (): void => {}
+let showControls = (_ms?: number): void => {}
+/** On a touch screen her window takes touches for a while after she is tapped, so the buttons at her feet can be pressed. */
+const TOUCH_CONTROLS_MS = 5000
 
 function wireOverlay(config: BodyConfig): void {
   const figure = makeHitTest(config.pack.layout)
   const overControls = wireControls()
   const hitTest = (x: number, y: number) => overControls(x, y) || figure(x, y)
   wireTouch(config, figure)
+  // A finger has no hover: a tap on her (handed in from the page outside) brings the buttons and lets her window take the next touches.
+  const tap = window.__herTap
+  let touchTimer: number | undefined
+  window.__herTap = (x: number, y: number) => {
+    if (!figure(x, y)) return
+    tap?.(x, y)
+    showControls(TOUCH_CONTROLS_MS)
+    window.her.hit(true)
+    window.clearTimeout(touchTimer)
+    touchTimer = window.setTimeout(() => window.her.hit(false), TOUCH_CONTROLS_MS)
+  }
   let onHer = false
   let lastCheck = 0
   let drag: { x: number; y: number; moved: boolean } | undefined

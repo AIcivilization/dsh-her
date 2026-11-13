@@ -27,6 +27,8 @@ export interface BodySettings {
   places?: { wallpaper: boolean; overlay: boolean }
   /** No icon in the menu bar / tray (her settings are in dsh). */
   noTray?: boolean
+  /** How big she floats on the desktop, 0.5–1.6 times the usual (her page sets it). */
+  petScale?: number
 }
 
 export function loadSettings(home: string): BodySettings {

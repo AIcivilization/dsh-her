@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { DEFAULT_WHO, fillPrompt, GUIDE, GUIDE_GROUPS, guideMarkdown, WHO } from '../src/core/material-guide.ts'
+import { DEFAULT_WHO, fillPrompt, GUIDE, GUIDE_GROUPS, guideMarkdown, promptFor, WHO } from '../src/core/material-guide.ts'
 import { cleanVeil, DEFAULT_VEIL } from '../src/dsh/web-body.ts'
 
 test('the document in docs/ is the one the guide writes (run scripts/make-material-doc.mjs after changing the guide)', () => {
@@ -43,4 +43,17 @@ test('the veil over a background stays within what a page can show', () => {
   assert.deepEqual(cleanVeil({ dim: 200, blur: -3 }), { dim: 95, blur: 0 })
   assert.deepEqual(cleanVeil({ dim: 12.4, blur: 8 }), { dim: 12, blur: 8 })
   assert.deepEqual(cleanVeil({ dim: 'x', blur: Number.NaN }), DEFAULT_VEIL)
+})
+
+test('every prompt to copy says what it is for and its size, a clip how long; nothing says only "the same as above"', () => {
+  for (const item of GUIDE) {
+    assert.ok(!item.size.startsWith('同上'), item.id)
+    const prompt = promptFor(item, DEFAULT_WHO)
+    assert.ok(prompt.startsWith('这是为deepseek-harness设计鲸鱼娘的角色之一，要求：'), item.id)
+    assert.ok(prompt.includes(item.size), item.id)
+    if (item.length !== undefined) assert.ok(prompt.includes(item.length), item.id)
+  }
+  const pet = GUIDE.find(i => i.id === 'pet-still')!
+  assert.ok(!promptFor(pet, DEFAULT_WHO, false).startsWith('这是为'))
+  assert.ok(promptFor(GUIDE.find(i => i.id === 'base-portrait')!, '银发的狐狸少女').startsWith('这是为deepseek-harness设计的角色素材之一'))
 })

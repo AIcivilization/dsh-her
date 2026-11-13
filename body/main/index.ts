@@ -156,10 +156,13 @@ const screenAspect = () => {
 /** Where 编排 puts her when she floats on top (its look's place), if it says. */
 const petPlace = () => (look === undefined || mode !== 'overlay' ? undefined : cleanPlace(look.place?.pet))
 
+/** How big she floats, from her page (half to 1.6 times). */
+const petScale = () => (typeof settings.petScale === 'number' && Number.isFinite(settings.petScale) ? Math.min(1.6, Math.max(0.5, settings.petScale)) : 1)
+
 function herSize(of: PackInfo = pack, place = petPlace()): { width: number; height: number } {
   const area = screen.getPrimaryDisplay().workArea
   const aspect = of.aspect ?? 0.75
-  let height = Math.round(area.height * (place?.height ?? 0.42))
+  let height = Math.round(Math.min(area.height * 0.92, area.height * (place?.height ?? 0.42) * petScale()))
   if (height * aspect > area.width * 0.6) height = Math.round((area.width * 0.6) / aspect)
   return { width: Math.round(height * aspect), height }
 }
@@ -320,7 +323,18 @@ function setTray(on: boolean): void {
 }
 
 function reportPrefs(): void {
-  link?.send({ t: 'body.prefs', places: shownPlaces(), tray: settings.noTray !== true, holdKey: settings.holdKey === true })
+  link?.send({ t: 'body.prefs', places: shownPlaces(), tray: settings.noTray !== true, holdKey: settings.holdKey === true, petScale: petScale() })
+}
+
+/** Her size, from her page or the menu: a fresh window of the new size. */
+function setPetScale(next: number, tell: boolean): void {
+  const scale = Math.min(1.6, Math.max(0.5, Math.round(next * 100) / 100))
+  if (scale === petScale()) return
+  settings = { ...settings, petScale: scale }
+  saveSettings(expand(home), settings)
+  replaceWindow()
+  refreshTray()
+  if (tell) reportPrefs()
 }
 
 function switchMode(next: Mode): void {
@@ -605,6 +619,7 @@ function menuTemplate(): Electron.MenuItemConstructorOptions[] {
     { label: `和她说话：打字或按住说（${process.platform === 'darwin' ? '⌃⌥↩' : 'Ctrl+Alt+Enter'}）`, click: showInput },
     { label: `任何程序里按住${HOLD_KEY_NAME}说话`, type: 'checkbox', checked: settings.holdKey === true, click: item => setHoldKey(item.checked) },
     { label: '设置…', click: () => openSettings() },
+    { label: '纯聊模式（在 dsh 里全屏聊天）', click: () => { link?.send({ t: 'chat.open' }); openDsh() } },
     { label: '专注一会儿（2 小时不主动说话）', type: 'checkbox', checked: focus, click: item => { link?.send({ t: 'focus.set', on: item.checked }) } },
     {
       label: '一直在听', type: 'checkbox', checked: micMode === 'always',
@@ -618,6 +633,10 @@ function menuTemplate(): Electron.MenuItemConstructorOptions[] {
     { label: '浮在桌面上', type: 'checkbox', checked: shownPlaces().overlay && mode !== 'window', click: box => setPlaces({ ...shownPlaces(), overlay: box.checked }, true) },
     { label: '住在壁纸里', type: 'checkbox', checked: shownPlaces().wallpaper, click: box => setPlaces({ ...shownPlaces(), wallpaper: box.checked }, true) },
     item('普通窗口', 'window'),
+    {
+      label: `大小：${Math.round(petScale() * 100)}%`,
+      submenu: ([['小', 0.7], ['中', 1], ['大', 1.3], ['特大', 1.6]] as const).map(([label, value]) => ({ label, type: 'radio' as const, checked: Math.abs(petScale() - value) < 0.05, click: () => setPetScale(value, true) })),
+    },
     { type: 'separator' },
     { label: '退出', click: () => app.quit() },
   ]
@@ -914,6 +933,7 @@ if (!app.requestSingleInstanceLock()) {
           if (message.config.places !== undefined) setPlaces(message.config.places, false)
           if (message.config.tray !== undefined && message.config.tray !== (settings.noTray !== true)) setTray(message.config.tray)
           if (message.config.holdKey !== undefined && message.config.holdKey !== (settings.holdKey === true)) setHoldKey(message.config.holdKey, false)
+          if (message.config.petScale !== undefined) setPetScale(message.config.petScale, false)
           refreshTray()
           reportPacks()
           reportMode()
@@ -929,7 +949,8 @@ if (!app.requestSingleInstanceLock()) {
           if (message.places !== undefined) setPlaces(message.places, false)
           if (message.tray !== undefined) setTray(message.tray)
           if (message.holdKey !== undefined) setHoldKey(message.holdKey, false)
-          if (message.places !== undefined || message.tray !== undefined || message.holdKey !== undefined) reportPrefs()
+          if (message.petScale !== undefined) setPetScale(message.petScale, false)
+          if (message.places !== undefined || message.tray !== undefined || message.holdKey !== undefined || message.petScale !== undefined) reportPrefs()
           return
         } else if (message.t === 'intro') {
           playIntro(message.path)

@@ -31,6 +31,8 @@ export interface FloatHost {
   hidden(): boolean
   setHidden(hidden: boolean): void
   refresh(): void
+  /** 纯聊模式: the whole screen hers, for talking (chat-mode.ts). */
+  openChat(): void
 }
 
 /** What the floating window can ask of her. */

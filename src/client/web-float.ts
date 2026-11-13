@@ -21,6 +21,7 @@ import type { AvatarView } from '../dsh/api.ts'
 import type { FloatHost } from './web-bridge.ts'
 import { TalkBar } from '../../body/renderer/talk-bar.ts'
 import { wearSaved } from './skin-wear.ts'
+import { openChatMode } from './chat-mode.ts'
 import type { SettingsPage, TalkView } from '../protocol/index.ts'
 
 const STATUS_EVERY_MS = 5000
@@ -186,6 +187,26 @@ export function mountWebFloat(): () => void {
     document.body.appendChild(shield)
   }
 
+  /** A finger, not a mouse: no keyboard shortcuts to offer. */
+  const touch = () => matchMedia('(pointer: coarse)').matches
+
+  /** 纯聊模式, while it is open. */
+  let closeChat: (() => void) | undefined
+  const openChat = () => {
+    if (closeChat !== undefined) return
+    closeBar()
+    closeMenu()
+    closeChat = openChatMode({
+      post,
+      guest: () => guest(),
+      ...(window.__herOpenSession === undefined ? {} : { openSession: window.__herOpenSession }),
+      closed: () => {
+        closeChat = undefined
+        if (location.hash === '#her-chat') history.replaceState(null, '', `${location.pathname}${location.search}`)
+      },
+    })
+  }
+
   let menuFromPill = false
   const hostApi: FloatHost = {
     frame: next => {
@@ -223,8 +244,9 @@ export function mountWebFloat(): () => void {
         }
         menu!.appendChild(button)
       }
-      item(window.isSecureContext ? '和她说话（Ctrl+Alt+空格）' : '和她说话（要 HTTPS 才能用麦克风）', () => guest()?.talk(), !window.isSecureContext)
+      item(!window.isSecureContext ? '和她说话（要 HTTPS 才能用麦克风）' : touch() ? '说一句（点一下开始，说完自动发出）' : '和她说话（Ctrl+Alt+空格）', () => guest()?.talk(), !window.isSecureContext || frame === undefined)
       item('打字给她', () => openTyping())
+      item('纯聊模式（全屏聊天）', () => openChat())
       item(focus ? '结束专注（她可以主动说话了）' : '专注一会儿（2 小时不主动说话）', () => {
         focus = !focus
         void post('/web/send', { message: { t: 'focus.set', on: focus } }).catch(() => {})
@@ -291,6 +313,7 @@ export function mountWebFloat(): () => void {
     },
     refresh: () => void sync(),
     openBar: () => openTyping(),
+    openChat: () => openChat(),
   }
 
   /** The veil, changed here: seen at once, saved a moment later (for every browser). */
@@ -563,7 +586,7 @@ export function mountWebFloat(): () => void {
     if (document.hidden) return
     try {
       const res = await fetch('/api/dsh-her/web/status', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ screen: { w: screen.width, h: screen.height, scale: devicePixelRatio }, remote: isRemotePage(location.protocol, location.hostname) }) })
-      const value = await res.json() as { ok: boolean; show?: boolean; pill?: boolean; veil?: Veil; place?: Place; scope?: Scope; avatar?: AvatarView; focus?: boolean; open?: string; page?: SettingsPage; skin?: { id: string; rev: number }; intro?: { url: string; when: 'every' | 'daily' } }
+      const value = await res.json() as { ok: boolean; chat?: boolean; show?: boolean; pill?: boolean; veil?: Veil; place?: Place; scope?: Scope; avatar?: AvatarView; focus?: boolean; open?: string; page?: SettingsPage; skin?: { id: string; rev: number }; intro?: { url: string; when: 'every' | 'daily' } }
       if (value.ok) {
         void wearSaved(value.skin)
         if (value.intro !== undefined) playIntroOnce(value.intro)
@@ -572,6 +595,8 @@ export function mountWebFloat(): () => void {
         if (value.open !== undefined) window.__herOpenSession?.(value.open)
         // "设置…" from the desktop's menu: this page shows her settings.
         if (value.page !== undefined) window.__herOpenPage?.(value.page)
+        // "纯聊模式" from the desktop's menu.
+        if (value.chat === true) openChat()
         shown = value.show === true
         // A brain from before the places were separate: the picture goes with her, as it did.
         pillOn = value.pill ?? shown
@@ -627,9 +652,14 @@ export function mountWebFloat(): () => void {
   document.addEventListener('visibilitychange', onVisibility)
   const timer = setInterval(() => void sync(), STATUS_EVERY_MS)
   const presenceTimer = setInterval(reportPresence, PRESENCE_EVERY_MS)
-  void sync()
+  // dsh opened at …#her-chat (a phone's home-screen shortcut, say): straight into 纯聊模式, once she is known.
+  const onHash = () => { if (location.hash === '#her-chat') openChat() }
+  window.addEventListener('hashchange', onHash)
+  void sync().then(onHash)
 
   return () => {
+    closeChat?.()
+    window.removeEventListener('hashchange', onHash)
     clearInterval(timer)
     clearInterval(presenceTimer)
     clearInterval(pillTimer)
