@@ -96,7 +96,7 @@ export function CharacterStrip({ state, apply }: { state: StateView; apply: Appl
         </div>
       )}
       {error !== undefined && <p className="her-error">{error}</p>}
-      <p className="her-muted her-people-note">人设、声音、模型、形象和编排、记忆、对话都跟着人物走。素材库、皮肤、外接语音是大家共用的。</p>
+      <p className="her-muted her-people-note">人设、声音、模型、形象和编排、记忆、对话都跟着人物走。素材库、皮肤、外接的语音服务是大家共用的。</p>
     </section>
   )
 }

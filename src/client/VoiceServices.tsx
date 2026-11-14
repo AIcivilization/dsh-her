@@ -1,5 +1,5 @@
 /**
- * 外接语音, on 引擎 (docs/设置页与编排设计.md §7): 讯飞, an OpenAI-style
+ * 外接的语音服务, on the 声音 page (docs/设置页与编排设计.md §7, §20): 讯飞, an OpenAI-style
  * service, a GPT-SoVITS server of your own, or another dsh plugin's voice.
  * Keys go to the keychain (or a file only you can read) and are never shown
  * again; the page only knows whether one is set.

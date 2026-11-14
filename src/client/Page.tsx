@@ -195,7 +195,7 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
  * on top, a list on the left in four groups, one thing on the right at a
  * time. Nothing folds; what needs doing shows on 总览 and as a dot in the list.
  */
-type Section = 'home' | 'persona' | 'voice' | 'memory' | 'look' | 'stage' | 'library' | 'guide' | 'skin' | 'workshop' | 'speak' | 'initiative' | 'talk' | 'model' | 'voices' | 'about'
+type Section = 'home' | 'persona' | 'voice' | 'memory' | 'look' | 'stage' | 'library' | 'guide' | 'skin' | 'workshop' | 'speak' | 'initiative' | 'talk' | 'model' | 'about'
 type Tone = 'ok' | 'warn' | 'bad' | 'off'
 
 const GROUPS: Array<{ title?: string; items: Array<{ id: Section; label: string; icon: string }> }> = [
@@ -203,7 +203,7 @@ const GROUPS: Array<{ title?: string; items: Array<{ id: Section; label: string;
   { title: '她', items: [{ id: 'persona', label: '人设', icon: 'persona' }, { id: 'voice', label: '声音', icon: 'voice' }, { id: 'memory', label: '记忆', icon: 'memory' }] },
   { title: '外观', items: [{ id: 'look', label: '形象', icon: 'look' }, { id: 'stage', label: '编排', icon: 'stage' }, { id: 'library', label: '素材库', icon: 'library' }, { id: 'guide', label: '素材指南', icon: 'guide' }, { id: 'skin', label: '皮肤', icon: 'skin' }, { id: 'workshop', label: '形象工坊', icon: 'workshop' }] },
   { title: '相处', items: [{ id: 'speak', label: '说话和聆听', icon: 'speak' }, { id: 'initiative', label: '主动说话', icon: 'initiative' }, { id: 'talk', label: '对话', icon: 'talk' }] },
-  { title: '系统', items: [{ id: 'model', label: '模型', icon: 'model' }, { id: 'voices', label: '外接语音', icon: 'voices' }, { id: 'about', label: '关于', icon: 'about' }] },
+  { title: '系统', items: [{ id: 'model', label: '模型', icon: 'model' }, { id: 'about', label: '关于', icon: 'about' }] },
 ]
 
 /** What each page is for, in one line under its title. */
@@ -222,7 +222,6 @@ const ABOUT: Record<Section, string> = {
   initiative: '她什么时候可以先开口，什么时候不要打扰你。',
   talk: '你们的对话存在哪儿、什么时候新开一段。',
   model: '她的大脑用哪个模型。',
-  voices: '接讯飞、OpenAI 兼容的服务、你自己的 GPT-SoVITS，或别的 dsh 插件。',
   about: '版本和更新、桌面程序，和重新走一遍向导。',
 }
 
@@ -307,7 +306,7 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
           {section === 'voice' && (
             <>
               <Card><VoicePicker state={state} apply={apply} saveLabel="用这个声音" /></Card>
-              <LinkRow icon="voices" title="想用别家的声音？" text="讯飞、OpenAI 兼容的服务、GPT-SoVITS 或别的插件，在「外接语音」里接。" onClick={() => go('voices')} />
+              <Card title="外接的语音服务" badge={<span className="her-faint">讯飞、OpenAI 兼容、GPT-SoVITS、别的插件</span>}><VoiceServices state={state} apply={apply} /></Card>
             </>
           )}
           {section === 'memory' && <MemoryView state={state} apply={apply} />}
@@ -362,7 +361,7 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
               <Card title="听你说话" badge={<><Dot tone={toneOf(state.voice.status)} />{listeningText(state.voice.status)}</>}>
                 {here ? <MicCheck state={state} /> : <p className="her-muted">身体连上之后才能用麦克风。</p>}
               </Card>
-              <LinkRow icon="voices" title="换一家来听" text="讯飞听写、OpenAI 兼容的识别，在「外接语音」里选。" onClick={() => go('voices')} />
+              <LinkRow icon="voices" title="换一家来听" text="讯飞听写、OpenAI 兼容的识别：在「声音」页下面的「外接的语音服务」里选。" onClick={() => go('voice')} />
             </>
           )}
           {section === 'initiative' && <InitiativeCard state={state} apply={apply} />}
@@ -374,7 +373,6 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
               <Card><ModelPicker state={state} apply={apply} /></Card>
             </>
           )}
-          {section === 'voices' && <Card><VoiceServices state={state} apply={apply} /></Card>}
           {section === 'about' && (
             <>
               <Card title="版本和更新"><UpdateBar state={state} apply={apply} /></Card>
