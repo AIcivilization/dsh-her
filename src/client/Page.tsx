@@ -19,6 +19,7 @@ import { VoiceServices } from './VoiceServices.tsx'
 import { CharacterStrip, onChanging, switchCharacter, type Changing } from './Characters.tsx'
 import { PlacesRow } from './Places.tsx'
 import { MaterialGuide } from './MaterialGuide.tsx'
+import { DesignPacks } from './DesignPacks.tsx'
 import { onPageRequest, takePage } from './open-page.ts'
 import type { SettingsPage } from '../protocol/index.ts'
 import { SERVICE_SHORT, voiceLabel } from './choice.tsx'
@@ -195,13 +196,13 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
  * on top, a list on the left in four groups, one thing on the right at a
  * time. Nothing folds; what needs doing shows on 总览 and as a dot in the list.
  */
-type Section = 'home' | 'persona' | 'voice' | 'memory' | 'look' | 'stage' | 'library' | 'guide' | 'skin' | 'workshop' | 'speak' | 'initiative' | 'talk' | 'model' | 'about'
+type Section = 'home' | 'persona' | 'voice' | 'memory' | 'look' | 'stage' | 'library' | 'guide' | 'skin' | 'designs' | 'workshop' | 'speak' | 'initiative' | 'talk' | 'model' | 'about'
 type Tone = 'ok' | 'warn' | 'bad' | 'off'
 
 const GROUPS: Array<{ title?: string; items: Array<{ id: Section; label: string; icon: string }> }> = [
   { items: [{ id: 'home', label: '总览', icon: 'home' }] },
   { title: '她', items: [{ id: 'persona', label: '人设', icon: 'persona' }, { id: 'voice', label: '声音', icon: 'voice' }, { id: 'memory', label: '记忆', icon: 'memory' }] },
-  { title: '外观', items: [{ id: 'look', label: '形象', icon: 'look' }, { id: 'stage', label: '编排', icon: 'stage' }, { id: 'library', label: '素材库', icon: 'library' }, { id: 'guide', label: '素材指南', icon: 'guide' }, { id: 'skin', label: '皮肤', icon: 'skin' }, { id: 'workshop', label: '形象工坊', icon: 'workshop' }] },
+  { title: '外观', items: [{ id: 'look', label: '形象', icon: 'look' }, { id: 'stage', label: '编排', icon: 'stage' }, { id: 'library', label: '素材库', icon: 'library' }, { id: 'guide', label: '素材指南', icon: 'guide' }, { id: 'skin', label: '皮肤', icon: 'skin' }, { id: 'designs', label: '设计包', icon: 'copy' }, { id: 'workshop', label: '形象工坊', icon: 'workshop' }] },
   { title: '相处', items: [{ id: 'speak', label: '说话和聆听', icon: 'speak' }, { id: 'initiative', label: '主动说话', icon: 'initiative' }, { id: 'talk', label: '对话', icon: 'talk' }] },
   { title: '系统', items: [{ id: 'model', label: '模型', icon: 'model' }, { id: 'about', label: '关于', icon: 'about' }] },
 ]
@@ -217,6 +218,7 @@ const ABOUT: Record<Section, string> = {
   library: '编排用的图片、视频和 SVG 都放在这里，还有她的三视图。',
   guide: '要做哪些图和视频、多大、有什么要求，每一样都有能直接复制的提示词。',
   skin: '换整个 dsh 的样子，和她出场时播的开机动画。',
+  designs: '别人做的角色、皮肤、开机动画，照着设计包格式做好，装进来就能用；你的她也能导出给别人。',
   workshop: '从头做一个自己的形象：照着每一步准备图片和视频，再导入。',
   speak: '怎么叫她、怎么跟她说话，还有麦克风好不好用。',
   initiative: '她什么时候可以先开口，什么时候不要打扰你。',
@@ -325,6 +327,7 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
           {section === 'library' && <StageEditor part="library" onGuide={() => go('guide')} {...(state.sheet?.chosen === true ? { sheet: state.sheet.name } : {})} onSheet={name => void apply(herApi.sheetSet(name))} />}
           {section === 'guide' && <MaterialGuide cid={state.cid} onLibrary={() => go('library')} onSkin={() => go('skin')} />}
           {section === 'skin' && <SkinCard />}
+          {section === 'designs' && <DesignPacks state={state} apply={apply} />}
           {section === 'workshop' && <Workshop state={state} apply={apply} />}
 
           {section === 'speak' && (

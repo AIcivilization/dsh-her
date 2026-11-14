@@ -58,6 +58,7 @@ import { cleanIntro, type IntroSettings } from '../core/intro.ts'
 import { checkMaterial, cleanSvg } from '../pack/material-check.ts'
 import { StageStore } from './stage-store.ts'
 import { Characters } from './characters.ts'
+import { DesignPacks } from './design-packs.ts'
 import { BrainServer } from '../server/brain-server.ts'
 import { type AvatarView, API_BASE, apiHandlers, handle, type ApiRuntime } from './api.ts'
 import { bodyRunning, findDevBody, launchBody, type LaunchPlan } from './body-launcher.ts'
@@ -1311,6 +1312,15 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     return { name: picked.name, url: `/api/dsh-her/web/library-file?row=sheet&name=${encodeURIComponent(picked.name)}&v=${Math.floor(picked.addedAt).toString(36)}`, chosen: picked.name === character.sheet }
   }
 
+  /** 设计包 (docs/设计包格式.md): others' designs in, hers out. */
+  const designs = new DesignPacks({
+    home: paths.root, charactersDir: paths.characters, version: PLUGIN_VERSION, library, skins, people,
+    current: () => ({ cid, dir, character }),
+    intro: () => { const settings = introSettings(); return { ...(settings.source === 'skin' ? {} : { source: settings.source }), when: settings.when } },
+    setIntro: (source, when) => saveIntro(cleanIntro({ ...introSettings(), on: true, source, when })),
+    examine: () => examineLater(),
+  })
+
   /** The "她" page's view of everything, and what it can change. */
   const api: ApiRuntime = {
     state: () => {
@@ -1710,6 +1720,14 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       refreshBodyPack()
     },
     webSetVeil: change => webBody.setVeil(change),
+    designsList: () => ({ installed: designs.installed(), exportable: designs.exportable() }),
+    designApply: (token, choice) => {
+      const { record, notes } = designs.apply(token, choice)
+      log({ event: 'design-pack', action: 'install', id: record.id, cid: record.cid ?? null, skin: record.skinId ?? null })
+      // Her, from now on: the brain starts again for her once this answer is out.
+      if (choice.switchTo && record.cid !== undefined) api.characterUse(record.cid)
+      return { record, notes }
+    },
     chatScenes: () => {
       // 纯聊模式 goes round her scenes: those of what she wears, then every 桌面 picture or clip of the 素材库.
       const own = webBody.scenes()
@@ -2195,6 +2213,21 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
         return new Response((error as Error).message, { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } })
       }
     })
+    // A 设计包 of the character of now (docs/设计包格式.md §7).
+    get('design-export', request => {
+      const q = new URL(request.url).searchParams
+      const parts = new Set((q.get('parts') ?? '').split(',').filter((p): p is 'character' | 'stage' | 'sheet' | 'skin' | 'intro' => ['character', 'stage', 'sheet', 'skin', 'intro'].includes(p)))
+      try {
+        const { zip } = designs.export({
+          parts, id: q.get('id') ?? '', name: q.get('name') ?? '', author: q.get('author') ?? '', version: q.get('version') ?? '1.0.0', license: q.get('license') ?? '',
+          description: q.get('description') ?? '', homepage: q.get('homepage') ?? '',
+        })
+        log({ event: 'design-pack', action: 'export', parts: [...parts] })
+        return download(zip, `${q.get('name') || character.name}.zip`)
+      } catch (error) {
+        return new Response((error as Error).message, { status: 400, headers: { 'content-type': 'text/plain; charset=utf-8' } })
+      }
+    })
     get('skin-template', () => download(makeZip([
       { name: 'my-skin/skin.json', data: new TextEncoder().encode(`${JSON.stringify(SKIN_TEMPLATE, null, 2)}\n`) },
       { name: 'my-skin/background.svg', data: new TextEncoder().encode(SKIN_TEMPLATE_SVG) },
@@ -2235,6 +2268,20 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
         const row = query.get('library')
         const skin = query.get('skin')
         let target: string | undefined
+        if (query.get('design') !== null) {
+          // A 设计包: looked at only; put in when its parts are chosen (/designs/apply).
+          if (!/\.zip$/i.test(file)) return refuse('设计包要是一个 .zip 文件')
+          const temp = join(uploadsDir, `design-${Date.now().toString(36)}.zip`)
+          mkdirSync(uploadsDir, { recursive: true })
+          try {
+            await saveUpload(request, temp)
+            return answer(200, { ok: true, preview: designs.preview(readFileSync(temp)) })
+          } catch (error) {
+            return answer(400, { ok: false, message: (error as Error).message })
+          } finally {
+            rmSync(temp, { force: true })
+          }
+        }
         if (query.get('skinzip') !== null) {
           // A skin as one zip (downloaded from here, or the template filled in): unpacked into a folder of its own.
           if (!/\.zip$/i.test(file)) return refuse('要是一个 .zip 文件')

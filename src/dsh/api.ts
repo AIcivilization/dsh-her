@@ -18,6 +18,7 @@ import type { VoicesConfig } from '../voice/external.ts'
 import type { LibraryRow, Material } from './library.ts'
 import type { StageVersion } from './stage-store.ts'
 import type { CharacterCard } from './characters.ts'
+import type { DesignChoice, DesignPacks, InstalledDesign } from './design-packs.ts'
 import type { ShowMedia, WebConfig, WebMode, WebPlace, WebScope, WebVeil } from './web-body.ts'
 
 /** 编排 for the page: the stage, what is wrong in it, the 素材库, the looks it can use whole, the versions to go back to. */
@@ -216,6 +217,10 @@ export interface ApiRuntime {
   webSend(message: BodyMessage): void
   webSetPlace(change: { place?: WebPlace; scope?: WebScope }): void
   webSetVeil(change: Partial<WebVeil>): void
+  /** 设计包: what came in, and what the character of now could go out with. */
+  designsList(): { installed: InstalledDesign[]; exportable: ReturnType<DesignPacks['exportable']> }
+  /** Put in the parts chosen of a pack looked at before. */
+  designApply(token: string, choice: DesignChoice): { record: InstalledDesign; notes: string[] }
   /** 纯聊模式: her scenes to go round, and her figure. */
   chatScenes(): { name: string; scenes: ShowMedia[]; pet?: ShowMedia }
   placesSet(change: { wallpaper?: boolean; overlay?: boolean; web?: boolean; webAlways?: boolean; avatar?: boolean; tray?: boolean; holdKey?: boolean; petScale?: number }): void
@@ -463,6 +468,12 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
       return withState()
     },
     '/chat/scenes': async () => ({ ...rt.chatScenes() }),
+    '/designs/list': async () => ({ ...rt.designsList() }),
+    '/designs/apply': async body => {
+      const c = (body.choice ?? {}) as Record<string, unknown>
+      const flag = (key: string) => c[key] === true
+      return { ...rt.designApply(str(body.token, '设计包'), { character: flag('character'), switchTo: flag('switchTo'), skin: flag('skin'), wearSkin: flag('wearSkin'), intro: flag('intro'), setIntro: flag('setIntro'), materials: flag('materials') }) }
+    },
     '/web/veil': async body => {
       rt.webSetVeil({ ...(typeof body.dim === 'number' ? { dim: body.dim } : {}), ...(typeof body.blur === 'number' ? { blur: body.blur } : {}) })
       return withState()

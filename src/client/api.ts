@@ -2,12 +2,15 @@
 
 import type { SkinsView, StageView, StateView, VoicesView } from '../dsh/api.ts'
 import type { ManualInstall } from '../dsh/body-install.ts'
+import type { DesignChoice, DesignPreview, InstalledDesign } from '../dsh/design-packs.ts'
 import { isRemotePage } from '../core/where.ts'
 import type { LookProject, WorkshopCard } from '../core/workshop.ts'
 import type { ProjectStatus } from '../dsh/workshop.ts'
 import type { ClipUse, ClipsView } from '../pack/types.ts'
 
 export type { SkinsView, StageView, StateView, VoicesView }
+export type { DesignChoice, DesignPreview, InstalledDesign }
+export type DesignsList = { installed: InstalledDesign[]; exportable: { character: string; stage?: { scenes: number; materials: number; skipped: string[] }; sheet?: string; skin?: string; intro?: string } }
 
 export interface FrameRegion {
   x: number
@@ -118,6 +121,8 @@ export const herApi = {
   stagePlay: (on: boolean) => post<StageView>('/stage/play', { on }),
   designOpen: (focus: string) => post<{ sessionId: string }>('/design/open', { focus }),
   designSkin: (id?: string) => post<{ sessionId: string }>('/design/skin', id === undefined ? {} : { id }),
+  designsList: () => post<DesignsList>('/designs/list'),
+  designApply: (token: string, choice: DesignChoice) => post<{ record: InstalledDesign; notes: string[] }>('/designs/apply', { token, choice }),
   libraryUndo: (row: string, name: string) => post<StageView>('/library/undo', { row, name }),
   skinsGet: () => post<SkinsView>('/skins/get'),
   voicesGet: () => post<VoicesView>('/voices/get'),

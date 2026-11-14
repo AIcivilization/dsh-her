@@ -76,6 +76,9 @@ body[data-ds-dark-theme] .her-page{--her-ink:var(--her-bar-accent,#86b4ff);--her
   .her-show-label.left b{flex-direction:row!important}
   .her-show-head{flex-direction:column!important;align-items:flex-start!important;gap:2px}
   .her-sheet{grid-template-columns:1fr!important}
+  .her-design-form{grid-template-columns:1fr!important}
+  .her-design-head{flex-direction:column}
+  .her-design-cover{width:100%}
   .her-make{grid-template-columns:1fr!important}
   .her-places-row{grid-template-columns:repeat(3,minmax(0,1fr))!important}
   .her-show-head .her-seg{align-self:flex-start}
@@ -344,6 +347,23 @@ body[data-ds-dark-theme] .her-page{--her-ink:var(--her-bar-accent,#86b4ff);--her
 .her-table th,.her-table td{padding:6px 8px;border-bottom:1px solid ${LINE};text-align:left;vertical-align:top}
 .her-table th{color:${MUTED};font-weight:600}
 .her-table code{white-space:nowrap}
+.her-design{margin-top:12px;padding:14px 16px;border:1px solid ${tint(INK, 40)};border-radius:14px;background:${tint(INK, 5)}}
+.her-design-head{display:flex;gap:14px;align-items:flex-start}
+.her-design-head h3{margin:0 0 2px;font-size:16px}
+.her-design-head h3 small{font-weight:500;color:${MUTED};font-size:12px}
+.her-design-head p{margin:2px 0}
+.her-design-cover{flex:none;width:200px;aspect-ratio:16/9;object-fit:cover;border-radius:10px;background:${FIELD}}
+.her-design-license{display:inline-flex;gap:8px;align-items:baseline;margin-top:6px!important;padding:4px 10px;border-radius:8px;background:${tint(WARN, 14)}}
+.her-design-license b{color:${WARN}}
+.her-design-parts{margin:10px 0}
+label.her-setrow{display:flex!important;width:100%;cursor:pointer}
+.her-setrow.sub{padding-left:22px}
+.her-design-read{margin:8px 0}
+.her-design-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:12px 0}
+.her-design-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:${MUTED}}
+.her-design-form label.wide{grid-column:1/-1}
+.her-setrow.her-off{opacity:.55}
+a.her-btn.disabled{opacity:.45;pointer-events:none}
 .her-people-box{margin-bottom:16px}
 .her-people{display:flex;gap:10px;overflow-x:auto;padding:3px 3px 8px;scrollbar-width:thin}
 .her-person{position:relative;flex:none;width:132px;border:1px solid ${LINE};border-radius:14px;background:${LAYER1};transition:border-color .12s,background .12s}

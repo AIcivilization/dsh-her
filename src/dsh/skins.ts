@@ -119,16 +119,25 @@ export class Skins {
       throw new Error(`skin.json 读不了：${(error as Error).message}`)
     }
     const folder = base.replace(/\/$/, '').split('/').pop() ?? ''
-    let id = skinId(folder) || skinId(typeof parsed.name === 'string' ? parsed.name : '') || skinId(fallback) || `skin${Date.now().toString(36)}`
+    const files = entries.filter(e => e.name.startsWith(base)).map(e => ({ name: e.name.slice(base.length), data: e.data }))
+    return this.importFiles(files, [folder, typeof parsed.name === 'string' ? parsed.name : '', fallback])
+  }
+
+  /**
+   * A skin from its files (a zip's, or a 设计包's skin folder): a new folder
+   * named after the first of `names` that makes an id, never over another.
+   * What a skin cannot have is left out and said.
+   */
+  importFiles(files: ReadonlyArray<{ name: string; data: Uint8Array }>, names: readonly string[]): { id: string; skipped: string[] } {
+    if (!files.some(f => f.name === 'skin.json')) throw new Error('没有 skin.json')
+    let id = names.map(skinId).find(n => n !== '') ?? `skin${Date.now().toString(36)}`
     if (BUILTIN_SKINS.some(s => s.id === id)) id = `${id}-mine`
     for (let n = 2; existsSync(join(this.root, id)); n++) id = `${id.replace(/-\d+$/, '')}-${n}`
     const skipped: string[] = []
     const dir = join(this.root, id)
     mkdirSync(dir, { recursive: true })
     try {
-      for (const entry of entries) {
-        if (!entry.name.startsWith(base)) continue
-        const name = entry.name.slice(base.length)
+      for (const { name, data } of files) {
         // Notes for people (the template's README) are not part of the skin, and not worth a warning.
         if (/\.(md|txt)$/i.test(name)) continue
         const target = name.includes('/') ? undefined : this.target(id, name)
@@ -136,9 +145,9 @@ export class Skins {
           skipped.push(name)
           continue
         }
-        if (/\.svg$/i.test(name)) writeFileSync(target, cleanSvg(new TextDecoder().decode(entry.data)).svg)
-        else if (/\.css$/i.test(name) && !safeSkinCss(new TextDecoder().decode(entry.data))) skipped.push(`${name}（里面有 url() 或 @import）`)
-        else writeFileSync(target, entry.data)
+        if (/\.svg$/i.test(name)) writeFileSync(target, cleanSvg(new TextDecoder().decode(data)).svg)
+        else if (/\.css$/i.test(name) && !safeSkinCss(new TextDecoder().decode(data))) skipped.push(`${name}（里面有 url() 或 @import）`)
+        else writeFileSync(target, data)
       }
     } catch (error) {
       rmSync(dir, { recursive: true, force: true })

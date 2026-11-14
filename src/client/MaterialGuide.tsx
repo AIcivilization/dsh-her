@@ -96,6 +96,7 @@ export function MaterialGuide({ cid, onLibrary, onSkin }: { cid: string; onLibra
           <li><b>传到素材库，在编排里摆好</b><span>每条下面写了传到哪儿、放进哪个场景。</span></li>
         </ol>
         <p className="her-faint">不用一次做完。最少只要一张「头像·定格图」和一张「宠物·站姿图」（或「桌面·场景图」），她就能出现。</p>
+        <p className="her-faint">想找灵感：去 <a href="https://treapgogo.github.io/deepseek-whale-girl/" target="_blank" rel="noreferrer">鲸鱼娘开源资产库</a> 看看（社区资源，不是我们做的；每件作品的许可不一样，用之前先看清楚）。</p>
       </section>
 
       <section className="her-card">

@@ -1,6 +1,8 @@
 # dsh-her
 
-**DSH 桌面女友，[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）插件。** 她可以住在你真正的桌面上（浮在所有窗口上面，或者住在壁纸里），也可以住在 dsh 的网页里，能语音聊天、会先开口、记得你。桌面程序支持 macOS（Apple 芯片）和 Windows；Linux、VPS 和手机上她住在网页里，见 [VPS 部署](https://github.com/AIcivilization/dsh-her/blob/main/docs/VPS部署.md)。
+**鲸鱼娘的身体引擎。** 设计交给设计者，身体交给我们：角色（人设、三视图、动画素材、编排）、界面皮肤、开机动画这些设计，按通用的[设计包格式](https://github.com/AIcivilization/dsh-her/blob/main/docs/设计包格式.md)做好就能装进来；会动、会说话、会听、会先开口、记得你，住在壁纸里、浮在桌面上、住在网页和手机里，这些由引擎完成。它首先是鲸鱼娘的身体引擎，也是给所有玩桌宠的人用的身体引擎——你的角色不一定是鲸鱼娘。见 [产品定义](https://github.com/AIcivilization/dsh-her/blob/main/docs/产品定义.md)。
+
+现在它是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）的插件。桌面程序支持 macOS（Apple 芯片）和 Windows；Linux、VPS 和手机上她住在网页里，见 [VPS 部署](https://github.com/AIcivilization/dsh-her/blob/main/docs/VPS部署.md)。以后不用 dsh 也能玩（独立安装包，在设计中）。
 
 ## 安装
 
@@ -36,6 +38,10 @@
 ## 她出现在哪儿
 
 「总览」那张图下面有一排开关：**壁纸里**（场景在所有窗口后面）、**桌面上**（桌宠）、**dsh中**、**dsh对话框上**（小头像）、**菜单栏图标**。开了哪个，上面的图里和你的屏幕上那里就有她；关了就没有。壁纸和桌面上可以同时开。开关下面可以调她的大小（50%–160%），桌面上也可以右键她 → 大小。她在网页里作背景时，可以调遮罩和朦胧，让字更清楚。
+
+## 设计包
+
+「她」页面 → **设计包**：别人做的角色（人设、编排、素材、三视图）、皮肤、开机动画，照着 [设计包格式](https://github.com/AIcivilization/dsh-her/blob/main/docs/设计包格式.md) 打成一个 zip，在这里选它：先看名字、作者、**许可**和里面有什么，再勾要装哪几部分。不会覆盖你已有的东西：人物总是新建，重名的素材和皮肤自动换名字。装过的都列出来，方便注明出处。你自己调好的她，也能在这里导出成设计包，发给别人。
 
 ## 编排、皮肤和开机动画
 
