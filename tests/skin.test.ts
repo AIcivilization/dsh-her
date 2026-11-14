@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { BUILTIN_SKINS, parseSkin, skinCss } from '../src/core/skin.ts'
-import { Skins } from '../src/dsh/skins.ts'
+import { Skins } from '../src/engine/skins.ts'
 
 test('a skin.json is read with what is wrong said, and nothing can break out of CSS', () => {
   const { skin, problems } = parseSkin({

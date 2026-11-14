@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import {
   clipList, clipPrompt, comfyuiList, customClip, describe, generatorInfo, isAdult, minimaxTask, newProject, newScene, plannedClips, presetClips, promptsFile, referencePrompt, screenColor, validateProject,
 } from '../src/core/workshop.ts'
-import { assignClip, examples, exportProject, findProject, importProject, listProjects, prepareImport, projectStatus, removeStray, saveProject } from '../src/dsh/workshop.ts'
+import { assignClip, examples, exportProject, findProject, importProject, listProjects, prepareImport, projectStatus, removeStray, saveProject } from '../src/engine/workshop.ts'
 
 test('the card becomes one sentence, used in every prompt', () => {
   const project = newProject('p1', '居家眼镜')

@@ -8,7 +8,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { NativeTool } from './design-tools.ts'
+import type { NativeTool } from '../engine/design-tools.ts'
 import { SKIN_INTERVIEW } from '../core/skin-guide.ts'
 import type { DshServices, ModelRoute, ScopedContext } from './her-session.ts'
 

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { bodyRunning, findDevBody } from '../src/dsh/body-launcher.ts'
+import { bodyRunning, findDevBody } from '../src/engine/body-launcher.ts'
 
 test('a body is running only when body.json names a live process', () => {
   const home = mkdtempSync(join(tmpdir(), 'dsh-her-body-'))

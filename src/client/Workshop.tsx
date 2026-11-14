@@ -11,7 +11,7 @@ import {
   AVATAR_CLIP_PROMPT, avatarPrompt, CARD_CHOICES, CARD_LABELS, clipPrompt, customClip, describe, DESK_DIR, GENERATORS, generatorInfo, MANUAL_LABEL, newScene, POSE_WORDS, referencePrompt, sceneDir, scenePhotoPrompt,
   type CharacterCard, type ClipPlan, type Generator, type LookProject, type Pose, type ProjectScene, type WorkshopCard,
 } from '../core/workshop.ts'
-import type { ProjectStatus } from '../dsh/workshop.ts'
+import type { ProjectStatus } from '../engine/workshop.ts'
 import { desktopHere, herApi, type StateView } from './api.ts'
 import type { Apply } from './parts.tsx'
 import { Fold, useFolds } from './fold.tsx'

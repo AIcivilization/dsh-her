@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { loadCharacter, saveCharacter, type Character } from '../src/core/character.ts'
-import { Characters } from '../src/dsh/characters.ts'
+import { Characters } from '../src/engine/characters.ts'
 
 const her = (name: string): Character => ({ name, persona: `你是${name}。爱笑。`, callYou: '你', pronoun: '他', voice: { id: 'zh-CN-XiaoxiaoNeural', speed: 1 }, onboarded: true })
 

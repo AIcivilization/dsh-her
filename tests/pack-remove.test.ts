@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from '
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { removePackOrLook } from '../src/dsh/pack-remove.ts'
-import { listProjects, removeProject } from '../src/dsh/workshop.ts'
+import { removePackOrLook } from '../src/engine/pack-remove.ts'
+import { listProjects, removeProject } from '../src/engine/workshop.ts'
 import { newProject } from '../src/core/workshop.ts'
 
 function home() {

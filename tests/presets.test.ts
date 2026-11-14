@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { archiveEntriesSafe, checkUnpacked, validatePresets } from '../src/dsh/presets.ts'
+import { archiveEntriesSafe, checkUnpacked, validatePresets } from '../src/engine/presets.ts'
 
 const sha = 'a'.repeat(64)
 const good = { id: 'xiaohe', name: '小禾', kind: 'look', file: 'xiaohe.tar.gz', size: 10, sha256: sha }

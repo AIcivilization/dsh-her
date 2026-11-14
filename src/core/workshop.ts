@@ -1,7 +1,7 @@
 /**
  * 形象工坊 (docs/形象工坊与多场景.md §4): a look as a project the user fills in,
  * and the prompts and files made from it. Pure: the brain writes the files
- * (dsh/workshop.ts), the "她" page edits the project.
+ * (engine/workshop.ts), the "她" page edits the project.
  *
  * Prompts come in three layers:
  * - rules: fixed, by kind (desk pet or scene);

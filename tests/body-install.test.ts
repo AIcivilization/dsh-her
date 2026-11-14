@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { appName, compareVersions, downloadFolder, fetchManifest, install, installDownloaded, installedBody, installedPlan, manualInstall, platformKey, validateManifest } from '../src/dsh/body-install.ts'
+import { appName, compareVersions, downloadFolder, fetchManifest, install, installDownloaded, installedBody, installedPlan, manualInstall, platformKey, validateManifest } from '../src/engine/body-install.ts'
 import { systemTar } from '../src/platform.ts'
 
 test('versions order like releases', () => {

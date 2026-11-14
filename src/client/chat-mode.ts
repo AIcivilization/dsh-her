@@ -9,7 +9,7 @@
 
 import { StackedView } from '../../body/renderer/stacked.ts'
 import { TalkBar } from '../../body/renderer/talk-bar.ts'
-import type { ShowMedia } from '../dsh/web-body.ts'
+import type { ShowMedia } from '../engine/web-body.ts'
 import type { BrainMessage, TalkView } from '../protocol/index.ts'
 
 export interface ChatHost {

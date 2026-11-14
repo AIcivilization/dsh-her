@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import type { ManualInstall } from '../dsh/body-install.ts'
+import type { ManualInstall } from '../engine/body-install.ts'
 import { herApi } from './api.ts'
 import type { Apply } from './parts.tsx'
 

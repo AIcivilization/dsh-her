@@ -9,7 +9,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { StackedView } from '../../body/renderer/stacked.ts'
-import type { ShowMedia } from '../dsh/web-body.ts'
+import type { ShowMedia } from '../engine/web-body.ts'
 import { desktopHere, desktopOffered, type StateView } from './api.ts'
 
 type Tone = 'ok' | 'warn' | 'off'

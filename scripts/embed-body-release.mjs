@@ -1,7 +1,7 @@
 // Before publishing to npm (prepack): put this version's GitHub release
 // manifest (body-latest.json) into the package as lib/body-release.json, so
 // the plugin knows the body's checksums even where GitHub cannot be reached
-// (src/dsh/body-install.ts bundledRelease). The GitHub release must exist
+// (src/engine/body-install.ts bundledRelease). The GitHub release must exist
 // first; publishing without it fails here.
 
 import { readFileSync, writeFileSync } from 'node:fs'

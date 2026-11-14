@@ -15,11 +15,11 @@ import type { Stage } from '../pack/stage.ts'
 import type { Skin } from '../core/skin.ts'
 import type { IntroSettings } from '../core/intro.ts'
 import type { VoicesConfig } from '../voice/external.ts'
-import type { LibraryRow, Material } from './library.ts'
-import type { StageVersion } from './stage-store.ts'
-import type { CharacterCard } from './characters.ts'
-import type { DesignChoice, DesignPacks, InstalledDesign } from './design-packs.ts'
-import type { ShowMedia, WebConfig, WebMode, WebPlace, WebScope, WebVeil } from './web-body.ts'
+import type { LibraryRow, Material } from '../engine/library.ts'
+import type { StageVersion } from '../engine/stage-store.ts'
+import type { CharacterCard } from '../engine/characters.ts'
+import type { DesignChoice, DesignPacks, InstalledDesign } from '../engine/design-packs.ts'
+import type { ShowMedia, WebConfig, WebMode, WebPlace, WebScope, WebVeil } from '../engine/web-body.ts'
 
 /** 编排 for the page: the stage, what is wrong in it, the 素材库, the looks it can use whole, the versions to go back to. */
 export interface StageView {
@@ -62,16 +62,16 @@ export interface AvatarView {
   overhang: number
 }
 import type { Fact, Episode } from '../memory/store.ts'
-import type { ReportLine } from './import-status.ts'
+import type { ReportLine } from '../engine/import-status.ts'
 import type { LookProject, WorkshopCard } from '../core/workshop.ts'
-import type { ProjectStatus } from './workshop.ts'
-import type { InstallState, ManualInstall } from './body-install.ts'
+import type { ProjectStatus } from '../engine/workshop.ts'
+import type { InstallState, ManualInstall } from '../engine/body-install.ts'
 import type { MingStatus } from '../voice/ming.ts'
 import type { MingSettings, OwnVoice } from '../voice/ming-voices.ts'
 
 import type { InitiativeSettings, PersonaFromCard, SplitSettings } from '../core/index.ts'
-import type { FocusChoice, InitiativeView } from './initiative.ts'
-import type { Preset } from './presets.ts'
+import type { FocusChoice, InitiativeView } from '../engine/initiative.ts'
+import type { Preset } from '../engine/presets.ts'
 
 export const API_BASE = '/api/dsh-her'
 

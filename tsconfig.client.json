@@ -23,6 +23,6 @@
     "src/client",
     "src/core",
     "src/dsh/api.ts",
-    "src/dsh/import-status.ts"
+    "src/engine/import-status.ts"
   ]
 }

@@ -9,7 +9,7 @@
 | 身体打包（`body/scripts/package.mjs`） | 在 Windows 上打包：Electron 的文件夹改名为 `dsh-her`，`electron.exe` 改成 `dsh-her.exe`；身体代码放 `resources\app`，带上壁纸层要用的 koffi（Windows 版）；`ffmpeg.exe` 放 `resources`；用 rcedit 写上名字"她"和图标；打成 `dsh-her-body-<版本>-win32-x64.zip` |
 | 图标 | 紫色圆加白色爱心，用代码画（`body/shared/icon.ts`、`body/scripts/ico.mjs`），仓库里没有图片。Windows 托盘以前是空图标（看不见），现在用它；exe 图标也是它 |
 | ffmpeg | Windows 用 BtbN 的 **LGPL** 静态版 8.1，下载后按它发布里的校验值核对 |
-| 插件下载安装身体（`src/dsh/body-install.ts`） | Windows 用系统自带的 `tar.exe` 解压 zip，启动 `dsh-her\dsh-her.exe`；旧版本的文件被占用时先留着，下次再删 |
+| 插件下载安装身体（`src/engine/body-install.ts`） | Windows 用系统自带的 `tar.exe` 解压 zip，启动 `dsh-her\dsh-her.exe`；旧版本的文件被占用时先留着，下次再删 |
 | 解压 | 一律用 `C:\Windows\System32\tar.exe`：装了 Git 的电脑上，PATH 里的 `tar` 是 GNU tar，会把 `C:\…` 当成远程地址而失败（语音模型、uv、身体都受影响） |
 | 启动身体 | 不弹黑色窗口（`windowsHide`） |
 | `--smoke` | 身体加了一个检查开关：正常启动，窗口加载好就打印一行并退出（失败退出码 1） |

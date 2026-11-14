@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { DEFAULT_WHO, fillPrompt, GUIDE, GUIDE_GROUPS, guideMarkdown, promptFor, WHO } from '../src/core/material-guide.ts'
-import { cleanVeil, DEFAULT_VEIL } from '../src/dsh/web-body.ts'
+import { cleanVeil, DEFAULT_VEIL } from '../src/engine/web-body.ts'
 
 test('the document in docs/ is the one the guide writes (run scripts/make-material-doc.mjs after changing the guide)', () => {
   // A Windows checkout may have turned the line ends into CRLF.

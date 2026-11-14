@@ -8,7 +8,7 @@
 import { isRemotePage } from '../core/where.ts'
 import type { BodyMessage, BrainMessage, SettingsPage } from '../protocol/index.ts'
 import type { BodyConfig, HerBridge, LinkStatus, MicMode } from '../../body/shared/types.ts'
-import type { WebConfig } from '../dsh/web-body.ts'
+import type { WebConfig } from '../engine/web-body.ts'
 
 const API = '/api/dsh-her'
 

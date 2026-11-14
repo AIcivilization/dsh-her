@@ -1,11 +1,11 @@
 // Calls to the plugin's endpoints on DSH's own authenticated `/api` channel.
 
 import type { SkinsView, StageView, StateView, VoicesView } from '../dsh/api.ts'
-import type { ManualInstall } from '../dsh/body-install.ts'
-import type { DesignChoice, DesignPreview, InstalledDesign } from '../dsh/design-packs.ts'
+import type { ManualInstall } from '../engine/body-install.ts'
+import type { DesignChoice, DesignPreview, InstalledDesign } from '../engine/design-packs.ts'
 import { isRemotePage } from '../core/where.ts'
 import type { LookProject, WorkshopCard } from '../core/workshop.ts'
-import type { ProjectStatus } from '../dsh/workshop.ts'
+import type { ProjectStatus } from '../engine/workshop.ts'
 import type { ClipUse, ClipsView } from '../pack/types.ts'
 
 export type { SkinsView, StageView, StateView, VoicesView }

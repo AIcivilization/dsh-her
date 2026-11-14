@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from '
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { cleanName, Library } from '../src/dsh/library.ts'
-import { KEEP_VERSIONS, StageStore } from '../src/dsh/stage-store.ts'
+import { cleanName, Library } from '../src/engine/library.ts'
+import { KEEP_VERSIONS, StageStore } from '../src/engine/stage-store.ts'
 import { emptyStage } from '../src/pack/stage.ts'
 
 const home = () => mkdtempSync(join(tmpdir(), 'her-lib-'))

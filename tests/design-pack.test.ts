@@ -6,12 +6,12 @@ import { test } from 'node:test'
 import { freeName, parseDesignManifest, planDesign, versionAtLeast } from '../src/core/design-pack.ts'
 import { makeZip, readZip } from '../src/core/zip.ts'
 import { loadCharacter, saveCharacter, type Character } from '../src/core/character.ts'
-import { Characters } from '../src/dsh/characters.ts'
-import { DesignPacks } from '../src/dsh/design-packs.ts'
-import { Library } from '../src/dsh/library.ts'
-import { Skins } from '../src/dsh/skins.ts'
-import { StageStore } from '../src/dsh/stage-store.ts'
-import { readPlay } from '../src/dsh/stage-play.ts'
+import { Characters } from '../src/engine/characters.ts'
+import { DesignPacks } from '../src/engine/design-packs.ts'
+import { Library } from '../src/engine/library.ts'
+import { Skins } from '../src/engine/skins.ts'
+import { StageStore } from '../src/engine/stage-store.ts'
+import { readPlay } from '../src/engine/stage-play.ts'
 
 const bytes = (text: string) => new TextEncoder().encode(text)
 const her: Character = { name: '小禾', persona: '你是小禾。', callYou: '你', pronoun: '他', voice: { id: 'zh-CN-XiaoxiaoNeural', speed: 1 }, onboarded: true }

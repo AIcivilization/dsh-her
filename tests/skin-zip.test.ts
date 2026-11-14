@@ -6,11 +6,11 @@ import { deflateRawSync } from 'node:zlib'
 import { test } from 'node:test'
 import { crc32, makeZip, readZip } from '../src/core/zip.ts'
 import { parseSkin, skinCss } from '../src/core/skin.ts'
-import { safeSkinCss, Skins } from '../src/dsh/skins.ts'
+import { safeSkinCss, Skins } from '../src/engine/skins.ts'
 import { SKIN_INTERVIEW, SKIN_TEMPLATE, SKIN_TOKENS, skinReadme } from '../src/core/skin-guide.ts'
-import { designTools } from '../src/dsh/design-tools.ts'
-import { Library } from '../src/dsh/library.ts'
-import { StageStore } from '../src/dsh/stage-store.ts'
+import { designTools } from '../src/engine/design-tools.ts'
+import { Library } from '../src/engine/library.ts'
+import { StageStore } from '../src/engine/stage-store.ts'
 
 const bytes = (text: string) => new TextEncoder().encode(text)
 

@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { candidates, explain, NetError, setMirrors } from '../src/net.ts'
-import { bundledRelease, latestRelease } from '../src/dsh/body-install.ts'
+import { bundledRelease, latestRelease } from '../src/engine/body-install.ts'
 
 const GH = 'https://github.com/AIcivilization/dsh-her/releases/latest/download/a.zip'
 
