@@ -197,6 +197,16 @@ export function Workshop({ state, apply }: { state: StateView; apply: Apply }) {
             <button className="her-btn" disabled={!desktopHere(state.body)} title={desktopHere(state.body) ? undefined : NEEDS_DESKTOP} onClick={() => void exportProject()}>把「{draft.name}」导出到文件夹…</button>
             <label><input type="checkbox" checked={withMedia} onChange={e => setWithMedia(e.target.checked)} /> 连同图片和视频</label>
             <span className="her-muted">不勾只导出设置（形象.json 和所有提示词），很小；导出的文件夹在别的电脑上用"导入已有项目"打开。</span>
+            <span className="her-grow" />
+            <button className="her-btn" disabled={inUse} title={inUse ? '她正在用这个形象：先在「形象」里换一个' : undefined} onClick={() => {
+              if (!window.confirm(`移走项目「${draft.name}」？\n它的文件夹会放进「文稿 / dsh-her 素材 / .removed」，不会直接删掉。${imported ? '\n已经导入的形象还在，要移走请到「形象」里。' : ''}`)) return
+              void herApi.workshopRemove(draft.id).then(async r => {
+                if (!r.ok) return setNote({ kind: 'error', text: r.message })
+                setOpen(undefined)
+                await reload()
+                setNote({ kind: 'ok', text: `移走了「${r.name}」` })
+              })
+            }}>移走这个项目</button>
           </div>
         )}
         {draft === undefined && note !== undefined && <p className={note.kind === 'error' ? 'her-danger' : 'her-ok'}>{note.text}</p>}

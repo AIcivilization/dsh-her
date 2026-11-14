@@ -19,7 +19,7 @@
  * never touched. Importing hands the folders to the body (same computer).
  */
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, extname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -87,6 +87,16 @@ export function listProjects(root = MATERIALS_DIR): Array<{ project: LookProject
 export function findProject(id: string, root = MATERIALS_DIR): { project: LookProject; dir: string } | undefined {
   const found = listProjects(root).find(p => p.project.id === id)
   return found === undefined ? undefined : { project: found.project, dir: found.status.dir }
+}
+
+/** A project out of the list: its folder into `.removed` beside it (kept, can be put back by hand). Its name. */
+export function removeProject(id: string, root = MATERIALS_DIR): string {
+  const found = findProject(id, root)
+  if (found === undefined) throw new Error('没有这个项目')
+  const bin = join(root, '.removed')
+  mkdirSync(bin, { recursive: true })
+  renameSync(found.dir, join(bin, `${Date.now()}-${found.dir.split(/[/\\]/).pop()}`))
+  return found.project.name
 }
 
 const has = (dir: string, file: string) => existsSync(join(dir, file))

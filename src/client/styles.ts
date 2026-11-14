@@ -364,6 +364,12 @@ label.her-setrow{display:flex!important;width:100%;cursor:pointer}
 .her-design-form label.wide{grid-column:1/-1}
 .her-setrow.her-off{opacity:.55}
 a.her-btn.disabled{opacity:.45;pointer-events:none}
+.her-choice-wrap{position:relative;display:flex}
+.her-choice-wrap>.her-choice{flex:1;padding-right:28px}
+.her-choice-x{position:absolute;right:5px;top:5px;width:22px;height:22px;border:none;border-radius:50%;background:none;color:${FAINT};font-size:15px;line-height:1;cursor:pointer;opacity:0;transition:opacity .12s}
+.her-choice-wrap:hover .her-choice-x,.her-choice-x:focus-visible{opacity:1}
+.her-choice-x:hover{background:${tint(DANGER, 16)};color:${DANGER}}
+@media (pointer:coarse){.her-choice-x{opacity:.7}}
 .her-people-box{margin-bottom:16px}
 .her-people{display:flex;gap:10px;overflow-x:auto;padding:3px 3px 8px;scrollbar-width:thin}
 .her-person{position:relative;flex:none;width:132px;border:1px solid ${LINE};border-radius:14px;background:${LAYER1};transition:border-color .12s,background .12s}

@@ -115,25 +115,34 @@ export function platformName(platform: string): string {
 export function PackPicker({ state, apply }: { state: StateView; apply: Apply }) {
   const body = state.body
   const imp = state.import
-  if (!body.connected && !body.web.connected) return <p className="her-muted">身体连上之后才能选外形。</p>
+  // With no body here the list still shows, to tidy up; choosing waits for one.
+  const live = body.connected || body.web.connected
   return (
     <div>
-      <Presets state={state} apply={apply} />
+      {!live && <p className="her-muted">身体连上之后才能选外形；不用的可以先移走。</p>}
+      {live && <Presets state={state} apply={apply} />}
       <div className="her-grid">
         {body.packs.map(pack => (
-          <button key={pack.packId} className={`her-choice ${pack.packId === body.activePack ? 'on' : ''}`} onClick={() => void apply(herApi.usePack(pack.packId))}>
-            {pack.name}
-            <small>{choiceNote(pack.packId, body.activePack ?? '', `${pack.packId.startsWith('look:') ? '多场景形象' : pack.layer === 'scene' ? '壁纸场景' : '桌宠'} · ${pack.actions.filter(a => !a.id.startsWith('scene_')).length} 个动作${pack.emotions.length > 0 ? ` · ${pack.emotions.length} 种情绪` : ''}`)}</small>
-          </button>
+          <div key={pack.packId} className="her-choice-wrap">
+            <button className={`her-choice ${pack.packId === body.activePack ? 'on' : ''}`} disabled={!live} onClick={() => void apply(herApi.usePack(pack.packId))}>
+              {pack.name}
+              <small>{choiceNote(pack.packId, body.activePack ?? '', `${pack.packId.startsWith('look:') ? '多场景形象' : pack.layer === 'scene' ? '壁纸场景' : '桌宠'} · ${pack.actions.filter(a => !a.id.startsWith('scene_')).length} 个动作${pack.emotions.length > 0 ? ` · ${pack.emotions.length} 种情绪` : ''}`)}</small>
+            </button>
+            {pack.packId !== body.activePack && pack.packId !== 'look:stage' && (
+              <button className="her-choice-x" aria-label={`移走「${pack.name}」`} title="移走（放进 .removed，不会直接删掉）" onClick={() => {
+                if (window.confirm(`移走「${pack.name}」？\n它会放进 dsh-her 文件夹里的 .removed，不会直接删掉；编排里用到它的格子会显示"不在了"。`)) void apply(herApi.packRemove(pack.packId))
+              }}>×</button>
+            )}
+          </div>
         ))}
         {body.packs.length === 0 && state.presets.list.length === 0 && <p className="her-muted">还没有导入过外形包。</p>}
       </div>
-      <div className="her-row">
+      {live && <div className="her-row">
         {desktopHere(body)
           ? <button className="her-btn" disabled={imp.state === 'picking' || imp.state === 'running'} onClick={() => void apply(herApi.pickPack())}>导入我的素材…</button>
           : <UploadPack apply={apply} busy={imp.state === 'running'} />}
         <span className="her-muted">{desktopHere(body) ? '会在身体那台电脑上弹出选择文件夹的窗口。' : '选一个素材文件夹，传上去就导入。'}素材怎么做、怎么命名，见<a href="https://github.com/AIcivilization/dsh-her/blob/main/docs/素材生成提示词.md" target="_blank" rel="noreferrer">素材规格</a>。</span>
-      </div>
+      </div>}
       {imp.state === 'picking' && <p className="her-muted">请在桌面上弹出的窗口里选择素材文件夹…</p>}
       {imp.state === 'running' && (
         <div>

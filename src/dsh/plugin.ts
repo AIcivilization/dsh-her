@@ -65,7 +65,8 @@ import { bodyRunning, findDevBody, launchBody, type LaunchPlan } from './body-la
 import { compareVersions, desktopBodyExists, downloadFolder, install, installDownloaded, installedBody, installedPlan, latestRelease, manualInstall, type InstallState, type ManualInstall } from './body-install.ts'
 import { IDLE_IMPORT, type ImportStatus, type ReportLine } from './import-status.ts'
 import { DESK_DIR, newProject, sceneDir } from '../core/workshop.ts'
-import { assignClip, avatarIn, avatarOf, exampleFile, examples, exportProject, findProject, importProject, listProjects, prepareImport, projectStatus, removeStray, saveProject } from './workshop.ts'
+import { assignClip, avatarIn, avatarOf, exampleFile, examples, exportProject, findProject, importProject, listProjects, prepareImport, projectStatus, removeProject, removeStray, saveProject } from './workshop.ts'
+import { removePackOrLook } from './pack-remove.ts'
 import type { HerConfig } from './config.ts'
 import { HerSession, type DshServices, type ModelRoute } from './her-session.ts'
 import { heardText, SpeechQueue } from '../voice/speech-queue.ts'
@@ -1769,6 +1770,19 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       log({ event: 'places', ...change })
     },
     workshopList: () => listProjects(),
+    workshopRemove: id => {
+      const name = removeProject(id)
+      log({ event: 'workshop', action: 'remove', id })
+      return name
+    },
+    packRemove: id => {
+      const { name, gone } = removePackOrLook(paths.root, paths.packs, id, [activePack, webBody.activeId(), character.look])
+      // The desktop body reads its list from disk the next time; the page's view of it follows now.
+      bodyPacks = bodyPacks.filter(p => !gone.includes(p.packId))
+      refreshBodyPack()
+      log({ event: 'pack', action: 'remove', id, gone })
+      return name
+    },
     workshopNew: name => {
       if (name === '') throw new Error('先给形象起个名字')
       return saveProject(newProject(`p${Date.now().toString(36)}`, name), mainScreen())

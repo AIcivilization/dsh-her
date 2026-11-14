@@ -221,6 +221,10 @@ export interface ApiRuntime {
   designsList(): { installed: InstalledDesign[]; exportable: ReturnType<DesignPacks['exportable']> }
   /** Put in the parts chosen of a pack looked at before. */
   designApply(token: string, choice: DesignChoice): { record: InstalledDesign; notes: string[] }
+  /** "移走" on the 形象 page: a 外形包 or 形象 (`look:<id>`) aside, kept in `.removed`; its name. */
+  packRemove(id: string): string
+  /** "移走" on the 形象工坊 page: a project's folder aside; its name. */
+  workshopRemove(id: string): string
   /** 纯聊模式: her scenes to go round, and her figure. */
   chatScenes(): { name: string; scenes: ShowMedia[]; pet?: ShowMedia }
   placesSet(change: { wallpaper?: boolean; overlay?: boolean; web?: boolean; webAlways?: boolean; avatar?: boolean; tray?: boolean; holdKey?: boolean; petScale?: number }): void
@@ -469,6 +473,11 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
     },
     '/chat/scenes': async () => ({ ...rt.chatScenes() }),
     '/designs/list': async () => ({ ...rt.designsList() }),
+    '/pack/remove': async body => {
+      const name = rt.packRemove(str(body.id, '外形'))
+      return { name, ...withState() }
+    },
+    '/workshop/remove': async body => ({ name: rt.workshopRemove(str(body.id, '项目')) }),
     '/designs/apply': async body => {
       const c = (body.choice ?? {}) as Record<string, unknown>
       const flag = (key: string) => c[key] === true

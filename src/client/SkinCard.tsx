@@ -213,6 +213,15 @@ export function SkinCard() {
               {view.introClips.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
             </select>
             <button className="her-btn" onClick={() => clip.current?.click()}>上传…</button>
+            {intro.source !== 'skin' && view.introClips.some(c => c.name === intro.source) && (
+              <button className="her-btn" onClick={() => {
+                if (!window.confirm(`移走开机动画「${intro.source}」？\n它会放进素材库的 .removed，不会直接删掉；开机动画改用皮肤自带的。`)) return
+                void herApi.libraryRemove('intro', intro.source).then(async r => {
+                  if (!r.ok) return setNote({ kind: 'error', text: r.message })
+                  take(await herApi.introSet({ source: 'skin' }), `移走了「${intro.source}」。`)
+                })
+              }}>移走这段</button>
+            )}
             <input ref={clip} type="file" accept="video/*" hidden onChange={e => { void sendClip(e.target.files); e.target.value = '' }} />
           </span>
         </div>
