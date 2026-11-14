@@ -5,12 +5,17 @@
  * when 编排 is switched off), not one part of a 形象 on its own.
  */
 
-import { existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import { listLooks } from '../pack/looks.ts'
+import type { Look } from '../pack/look.ts'
 import { listPacks } from '../pack/settings.ts'
 
 const STAGE_LOOK = 'stage'
+
+/** A look's own packs: the ones it uses that were made for it (a 形象工坊 import names them `<look>-<part>`). Packs it only borrows stay. */
+const ownPacks = (look: Look): string[] => [...new Set([look.desk, ...look.scenes.flatMap(s => [s.pack, s.desk])])]
+  .filter((id): id is string => id !== undefined && id.startsWith(`${look.id}-`))
 
 function moveAside(dir: string, parent: string, name: string): void {
   const bin = join(parent, '.removed')
@@ -32,14 +37,12 @@ export function removePackOrLook(home: string, packsDir: string, id: string, act
     if (look === undefined || !/^[\w-]+$/.test(lookId)) throw new Error('没有这个形象')
     if (active.includes(id)) throw new Error(`她正在用「${look.name}」：先换一个形象，再移走它`)
     moveAside(join(home, 'looks', lookId), join(home, 'looks'), lookId)
-    // Its own packs (a 形象工坊 import makes `<look>-<part>`) go with it.
+    // Its own packs go with it, unless another look uses them too.
     const gone = [id]
-    if (existsSync(packsDir)) {
-      for (const entry of readdirSync(packsDir)) {
-        if (!entry.startsWith(`${lookId}-`)) continue
-        moveAside(join(packsDir, entry), packsDir, entry)
-        gone.push(entry)
-      }
+    for (const pack of ownPacks(look)) {
+      if (looks.some(other => other.id !== lookId && ownPacks(other).includes(pack)) || !existsSync(join(packsDir, pack))) continue
+      moveAside(join(packsDir, pack), packsDir, pack)
+      gone.push(pack)
     }
     return { name: look.name, gone }
   }
@@ -47,7 +50,7 @@ export function removePackOrLook(home: string, packsDir: string, id: string, act
   if (id.startsWith(`${STAGE_LOOK}-`)) throw new Error('这是「编排」生成的：在编排页关掉"让她按这份编排来"，它就没了')
   const pack = listPacks(packsDir).find(p => p.packId === id)
   if (pack === undefined) throw new Error('没有这个外形包')
-  const owner = looks.find(l => id.startsWith(`${l.id}-`))
+  const owner = looks.find(l => ownPacks(l).includes(id))
   if (owner !== undefined) throw new Error(`这是形象「${owner.name}」的一部分：移走那个形象，它就一起走了`)
   if (active.includes(id)) throw new Error(`她正在用「${pack.name}」：先换一个，再移走它`)
   moveAside(join(packsDir, id), packsDir, id)

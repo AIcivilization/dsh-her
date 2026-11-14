@@ -15,9 +15,10 @@ function home() {
     writeFileSync(join(packs, id, 'clips.json'), JSON.stringify({ name: id, clips: [{ id: 'a', file: 'a.mp4' }] }))
     writeFileSync(join(packs, id, 'a.mp4'), 'x')
   }
-  for (const id of ['old-test', 'in-use', 'stage-desktop-base', 'room-desk', 'room-s1']) pack(id)
+  for (const id of ['old-test', 'in-use', 'stage-desktop-base', 'room-desk', 'room-s1', 'room-other', 'shared']) pack(id)
   mkdirSync(join(root, 'looks', 'room'), { recursive: true })
-  const scenes = [{ id: 's1', name: '卧室', pack: 'room-s1' }]
+  // room-other only shares the prefix; shared is borrowed, not made for it.
+  const scenes = [{ id: 's1', name: '卧室', pack: 'room-s1' }, { id: 's2', name: '借来的', pack: 'shared' }]
   writeFileSync(join(root, 'looks', 'room', 'look.json'), JSON.stringify({ format: 'dsh-her-look@1', id: 'room', name: '卧室测试', desk: 'room-desk', scenes, default: 's1' }))
   return { root, packs }
 }
@@ -44,6 +45,8 @@ test('a 形象 goes with its own packs; one of its packs alone, or what 编排 m
   assert.equal(existsSync(join(h.root, 'looks', 'room')), false)
   assert.equal(readdirSync(join(h.root, 'looks', '.removed')).length, 1)
   assert.equal(existsSync(join(h.packs, 'old-test')), true, 'other packs stay')
+  assert.equal(existsSync(join(h.packs, 'room-other')), true, 'a pack that only shares the name stays')
+  assert.equal(existsSync(join(h.packs, 'shared')), true, 'a borrowed pack stays')
 })
 
 test('a 形象工坊 project goes aside and leaves the list', () => {
