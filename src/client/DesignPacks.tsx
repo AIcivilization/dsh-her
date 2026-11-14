@@ -93,7 +93,7 @@ export function DesignPacks({ state, apply }: { state: StateView; apply: Apply }
             {p.newer !== undefined && <p className="her-warn">这个设计包是给 dsh-her {p.newer} 以上做的，你装的是 {state.version}：有的地方可能用不上，最好先更新。</p>}
             <div className="her-design-parts">
               {p.character !== undefined && (
-                <label className="her-setrow"><div><b>人物「{p.character.name}」</b><span>{p.stage === undefined ? '' : `带编排（${p.stage.scenes} 个场景）和 ${materialCount - (p.materials.intro ?? 0)} 个素材。`}装成一个新人物，你现在的人物不变。「{p.character.persona}…」</span></div><input type="checkbox" checked={choice.character} onChange={toggle('character')} /></label>
+                <label className="her-setrow"><div><b>人物「{p.character.name}」</b><span>{p.stage === undefined ? '' : `带编排（${p.stage.scenes} 个场景）和 ${materialCount - (p.materials.intro ?? 0)} 个素材。`}{p.character.lines === undefined ? '' : `带 ${p.character.lines} 句写好的台词。`}装成一个新人物，你现在的人物不变。「{p.character.persona}…」</span></div><input type="checkbox" checked={choice.character} onChange={toggle('character')} /></label>
               )}
               {p.character !== undefined && choice.character && (
                 <label className="her-setrow sub"><div><b>装好就换成她</b><span>不换的话，在「人设」顶上的人物卡里点她。</span></div><input type="checkbox" checked={choice.switchTo} onChange={toggle('switchTo')} /></label>
@@ -160,7 +160,7 @@ function ExportCard({ list, state }: { list: DesignsList; state: StateView }) {
   const [form, setForm] = useState({ name: e.character, id: '', author: '', version: '1.0.0', license: LICENSES[0]!, description: '' })
   useEffect(() => setForm(f => ({ ...f, name: e.character })), [e.character])
   const available: Array<{ key: string; label: string; text: string; ok: boolean }> = [
-    { key: 'character', label: `人设：${e.character}`, text: '名字、人设、称呼、声音。不带模型、记忆和对话。', ok: true },
+    { key: 'character', label: `人设：${e.character}`, text: '名字、人设、称呼、声音，还有她被碰时说的那几句台词。不带模型、记忆和对话。', ok: true },
     { key: 'stage', label: '编排和它用到的素材', text: e.stage === undefined ? '这个人物还没有编排。' : `${e.stage.scenes} 个场景、${e.stage.materials} 个素材。${e.stage.skipped.length > 0 ? `带不走的：${e.stage.skipped.slice(0, 3).join('、')}${e.stage.skipped.length > 3 ? '…' : ''}` : ''}`, ok: e.stage !== undefined },
     { key: 'sheet', label: '三视图', text: e.sheet === undefined ? '素材库里还没有她的三视图。' : `「${e.sheet}」`, ok: e.sheet !== undefined },
     { key: 'skin', label: '现在的皮肤', text: e.skin === undefined ? '现在用的不是你自己的皮肤。' : `「${e.skin}」`, ok: e.skin !== undefined },

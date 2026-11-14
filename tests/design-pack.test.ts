@@ -127,3 +127,46 @@ test('the character of now goes out as a design pack that comes back in as the s
   assert.equal(loadCharacter(join(other.charactersDir, back.record.cid!), her).persona, '你是小禾。')
   assert.throws(() => e.designs.export({ parts: new Set(), id: 'x-y', name: 'x', author: '', version: '1', license: 'MIT' }), /没有可以导出/)
 })
+
+test('written lines: read from a pack, kept for the new character, and exported again', async () => {
+  const { parseLines, loadLines, saveLines } = await import('../src/core/lines.ts')
+  const long = '字'.repeat(41)
+  const read = parseLines({ touch: { head: ['嗯？', '嗯？', long, 3], body: 'no' }, hello: ['我来啦。'], night: [], extra: ['x'] })
+  assert.deepEqual(read.lines?.touch?.head, ['嗯？'])
+  // A mood the pack left out gets the neutral lines.
+  assert.ok((read.lines?.touch?.long.length ?? 0) > 0)
+  assert.deepEqual(read.lines?.hello, ['我来啦。'])
+  assert.equal(read.lines?.night, undefined)
+  assert.ok(read.problems.some(p => p.includes('超过 40 个字')))
+  assert.ok(read.problems.some(p => p.includes('摸身体')))
+  assert.deepEqual(parseLines(undefined), { problems: [] })
+  assert.equal(parseLines({ touch: {} }).lines, undefined)
+
+  const { home, charactersDir, designs, people } = engine()
+  const lines = { touch: { head: ['别闹。'], body: ['怎么啦？'], long: ['嗯……'], many: ['好啦好啦。'] }, hello: ['我来啦。'], night: ['去睡吧。'] }
+  const withLines = makeZip([
+    { name: 'design.json', data: bytes(JSON.stringify({ ...manifest, stage: undefined, skin: undefined, intro: undefined, character: { ...manifest.character, sheet: undefined, lines } })) },
+  ])
+  const preview = designs.preview(withLines)
+  assert.equal(preview.character?.lines, 6)
+  const { record } = designs.apply(preview.token, { character: true, switchTo: false, skin: false, wearSkin: false, intro: false, setIntro: false, materials: true })
+  const cid = record.cid!
+  const dir = join(charactersDir, cid)
+  const installed = loadCharacter(dir, her)
+  assert.deepEqual(loadLines(dir, installed), lines)
+  // Touch lines are for one persona: a rewritten persona no longer has them, hello and night stay.
+  assert.deepEqual(loadLines(dir, { ...installed, persona: '你是别人。' }), { hello: ['我来啦。'], night: ['去睡吧。'] })
+
+  // Exported from the character of now, they come back the same.
+  saveLines(join(charactersDir, 'sample'), her, lines)
+  const out = designs.export({ parts: new Set(['character']), id: 'mine', name: '我的', author: '我', version: '1.0.0', license: 'CC BY 4.0' })
+  const back = planDesign(readZip(out.zip))
+  assert.deepEqual(back.plan?.manifest.character?.lines, lines)
+  // A character without lines exports none.
+  saveLines(join(charactersDir, 'sample'), her, {})
+  assert.equal(existsSync(join(charactersDir, 'sample', 'touch-lines.json')), false)
+  const bare = planDesign(readZip(designs.export({ parts: new Set(['character']), id: 'mine', name: '我的', author: '我', version: '1.0.0', license: 'CC BY 4.0' }).zip))
+  assert.equal(bare.plan?.manifest.character?.lines, undefined)
+  void home
+  void people
+})

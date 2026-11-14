@@ -38,6 +38,7 @@ import { fileURLToPath } from 'node:url'
 import { basename, dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { buildSystemPrompt, cardText, DEFAULT_VOICE, extractCues, extractSounds, FALLBACK_LINES, herPaths, initiativePrompt, invalidCharacter, judgeBargeIn, loadCharacter, memoryContext, OWN_PREFIX, parseOpening, parsePersonaCard, parseTouchLines, performanceSection, personaCardPrompt, readingMs, saveCharacter, SentenceSplitter, serviceOf, SOUND_SECTION, speakable, touchClip, touchLinesPrompt, TouchTracker, withSounds, cleanSplit, lastLines, sizeText, splitReason, type Character, type Moment, type SplitSettings, type TalkLine, type TouchLines } from '../core/index.ts'
+import { personaHash as linesHash } from '../core/lines.ts'
 import { digestPrompt, notePrompt, parseDigest, transcriptOf } from '../memory/digest.ts'
 import { dayOf, FileMemory } from '../memory/store.ts'
 import { PROTOCOL_VERSION, SETTINGS_PAGES, type BodyMessage, type BrainMessage, type DeskPlaces, type LookView, type PackSummary, type SettingsPage, type TalkView, type WindowMode } from '../protocol/index.ts'
@@ -505,7 +506,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
   }
   let writingLines = false
   let touchLinesRetryAt = 0
-  const personaHash = () => createHash('sha1').update(`${character.name}\n${character.persona}`).digest('hex').slice(0, 12)
+  const personaHash = () => linesHash(character)
   const ensureTouchLines = () => {
     if (writingLines || !character.onboarded || touchLines?.hash === personaHash() || Date.now() < touchLinesRetryAt) return
     writingLines = true

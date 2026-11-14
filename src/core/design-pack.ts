@@ -6,6 +6,7 @@
  */
 
 import type { ZipEntry } from './zip.ts'
+import { parseLines, type WrittenLines } from './lines.ts'
 
 export const DESIGN_FORMAT = 'dsh-her-design@1'
 export const DESIGN_ROWS = ['avatar', 'desktop', 'pet', 'intro', 'sheet'] as const
@@ -24,6 +25,8 @@ export interface DesignCharacter {
   pronoun?: '他' | '她' | 'TA'
   voice?: { id: string; speed: number }
   sheet?: string
+  /** What she says without a brain (lines.ts). */
+  lines?: WrittenLines
 }
 
 export interface DesignManifest {
@@ -95,6 +98,9 @@ export function parseDesignManifest(raw: unknown): { manifest?: DesignManifest; 
       }
       const sheet = text(c.sheet, 80)
       if (sheet !== undefined) character.sheet = sheet
+      const written = parseLines(c.lines)
+      problems.push(...written.problems)
+      if (written.lines !== undefined) character.lines = written.lines
       manifest.character = character
     }
   }

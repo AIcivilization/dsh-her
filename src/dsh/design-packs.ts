@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import { extname, join } from 'node:path'
 import { DESIGN_FORMAT, DESIGN_ROWS, freeName, planDesign, versionAtLeast, type DesignManifest, type DesignPlan, type DesignRow } from '../core/design-pack.ts'
 import { invalidCharacter, type Character } from '../core/character.ts'
+import { loadLines, saveLines, type WrittenLines } from '../core/lines.ts'
 import { makeZip, readZip, type ZipEntry } from '../core/zip.ts'
 import { parseStage, renameMaterial, type Stage } from '../pack/stage.ts'
 import type { Characters } from './characters.ts'
@@ -41,7 +42,8 @@ export interface DesignPreview {
   token: string
   manifest: Pick<DesignManifest, 'id' | 'name' | 'version' | 'author' | 'license' | 'homepage' | 'description' | 'engine'>
   cover?: string
-  character?: { name: string; persona: string }
+  /** `lines`: how many written lines come with her (touch, hello, night together). */
+  character?: { name: string; persona: string; lines?: number }
   stage?: { scenes: number }
   skin?: { name: string }
   intro?: { name: string; when: 'every' | 'daily' }
@@ -52,6 +54,9 @@ export interface DesignPreview {
   /** The pack wants a newer dsh-her than this. */
   newer?: string
 }
+
+const countLines = (lines: WrittenLines): number =>
+  (lines.touch === undefined ? 0 : Object.values(lines.touch).reduce((n, l) => n + l.length, 0)) + (lines.hello?.length ?? 0) + (lines.night?.length ?? 0)
 
 export interface DesignChoice {
   /** The character, with her 编排, its materials and her 三视图. */
@@ -124,7 +129,7 @@ export class DesignPacks {
       token,
       manifest: { id: m.id, name: m.name, version: m.version, author: m.author, license: m.license, ...(m.homepage === undefined ? {} : { homepage: m.homepage }), ...(m.description === undefined ? {} : { description: m.description }), ...(m.engine === undefined ? {} : { engine: m.engine }) },
       ...(plan.cover !== undefined && coverType !== undefined && plan.cover.data.length <= 2 * 1024 * 1024 ? { cover: `data:${coverType};base64,${Buffer.from(plan.cover.data).toString('base64')}` } : {}),
-      ...(m.character === undefined ? {} : { character: { name: m.character.name, persona: m.character.persona.slice(0, 200) } }),
+      ...(m.character === undefined ? {} : { character: { name: m.character.name, persona: m.character.persona.slice(0, 200), ...(m.character.lines === undefined ? {} : { lines: countLines(m.character.lines) }) } }),
       ...(stage?.stage === undefined ? {} : { stage: { scenes: stage.stage.scenes.length } }),
       ...(skinName === undefined ? {} : { skin: { name: skinName } }),
       ...(m.intro === undefined ? {} : { intro: { name: m.intro.material, when: m.intro.when } }),
@@ -181,6 +186,7 @@ export class DesignPacks {
       const cid = this.deps.people.create(next)
       record.cid = cid
       record.character = c.name
+      if (c.lines !== undefined) saveLines(join(this.deps.charactersDir, cid), next, c.lines)
       const parsed = plan.stage === undefined ? undefined : parseStage(plan.stage).stage
       if (parsed !== undefined) {
         const stage = parsed as Stage
@@ -281,9 +287,11 @@ export class DesignPacks {
     }
     const sheet = this.sheetName(character)
     if (options.parts.has('character')) {
+      const lines = loadLines(dir, character)
       manifest.character = {
         name: character.name, persona: character.persona, callYou: character.callYou, pronoun: character.pronoun, voice: character.voice,
         ...(options.parts.has('sheet') && sheet !== undefined ? { sheet } : {}),
+        ...(countLines(lines) === 0 ? {} : { lines }),
       }
     }
     if (options.parts.has('stage')) {
