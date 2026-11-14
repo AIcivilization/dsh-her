@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { DEFAULT_WHO, fillPrompt, GUIDE, GUIDE_GROUPS, guideMarkdown, promptFor, WHO } from '../src/core/material-guide.ts'
+import { DEFAULT_WHO, fillPrompt, GUIDE, GUIDE_GROUPS, guideMarkdown, MUST, promptFor, WHO } from '../src/core/material-guide.ts'
 import { cleanVeil, DEFAULT_VEIL } from '../src/dsh/web-body.ts'
 
 test('the document in docs/ is the one the guide writes (run scripts/make-material-doc.mjs after changing the guide)', () => {
@@ -34,7 +34,8 @@ test("your character's description goes into the prompts that describe her", () 
   assert.ok(fillPrompt(portrait.prompt, '银发的狐狸少女').includes('银发的狐狸少女'))
   assert.ok(!fillPrompt(portrait.prompt, '银发的狐狸少女').includes(WHO))
   // Nothing typed: ours.
-  assert.ok(fillPrompt(portrait.prompt, '  ').includes(DEFAULT_WHO))
+  assert.ok(fillPrompt(portrait.prompt, '  ').includes(DEFAULT_WHO.anime))
+  assert.ok(fillPrompt(portrait.prompt, '  ', 'real').includes(DEFAULT_WHO.real))
   assert.ok(guideMarkdown('银发的狐狸少女').includes('银发的狐狸少女'))
 })
 
@@ -48,12 +49,32 @@ test('the veil over a background stays within what a page can show', () => {
 test('every prompt to copy says what it is for and its size, a clip how long; nothing says only "the same as above"', () => {
   for (const item of GUIDE) {
     assert.ok(!item.size.startsWith('同上'), item.id)
-    const prompt = promptFor(item, DEFAULT_WHO)
+    const prompt = promptFor(item, DEFAULT_WHO.anime)
     assert.ok(prompt.startsWith('这是为deepseek-harness设计鲸鱼娘的角色之一，要求：'), item.id)
     assert.ok(prompt.includes(item.size), item.id)
     if (item.length !== undefined) assert.ok(prompt.includes(item.length), item.id)
   }
   const pet = GUIDE.find(i => i.id === 'pet-still')!
-  assert.ok(!promptFor(pet, DEFAULT_WHO, false).startsWith('这是为'))
+  assert.ok(!promptFor(pet, DEFAULT_WHO.anime, false).startsWith('这是为'))
   assert.ok(promptFor(GUIDE.find(i => i.id === 'base-portrait')!, '银发的狐狸少女').startsWith('这是为deepseek-harness设计的角色素材之一'))
+})
+
+test('two versions of her, drawn and real; every prompt that shows her keeps the three things, none has a marker left', () => {
+  for (const style of ['anime', 'real'] as const) {
+    for (const item of GUIDE) {
+      const prompt = promptFor(item, DEFAULT_WHO[style], true, style)
+      assert.ok(!/\{(人物|画风|Q版)\}/.test(prompt), `${style} ${item.id}`)
+      assert.equal(prompt.includes(MUST), item.noHer !== true, `${style} ${item.id}`)
+    }
+  }
+  // Both descriptions name the three, in their own words.
+  for (const who of [DEFAULT_WHO.anime, DEFAULT_WHO.real]) assert.ok(/鲸鱼尾巴(造型亚克力)?发卡/.test(who) && who.includes('DeepSeek') && /鲸鱼尾巴/.test(who))
+  const real = promptFor(GUIDE.find(i => i.id === 'base-portrait')!, DEFAULT_WHO.real, false, 'real')
+  assert.ok(real.startsWith('写实真人摄影，商业级Cosplay角色设定图，展示一位身材高挑修长的成年亚洲女性coser，扮演蓝色鲸鱼娘'))
+  assert.ok(real.includes('写实摄影') && !real.includes('二次元'))
+  // The small her on the chat box is chibi and stands; she walks, flips and rolls.
+  for (const id of ['avatar-walk', 'avatar-flip', 'avatar-roll']) assert.ok(GUIDE.some(i => i.id === id), id)
+  assert.match(promptFor(GUIDE.find(i => i.id === 'avatar-still')!, DEFAULT_WHO.anime), /Q 版小人[\s\S]*站着/)
+  // Someone's own character: no lines of ours added.
+  assert.ok(!promptFor(GUIDE.find(i => i.id === 'base-sheet')!, '银发的狐狸少女').includes(MUST))
 })

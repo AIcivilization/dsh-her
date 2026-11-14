@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { DEFAULT_WHO, GUIDE, GUIDE_GROUPS, guideMarkdown, promptFor, purposeLine, VIDEO_RULES, type GuideGroup, type GuideItem } from '../core/material-guide.ts'
+import { DEFAULT_WHO, GUIDE, GUIDE_GROUPS, guideMarkdown, MUST, promptFor, purposeLine, STYLE_LABEL, VIDEO_RULES, type GuideGroup, type GuideItem, type GuideStyle } from '../core/material-guide.ts'
 import { Icon } from './icons.tsx'
 
 /** Copy text, also on a page without HTTPS (no clipboard API there). */
@@ -48,16 +48,35 @@ function CopyButton({ text, label = '复制提示词', primary = true }: { text:
   )
 }
 
-const whoKey = (cid: string) => `dsh-her.guide.who.${cid}`
+/** Her description, per character and style (二次元 and 真人 are kept apart). */
+const whoKey = (cid: string, style: GuideStyle) => `dsh-her.guide.who.${cid}${style === 'anime' ? '' : `.${style}`}`
+const STYLE_KEY = 'dsh-her.guide.style'
+const readWho = (cid: string, style: GuideStyle) => {
+  try {
+    return localStorage.getItem(whoKey(cid, style)) ?? DEFAULT_WHO[style]
+  } catch {
+    return DEFAULT_WHO[style]
+  }
+}
 
 export function MaterialGuide({ cid, onLibrary, onSkin }: { cid: string; onLibrary: () => void; onSkin: () => void }) {
-  const [who, setWho] = useState(() => {
+  const [style, setStyle] = useState<GuideStyle>(() => {
     try {
-      return localStorage.getItem(whoKey(cid)) ?? DEFAULT_WHO
+      return localStorage.getItem(STYLE_KEY) === 'real' ? 'real' : 'anime'
     } catch {
-      return DEFAULT_WHO
+      return 'anime'
     }
   })
+  const [who, setWho] = useState(() => readWho(cid, style))
+  const chooseStyle = (next: GuideStyle) => {
+    setStyle(next)
+    setWho(readWho(cid, next))
+    try {
+      localStorage.setItem(STYLE_KEY, next)
+    } catch {
+      // kept until the page closes
+    }
+  }
   const [group, setGroup] = useState<GuideGroup>('base')
   const [purpose, setPurpose] = useState(() => {
     try {
@@ -77,8 +96,8 @@ export function MaterialGuide({ cid, onLibrary, onSkin }: { cid: string; onLibra
   const save = (text: string) => {
     setWho(text)
     try {
-      if (text === DEFAULT_WHO) localStorage.removeItem(whoKey(cid))
-      else localStorage.setItem(whoKey(cid), text)
+      if (text === DEFAULT_WHO[style]) localStorage.removeItem(whoKey(cid, style))
+      else localStorage.setItem(whoKey(cid, style), text)
     } catch {
       // private window: kept until the page closes
     }
@@ -95,20 +114,27 @@ export function MaterialGuide({ cid, onLibrary, onSkin }: { cid: string; onLibra
           <li><b>其余都从三视图派生</b><span>做图时把三视图传给工具当参考；做视频时先有图，再用它当首帧和尾帧。</span></li>
           <li><b>传到素材库，在编排里摆好</b><span>每条下面写了传到哪儿、放进哪个场景。</span></li>
         </ol>
-        <p className="her-faint">不用一次做完。最少只要一张「头像·定格图」和一张「宠物·站姿图」（或「桌面·场景图」），她就能出现。</p>
+        <p className="her-faint">不用一次做完。最少只要一张「头像·站姿图」和一张「宠物·站姿图」（或「桌面·场景图」），她就能出现。</p>
         <p className="her-faint">想找灵感：去 <a href="https://treapgogo.github.io/deepseek-whale-girl/" target="_blank" rel="noreferrer">鲸鱼娘开源资产库</a> 看看（社区资源，不是我们做的；每件作品的许可不一样，用之前先看清楚）。</p>
       </section>
 
       <section className="her-card">
-        <div className="her-row"><h2 style={{ flex: 1, margin: 0 }}>你的人物</h2>{who !== DEFAULT_WHO && <button className="her-btn small" onClick={() => save(DEFAULT_WHO)}>换回默认的鲸鱼娘</button>}</div>
-        <p className="her-muted">写一次，下面每条提示词里的人物设定都会换成它。派生的图只写动作和场景，外貌交给参考图，所以这段主要用在定妆照和三视图上。</p>
-        <textarea className="her-textarea" rows={4} value={who} onChange={e => save(e.target.value)} aria-label="你的人物设定" />
+        <div className="her-row">
+          <h2 style={{ flex: 1, margin: 0 }}>你的人物</h2>
+          <span className="her-seg" role="group" aria-label="画风">
+            {(['anime', 'real'] as GuideStyle[]).map(st => <button key={st} className={style === st ? 'on' : ''} aria-pressed={style === st} onClick={() => chooseStyle(st)}>{STYLE_LABEL[st]}</button>)}
+          </span>
+          {who !== DEFAULT_WHO[style] && <button className="her-btn small" onClick={() => save(DEFAULT_WHO[style])}>换回默认的鲸鱼娘（{STYLE_LABEL[style]}）</button>}
+        </div>
+        <p className="her-muted">默认是我们自己的鲸鱼娘，有二次元和真人（真人 Cosplay 摄影）两版，下面每条提示词跟着切换。写一次，每条提示词里的人物设定都会换成它；派生的图只写动作和场景，外貌交给参考图，所以这段主要用在定妆照和三视图上。</p>
+        <textarea className="her-textarea" rows={5} value={who} onChange={e => save(e.target.value)} aria-label="你的人物设定" />
+        <p className="her-faint"><b>每条有她的提示词都带着：</b>{MUST.replace('必须保留这三样：', '')}{who === DEFAULT_WHO[style] ? '' : '（换成你自己的人物后就不再加，按你的设定来）'}</p>
         <div className="her-setrow">
           <div><b>提示词前面加一句用途说明</b><span>「{purposeLine(who)}」：让生图、生视频的工具知道这是做什么用的。每条提示词后面都已经带上了尺寸（视频还有时长）。</span></div>
           <input type="checkbox" aria-label="提示词前面加一句用途说明" checked={purpose} onChange={e => choosePurpose(e.target.checked)} />
         </div>
         <div className="her-row">
-          <CopyButton text={guideMarkdown(who)} label="复制整份文档（Markdown）" primary={false} />
+          <CopyButton text={guideMarkdown(who === DEFAULT_WHO[style] ? undefined : who)} label="复制整份文档（Markdown）" primary={false} />
           <a className="her-btn small" href="https://github.com/AIcivilization/dsh-her/blob/main/docs/素材规格与提示词.md" target="_blank" rel="noreferrer">在网上看这份文档</a>
         </div>
       </section>
@@ -122,7 +148,7 @@ export function MaterialGuide({ cid, onLibrary, onSkin }: { cid: string; onLibra
       </div>
       <p className="her-muted her-guide-about">{current.about}</p>
 
-      {GUIDE.filter(item => item.group === group).map(item => <GuideCard key={item.id} item={item} who={who} purpose={purpose} onGo={item.group === 'skin' || item.group === 'intro' ? onSkin : onLibrary} />)}
+      {GUIDE.filter(item => item.group === group).map(item => <GuideCard key={item.id} item={item} who={who} style={style} purpose={purpose} onGo={item.group === 'skin' || item.group === 'intro' ? onSkin : onLibrary} />)}
 
       <section className="her-card">
         <h2>每一段视频都要遵守</h2>
@@ -134,8 +160,8 @@ export function MaterialGuide({ cid, onLibrary, onSkin }: { cid: string; onLibra
   )
 }
 
-function GuideCard({ item, who, purpose, onGo }: { item: GuideItem; who: string; purpose: boolean; onGo: () => void }) {
-  const prompt = promptFor(item, who, purpose)
+function GuideCard({ item, who, style, purpose, onGo }: { item: GuideItem; who: string; style: GuideStyle; purpose: boolean; onGo: () => void }) {
+  const prompt = promptFor(item, who, purpose, style)
   return (
     <section className="her-card her-guide-item">
       <div className="her-row her-guide-head">
