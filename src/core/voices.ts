@@ -88,6 +88,6 @@ export function mingSpeech(id: string, emotion: string | undefined, speed: numbe
 export const SERVICE_NAMES: Record<VoiceService, string> = {
   edge: '微软 Edge（免费，要联网）',
   cosyvoice: '阿里云百炼 CosyVoice（要 key，按字数付费）',
-  ming: '本机 Ming（离线、免费、能表达情绪；Mac、Windows、Linux 都能用，下载约 2 GB）',
+  ming: '本机 Ming（离线、免费、能表达情绪；Mac 和 Linux 能用，Windows 暂不开放；下载约 2 GB）',
   ext: '外接的语音服务（讯飞、OpenAI 兼容、GPT-SoVITS、别的插件）',
 }

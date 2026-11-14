@@ -479,7 +479,9 @@ export function VoicePicker({ state, apply, onSaved, saveLabel = '用这个声�
   const [error, setError] = useState<string>()
   const [playing, setPlaying] = useState<string>()
   // One service at a time (tabs), starting on the one she uses.
-  const [service, setService] = useState<VoiceService>(serviceOf(inUse.id))
+  /** 本机 Ming cannot run where dsh runs (Windows for now): its tab is grey. */
+  const mingOff = state.voice.ming.state === 'unsupported'
+  const [service, setService] = useState<VoiceService>(mingOff && serviceOf(inUse.id) === 'ming' ? 'edge' : serviceOf(inUse.id))
   const { status: speaking, error: speakingError } = state.voice.speaking
   const listen = async (which: string) => {
     setTrying(which)
@@ -503,7 +505,7 @@ export function VoicePicker({ state, apply, onSaved, saveLabel = '用这个声�
       {speaking === 'failed' && <p className="her-warn">她的声音出错了：{speakingError ?? '未知原因'}。{state.voice.speaking.service === 'ming' ? '' : '会自动重试。'}</p>}
       <div className="her-tabs her-subtabs">
         {(['edge', 'cosyvoice', 'ming'] as VoiceService[]).map(id => (
-          <button key={id} className={`her-tab ${service === id ? 'on' : ''}`} onClick={() => setService(id)}>
+          <button key={id} className={`her-tab ${service === id ? 'on' : ''}`} disabled={id === 'ming' && mingOff} title={id === 'ming' && mingOff ? state.voice.ming.error : undefined} onClick={() => setService(id)}>
             {SERVICE_SHORT[id]}{serviceOf(inUse.id) === id && <span className="her-badge her-badge-inline">在用</span>}
           </button>
         ))}

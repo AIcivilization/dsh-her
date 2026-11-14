@@ -166,3 +166,9 @@ audio.cpp 的流匹配固定 10 步，没有"步数"可调，所以 audio.cpp �
 - **CI**：GitHub Actions 的 Windows 和 Ubuntu 机器可以加一步"下载 CPU 包和模型、说一句"，但每次要下 1.8 GB，建议只在手动触发时跑，还没加。
 - **克隆在 Windows 上读 m4a**：走 ffmpeg，没在 Windows 上试过。
 - **`ming-gguf-1` Release**：把模型传上去以后，国内下载会快很多（现在先 404 再去 Hugging Face）。
+
+## 0.8.5：Windows 暂不开放
+
+audio.cpp 引擎已经合进 main，但还没在 Windows 上实测，所以在 Windows 上本机 Ming 先标成"暂时还不能用"：「声音」里 Ming 那一栏是灰的，大脑也不会去装。Mac（MLX，Intel Mac 用 audio.cpp）和 x64 的 Linux 照常。
+
+要在 Windows 上试：启动 DSH 之前设环境变量 `DSH_HER_MING_ENGINE=audiocpp`，Ming 那一栏就能用了。实测没问题后，把 `src/voice/ming.ts` 里 `mingEngine()` 的 Windows 那一行去掉即可。

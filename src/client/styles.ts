@@ -200,6 +200,7 @@ body[data-ds-dark-theme] .her-page{--her-ink:var(--her-bar-accent,#86b4ff);--her
 
 .her-tabs{display:inline-flex;gap:2px;padding:3px;margin-bottom:12px;border-radius:10px;background:${FIELD};flex-wrap:wrap}
 .her-tab{border:none;background:none;color:${MUTED};padding:5px 12px;border-radius:8px;cursor:pointer;font:inherit}
+.her-tab:disabled{opacity:.4;cursor:not-allowed}
 .her-tab:hover{color:${TEXT}}
 .her-tab.on{background:${LAYER1};color:${TEXT};font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.18)}
 .her-subtabs{margin:4px 0 8px}

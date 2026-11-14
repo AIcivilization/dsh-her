@@ -3,18 +3,21 @@ import assert from 'node:assert/strict'
 import { decodeWav, encodeWav } from '../src/core/index.ts'
 import { AUDIOCPP_BUILDS, AUDIOCPP_VERSION, MING_GGUF } from '../src/voice/audiocpp-release.ts'
 import { audiocppInfo, cpuThreads, hasNvidia, ming3Instruction, pickFastest, replyError, serverConfig, SLOW_MS, speechBody } from '../src/voice/ming-audiocpp.ts'
-import { mingEngine, mingUnsupported } from '../src/voice/ming.ts'
+import { MING_WINDOWS_NOT_YET, mingEngine, mingUnsupported } from '../src/voice/ming.ts'
 
 test('which program runs Ming: MLX on Apple chips with macOS 14, audio.cpp on other x64 computers', () => {
   assert.deepEqual(mingEngine('darwin', 'arm64', '25.2.0', undefined), { engine: 'mlx' })
   assert.deepEqual(mingEngine('darwin', 'arm64', '25.2.0', 'audiocpp'), { engine: 'audiocpp' })
   assert.deepEqual(mingEngine('darwin', 'arm64', '22.6.0', undefined), { engine: 'audiocpp' })
   assert.deepEqual(mingEngine('darwin', 'x64', '25.2.0', undefined), { engine: 'audiocpp' })
-  assert.deepEqual(mingEngine('win32', 'x64', '10.0.22631', undefined), { engine: 'audiocpp' })
+  // Windows: not offered yet, unless asked for on purpose (to try it).
+  assert.deepEqual(mingEngine('win32', 'x64', '10.0.22631', undefined), { unsupported: MING_WINDOWS_NOT_YET })
+  assert.deepEqual(mingEngine('win32', 'x64', '10.0.22631', 'audiocpp'), { engine: 'audiocpp' })
+  assert.deepEqual(mingEngine('win32', 'arm64', '10.0.22631', 'audiocpp'), { unsupported: MING_WINDOWS_NOT_YET })
   assert.deepEqual(mingEngine('linux', 'x64', '6.8.0', undefined), { engine: 'audiocpp' })
-  assert.match(mingUnsupported('win32', 'arm64', '10.0')!, /ARM/)
+  assert.equal(mingUnsupported('win32', 'arm64', '10.0'), MING_WINDOWS_NOT_YET)
   assert.match(mingUnsupported('linux', 'arm64', '6.8.0')!, /ARM/)
-  assert.equal(mingUnsupported('win32', 'x64', '10.0'), undefined)
+  assert.equal(mingUnsupported('win32', 'x64', '10.0'), MING_WINDOWS_NOT_YET)
 })
 
 test('every build is pinned: this version, a size and a SHA-256; one main build per computer', () => {

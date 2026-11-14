@@ -46,10 +46,14 @@ export interface MingStatus {
 const SPEAK_TIMEOUT_MS = 90_000
 const CRASH_WINDOW_MS = 5 * 60_000
 
+/** On Windows it is not offered yet (not tried there); `DSH_HER_MING_ENGINE=audiocpp` turns it on for trying it. */
+export const MING_WINDOWS_NOT_YET = '本机 Ming 在 Windows 上暂时还不能用（还在测试）。现在可以用微软 Edge 的声音，或者在「外接语音」里接你自己电脑上的 GPT-SoVITS。'
+
 /** Which program runs Ming on a computer, or why none can. */
 export function mingEngine(platform: string = process.platform, arch: string = process.arch, darwin = release(), override = process.env.DSH_HER_MING_ENGINE): { engine: 'mlx' | 'audiocpp' } | { unsupported: string } {
   const audiocpp = AUDIOCPP_BUILDS[`${platform}-${arch}`] !== undefined
   if (override === 'audiocpp' && audiocpp) return { engine: 'audiocpp' }
+  if (platform === 'win32') return { unsupported: MING_WINDOWS_NOT_YET }
   // MLX needs macOS 14 (Darwin 23); measured on an M1 Pro it is as fast as audio.cpp's Metal (docs/Ming跨平台.md §6).
   if (platform === 'darwin' && arch === 'arm64' && Number.parseInt(darwin, 10) >= 23) return { engine: 'mlx' }
   if (audiocpp) return { engine: 'audiocpp' }
