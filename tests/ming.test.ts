@@ -7,11 +7,12 @@ import { wavFromPcm16 } from '../src/core/index.ts'
 import { defaultIdleMinutes, mingUnsupported } from '../src/voice/ming.ts'
 import { OwnVoices, trimSilence } from '../src/voice/ming-voices.ts'
 
-test('Ming runs on Apple chips with macOS 14 or later only', () => {
+test('Ming runs on Macs and on x64 Windows and Linux', () => {
   assert.equal(mingUnsupported('darwin', 'arm64', '25.2.0'), undefined)
-  assert.match(mingUnsupported('darwin', 'arm64', '22.6.0')!, /macOS 14/)
-  assert.match(mingUnsupported('darwin', 'x64', '25.2.0')!, /Apple 芯片/)
-  assert.match(mingUnsupported('win32', 'x64', '10.0')!, /Apple 芯片/)
+  assert.equal(mingUnsupported('darwin', 'arm64', '22.6.0'), undefined)
+  assert.equal(mingUnsupported('darwin', 'x64', '25.2.0'), undefined)
+  assert.equal(mingUnsupported('win32', 'x64', '10.0'), undefined)
+  assert.match(mingUnsupported('win32', 'arm64', '10.0')!, /暂不支持/)
   assert.equal(defaultIdleMinutes(16 * 2 ** 30), 10)
   assert.equal(defaultIdleMinutes(32 * 2 ** 30), 30)
 })

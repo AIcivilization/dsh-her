@@ -40,28 +40,41 @@ function wavHeader(dataBytes: number, sampleRate: number): Uint8Array {
   return bytes
 }
 
-/** Decode a PCM16 mono WAV (as produced by encodeWav or a mic capture). */
+/**
+ * Decode a WAV of 16-bit or 32-bit float samples (encodeWav's, a mic
+ * capture, a local voice engine's); the first channel. A data chunk whose
+ * size was left unfilled (a stream) runs to the end of the file.
+ */
 export function decodeWav(bytes: Uint8Array): { samples: Float32Array; sampleRate: number } {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const tag = (offset: number) => String.fromCharCode(...bytes.subarray(offset, offset + 4))
-  if (tag(0) !== 'RIFF' || tag(8) !== 'WAVE') throw new Error('not a WAV file')
+  if (bytes.byteLength < 12 || tag(0) !== 'RIFF' || tag(8) !== 'WAVE') throw new Error('not a WAV file')
   let offset = 12
   let sampleRate = 0
   let channels = 1
   let bits = 16
+  let format = 1
   while (offset + 8 <= bytes.byteLength) {
     const id = tag(offset)
     const size = view.getUint32(offset + 4, true)
     const body = offset + 8
     if (id === 'fmt ') {
+      format = view.getUint16(body, true)
       channels = view.getUint16(body + 2, true)
       sampleRate = view.getUint32(body + 4, true)
       bits = view.getUint16(body + 14, true)
+      // WAVE_FORMAT_EXTENSIBLE: the real format is the sub-format GUID's first two bytes.
+      if (format === 0xfffe && size >= 26) format = view.getUint16(body + 24, true)
     } else if (id === 'data') {
-      if (bits !== 16) throw new Error(`unsupported WAV: ${bits}-bit`)
-      const frames = Math.floor(size / 2 / channels)
+      const float = format === 3 && bits === 32
+      if (!float && !(format === 1 && bits === 16)) throw new Error(`unsupported WAV: format ${format}, ${bits}-bit`)
+      const width = bits / 8
+      const frames = Math.floor(Math.min(size, bytes.byteLength - body) / width / Math.max(1, channels))
       const samples = new Float32Array(frames)
-      for (let i = 0; i < frames; i++) samples[i] = view.getInt16(body + i * 2 * channels, true) / 0x8000
+      for (let i = 0; i < frames; i++) {
+        const at = body + i * width * channels
+        samples[i] = float ? view.getFloat32(at, true) : view.getInt16(at, true) / 0x8000
+      }
       return { samples, sampleRate }
     }
     offset = body + size + (size % 2)

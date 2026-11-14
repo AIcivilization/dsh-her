@@ -1874,6 +1874,18 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     mingRestart: async () => {
       await ming?.restart()
     },
+    mingAddCuda: () => {
+      if (ming === undefined) throw new Error('声音还没准备好')
+      void ming.addCuda().catch(error => ctx.logger.warn(`dsh-her: ${(error as Error).message}`))
+    },
+    mingRecheck: () => {
+      if (ming === undefined) throw new Error('声音还没准备好')
+      void ming.recheck().catch(error => ctx.logger.warn(`dsh-her: ${(error as Error).message}`))
+    },
+    mingBackend: (build, backend) => {
+      if (backend !== 'metal' && backend !== 'vulkan' && backend !== 'cuda' && backend !== 'cpu') throw new Error('没有这种方式')
+      ming?.chooseBackend(build, backend)
+    },
     mingSettings: patch => {
       const next = ownVoices.saveSettings(patch)
       ming?.setIdleMinutes(next.idleMinutes ?? defaultIdleMinutes())
@@ -1891,7 +1903,9 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       return drafts
     },
     mingClone: async (audio, name) => {
-      const recording = await prepareRecording(Buffer.from(audio, 'base64'), name)
+      // Off macOS the recording is read by ffmpeg (the desktop body's, one on this computer, or a checked download).
+      if (process.platform !== 'darwin' && !await findFfmpeg(paths.root)) await ensureFfmpeg(paths.root, () => {})
+      const recording = await prepareRecording(Buffer.from(audio, 'base64'), name, process.platform === 'darwin' ? undefined : ffmpegCommand())
       // What it says, to start from (Ming needs the words); you correct it on the page.
       const heard = await voice?.recognize(recording.pcm16k, 16_000).catch(() => undefined)
       const id = ownVoices.addDraft(recording.wav, { kind: 'clone', text: heard?.text ?? '' })

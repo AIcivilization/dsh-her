@@ -141,11 +141,24 @@ export class OwnVoices {
 }
 
 /**
- * A recording you add, made ready to clone: converted by macOS's afconvert
- * (wav, m4a from Voice Memos, mp3, aiff …) to 44.1 kHz mono, quiet start and
- * end cut off, at most CLONE_MAX_S. Also at 16 kHz, to recognize what it says.
+ * To 16-bit mono WAV at `rate`: macOS's own afconvert, elsewhere ffmpeg (the
+ * desktop body brings one; `ffmpeg` is the one to run).
  */
-export async function prepareRecording(bytes: Uint8Array, name: string): Promise<{ wav: Uint8Array; pcm16k: Uint8Array; seconds: number }> {
+async function toWav(input: string, output: string, rate: number, ffmpeg: string | undefined): Promise<void> {
+  if (process.platform === 'darwin' && ffmpeg === undefined) {
+    await run('afconvert', ['-f', 'WAVE', '-d', `LEI16@${rate}`, '-c', '1', input, output], { timeout: 60_000 })
+    return
+  }
+  await run(ffmpeg ?? 'ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', input, '-vn', '-ac', '1', '-ar', String(rate), '-c:a', 'pcm_s16le', '-f', 'wav', output], { timeout: 60_000 })
+}
+
+/**
+ * A recording you add, made ready to clone: converted (wav, m4a from Voice
+ * Memos, mp3, aiff …) to 44.1 kHz mono, quiet start and end cut off, at most
+ * CLONE_MAX_S. Also at 16 kHz, to recognize what it says. `ffmpeg`: the one
+ * to use off macOS.
+ */
+export async function prepareRecording(bytes: Uint8Array, name: string, ffmpeg?: string): Promise<{ wav: Uint8Array; pcm16k: Uint8Array; seconds: number }> {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-her-clone-'))
   try {
     const ext = /\.([a-z0-9]{1,5})$/i.exec(name)?.[1] ?? 'wav'
@@ -153,7 +166,7 @@ export async function prepareRecording(bytes: Uint8Array, name: string): Promise
     await writeFile(input, bytes)
     const full = join(dir, 'full.wav')
     try {
-      await run('afconvert', ['-f', 'WAVE', '-d', 'LEI16@44100', '-c', '1', input, full], { timeout: 60_000 })
+      await toWav(input, full, 44_100, ffmpeg)
     } catch {
       throw new Error('读不了这个录音文件（试试 wav、m4a 或 mp3）')
     }
@@ -166,7 +179,7 @@ export async function prepareRecording(bytes: Uint8Array, name: string): Promise
     const trimmed = join(dir, 'trimmed.wav')
     await writeFile(trimmed, wav)
     const small = join(dir, 'small.wav')
-    await run('afconvert', ['-f', 'WAVE', '-d', 'LEI16@16000', '-c', '1', trimmed, small], { timeout: 60_000 })
+    await toWav(trimmed, small, 16_000, ffmpeg)
     const pcm16 = pcmOf(new Uint8Array(await readFile(small)))
     return { wav, pcm16k: new Uint8Array(pcm16.buffer, pcm16.byteOffset, pcm16.byteLength), seconds: clip.length / 44_100 }
   } finally {

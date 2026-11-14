@@ -227,6 +227,10 @@ export interface ApiRuntime {
   mingUninstall(): void
   mingRestart(): Promise<void>
   mingSettings(patch: Partial<MingSettings>): void
+  /** audio.cpp's Ming: download the CUDA build and measure it; measure every backend again; use one of them. */
+  mingAddCuda(): void
+  mingRecheck(): void
+  mingBackend(build: string, backend: string): void
   /** Three takes of a voice from its description, each kept as a draft to listen to. */
   mingDesign(description: string): Promise<Array<{ id: string; audio: string; durationMs: number }>>
   /** A recording to clone (base64, its file name for the format): a draft, with what it says as recognized. */
@@ -500,6 +504,18 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
     },
     '/voice/ming/restart': async () => {
       await rt.mingRestart()
+      return withState()
+    },
+    '/voice/ming/cuda': async () => {
+      rt.mingAddCuda()
+      return withState()
+    },
+    '/voice/ming/recheck': async () => {
+      rt.mingRecheck()
+      return withState()
+    },
+    '/voice/ming/backend': async body => {
+      rt.mingBackend(str(body.build, '程序'), str(body.backend, '方式'))
       return withState()
     },
     '/voice/ming/settings': async body => {
