@@ -145,7 +145,7 @@ MLX 版没有移植文字规范化，实测"2个小时"念成了"二个小时"�
 
 ## 10. 不做的
 
-- Windows、Intel Mac：以后看 audio.cpp 版（不需要 Python，有 NVIDIA 显卡更快）。
+- Windows、Intel Mac：已经用 audio.cpp 版做了（2026-11-13），见 [Ming跨平台.md](Ming跨平台.md)。
 - 真正的边合成边播放（流式）：Ming 是整句合成，做不到；第一句拆开已经够用。
 - 识别仍然用 SenseVoice，Ming 只负责说话。
 

@@ -96,7 +96,7 @@ test('a sentence as audio.cpp asks for it: built-in voice, own voice, design', (
 
   const design = speechBody({ text: '你好。', design: '温柔的女声', steps: 10, seed: 22 })
   assert.equal(design.seed, 22)
-  assert.deepEqual(design.options, { language: 'zh', template_name: 'voice_design', instruct: '温柔的女声', zero_speaker_embedding: true })
+  assert.deepEqual(design.options, { language: 'zh', template_name: 'freeform', instruct: '温柔的女声', zero_speaker_embedding: true })
 
   assert.throws(() => speechBody({ text: '你好。', steps: 10 }), /声音/)
 })

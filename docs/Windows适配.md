@@ -15,7 +15,7 @@
 | `--smoke` | 身体加了一个检查开关：正常启动，窗口加载好就打印一行并退出（失败退出码 1） |
 | 自动检查（`.github/workflows/ci.yml`） | 每次推送：插件的类型检查和单元测试在 Linux、Windows、macOS 上各跑一遍；检查 Windows 自带的 tar 能不能解 `.tar.bz2`（语音识别模型是这个格式）；在 Windows 上打身体的包、解压、`--smoke` 启动一次；包作为构建产物保留 |
 
-**本机 Ming** 在 Windows 上还不能用（只支持 Apple 芯片），设置里会写明原因；要等 [Ming跨平台.md](Ming跨平台.md) 里的 audio.cpp 版。Edge 和百炼的声音不受影响。
+**本机 Ming** 在 x64 的 Windows 上用 audio.cpp 版（见 [Ming跨平台.md](Ming跨平台.md)）：装好后自动比较显卡（Vulkan）和 CPU 哪个快，有 NVIDIA 显卡还可以再下 CUDA 版试试。ARM 的 Windows 暂不支持。克隆声音时读录音用 ffmpeg（桌面版的她自带一个）。
 
 ## 网络：GitHub 连不上时（0.3.1）
 

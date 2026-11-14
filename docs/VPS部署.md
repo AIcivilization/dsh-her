@@ -73,7 +73,7 @@ sudo apt install ffmpeg
 |---|---|
 | Edge | 能。第一次用时自动装好，Python 或 venv 不全也没关系（会改用 uv）。VPS 的 IP 有时会被微软限制，不出声时换百炼试试 |
 | 百炼 | 能，需要 API 密钥 |
-| 本机 Ming | 暂时不能（目前只支持 Apple 芯片的 Mac；VPS 没有显卡也会很慢） |
+| 本机 Ming | x64 的 Linux 能装（audio.cpp 版，见 [Ming跨平台.md](Ming跨平台.md)），但 VPS 没有显卡，只能用 CPU，多半很慢；装好后设置页会显示一句要几秒，太慢会建议继续用 Edge |
 
 浏览器不让网页自己出声：第一次要在页面上点一下，会看到"🔊 点一下开声音"。
 

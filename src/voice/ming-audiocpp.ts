@@ -15,7 +15,8 @@
  * The request mapping keeps what MLX does (python/ming_worker.py): built-in
  * voices are an IP caption over a zero speaker embedding, with the mood and
  * pace in the same caption; your own voices clone their recording, the mood
- * as an instruction; a design is the voice-design template. audio.cpp's flow
+ * as an instruction; a design is its description as the instruction, over a
+ * zero speaker embedding. audio.cpp's flow
  * takes a fixed 10 steps, so "速度优先" makes no difference here.
  */
 
@@ -105,7 +106,9 @@ export function speechBody(request: MingRequest, model = MODEL_ID): Record<strin
   if (request.seed !== undefined) body.seed = request.seed
   const mood = { ...(request.emotion === undefined ? {} : { emotion: request.emotion }), ...(request.speed === undefined ? {} : { speed: request.speed }) }
   if (request.design !== undefined) {
-    options.template_name = 'voice_design'
+    // The description as it is, over a zero speaker (what MLX does). audio.cpp's voice_design
+    // template wraps it in a caption and then speaks to the end of its context: 26 s, not 7.
+    options.template_name = 'freeform'
     options.instruct = request.design
     options.zero_speaker_embedding = true
   } else if (request.ref !== undefined) {
@@ -339,7 +342,7 @@ export class AudioCppEngine implements MingEngine {
     return existsSync(join(dir, '.verified')) ? serverIn(dir) : undefined
   }
 
-  /** Every backend of a build: load, warm up, time one sentence. */
+  /** Every backend of a build: load, warm up, time one sentence (twice). */
   private async check(build: AudioCppBuild, step: MingStep): Promise<CheckResult[]> {
     const results: CheckResult[] = []
     for (const backend of build.backends) {
@@ -347,8 +350,10 @@ export class AudioCppEngine implements MingEngine {
       try {
         await this.launch(build.id, backend)
         await this.speak(WARM, LOAD_TIMEOUT_MS)
-        const said = await this.speak({ text: CHECK_TEXT, voice: '灵小芸', steps: 10 }, CHECK_TIMEOUT_MS)
-        results.push({ build: build.id, backend, ms: said.ms })
+        // The first sentences after loading are still slow (measured: 2.3 s, then 1.5 s on a CPU): the better of two.
+        const first = await this.speak({ text: CHECK_TEXT, voice: '灵小芸', steps: 10 }, CHECK_TIMEOUT_MS)
+        const second = await this.speak({ text: CHECK_TEXT, voice: '灵小芸', steps: 10 }, CHECK_TIMEOUT_MS)
+        results.push({ build: build.id, backend, ms: Math.min(first.ms, second.ms) })
       } catch (error) {
         results.push({ build: build.id, backend, error: (error as Error).message.slice(0, 200) })
       } finally {
