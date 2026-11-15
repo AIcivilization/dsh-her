@@ -12,7 +12,8 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "allowImportingTsExtensions": true,
-    "noEmit": true
+    "noEmit": true,
+    "paths": { "ws": ["./node_modules/@types/ws", "../node_modules/@types/ws"] }
   },
   "include": ["main", "renderer", "shared", "../src/protocol"]
 }

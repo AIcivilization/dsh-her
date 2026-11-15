@@ -37,6 +37,7 @@ import { listPacks, loadSettings, saveSettings, type BodySettings } from '../../
 import { iconPixels } from '../shared/icon.ts'
 import { importLook } from '../../src/pack/import-look.ts'
 import { attachToWallpaper } from './wallpaper-win.ts'
+import { APP_NAME, designArg, insideZip, STANDALONE, Standalone, standaloneHome, translocated } from './standalone.ts'
 
 /** ⌃⌥Space / Ctrl+Alt+Space: talk to her. Alt+Space alone is taken by Windows' window menu. */
 const TALK_SHORTCUT = 'Control+Alt+Space'
@@ -58,7 +59,17 @@ function arg(name: string): string | undefined {
 }
 
 const expand = (p: string) => p.replace(/^~(?=$|[\\/])/, homedir())
-const home = arg('home') ?? process.env.DSH_HER_HOME ?? '~/.dsh-her'
+/**
+ * 真人桌宠 (main/standalone.ts): an app of its own name, with its own data
+ * folder and its own single-instance lock, and never a DSH to connect to
+ * (whatever started it may have DSH's address in its environment).
+ */
+if (STANDALONE) {
+  app.setName(APP_NAME)
+  delete process.env.DSH_HER_URL
+  delete process.env.DSH_HER_TOKEN
+}
+const home = arg('home') ?? (STANDALONE ? standaloneHome() : process.env.DSH_HER_HOME ?? '~/.dsh-her')
 const packsDir = join(expand(home), 'packs')
 let settings: BodySettings = loadSettings(expand(home))
 /** The pack chosen on the "她" page wins; `--pack` is only the first default. */
@@ -123,6 +134,10 @@ let focus = false
 let off = settings.off === true
 /** When either of you last said something: no scene changes mid-conversation. */
 let lastTalkAt = 0
+/** 真人桌宠 before any 设计包 came in: there is nobody to show. */
+let nobody = false
+/** 真人桌宠: the brain inside this program and its settings window. */
+let pet: Standalone | undefined
 let win: BrowserWindow | undefined
 let tray: Tray | undefined
 /**
@@ -189,7 +204,7 @@ function floatingWindow(her: { width: number; height: number }, place: ReturnTyp
 
 /** The look's desk pet for the scene she is in, when both places are on and the wallpaper shows the scene. */
 function petPackId(): string | undefined {
-  if (off || places === undefined || !places.wallpaper || !places.overlay || look === undefined || mode !== 'wallpaper') return undefined
+  if (off || nobody || places === undefined || !places.wallpaper || !places.overlay || look === undefined || mode !== 'wallpaper') return undefined
   const desk = lookPack(look, 'overlay')
   return desk === lookPack(look, 'wallpaper') ? undefined : desk
 }
@@ -276,7 +291,7 @@ function setOff(next: boolean, tell: boolean): void {
 /** A fresh window for her (after a change of mode, pack or scene); none while she is switched off. */
 function replaceWindow(): void {
   const old = win
-  win = off ? undefined : createWindow()
+  win = off || nobody ? undefined : createWindow()
   old?.destroy()
   syncPet()
 }
@@ -593,7 +608,33 @@ function statusLabel(): string {
   }
 }
 
+/** 真人桌宠's menu: who she is, on or off, where she shows; nothing about talking or DSH. */
+function petMenu(): Electron.MenuItemConstructorOptions[] {
+  const view = pet!.view()
+  const last: Electron.MenuItemConstructorOptions[] = [
+    { type: 'separator' },
+    { label: '设置…', click: () => openSettings() },
+    { label: '退出', click: () => app.quit() },
+  ]
+  if (view.empty) return [{ label: '还没有人物', enabled: false }, { label: '装一个设计包…', click: () => openSettings() }, ...last]
+  if (off) return [{ label: `${view.character!.name}（关着）`, enabled: false }, { label: '叫她出来', click: () => setOff(false, true) }, ...last]
+  return [
+    { label: view.character!.name, enabled: false },
+    { label: '关掉她', click: () => setOff(true, true) },
+    ...(look === undefined ? [] : [sceneMenu(look)]),
+    { type: 'separator' },
+    { label: '浮在桌面上', type: 'checkbox', checked: shownPlaces().overlay && mode !== 'window', click: box => setPlaces({ ...shownPlaces(), overlay: box.checked }, true) },
+    { label: '住在壁纸里', type: 'checkbox', checked: shownPlaces().wallpaper, click: box => setPlaces({ ...shownPlaces(), wallpaper: box.checked }, true) },
+    {
+      label: `大小：${Math.round(petScale() * 100)}%`,
+      submenu: ([['小', 0.7], ['中', 1], ['大', 1.3], ['特大', 1.6]] as const).map(([label, value]) => ({ label, type: 'radio' as const, checked: Math.abs(petScale() - value) < 0.05, click: () => setPetScale(value, true) })),
+    },
+    ...last,
+  ]
+}
+
 function menuTemplate(): Electron.MenuItemConstructorOptions[] {
+  if (pet !== undefined) return petMenu()
   const item = (label: string, value: Mode): Electron.MenuItemConstructorOptions =>
     ({ label, type: 'radio', checked: mode === value, click: () => switchMode(value) })
   if (off) {
@@ -659,6 +700,13 @@ function sceneMenu(l: Look): Electron.MenuItemConstructorOptions {
 function refreshTray(): void {
   if (tray === undefined) return
   tray.setContextMenu(Menu.buildFromTemplate(menuTemplate()))
+  if (pet !== undefined) {
+    const name = pet.view().character?.name
+    if (process.platform === 'darwin') tray.setTitle(name === undefined ? '桌宠' : off ? `${[...name].slice(0, 4).join('')}·关` : [...name].slice(0, 4).join(''))
+    tray.setToolTip(name === undefined ? APP_NAME : `${APP_NAME} · ${name}`)
+    pet.refresh()
+    return
+  }
   if (process.platform === 'darwin') tray.setTitle(off ? '她·关' : status.status === 'connected' ? '她' : '她·睡')
   tray.setToolTip(`dsh-her · ${statusLabel()}`)
 }
@@ -691,7 +739,8 @@ function barBounds(): Electron.Rectangle {
  * app: a window you called is allowed there; her own figure is not.
  */
 function openBar(): void {
-  if (off) return
+  // 真人桌宠 without a brain has nobody to talk to.
+  if (off || STANDALONE) return
   if (process.platform === 'darwin') app.focus({ steal: true })
   if (barWindow !== undefined && !barWindow.isDestroyed()) {
     barWindow.setBounds(barBounds())
@@ -791,6 +840,10 @@ function stopHoldHook(): void {
  * which page was asked for, dsh comes to the front, and its page shows it.
  */
 function openSettings(): void {
+  if (pet !== undefined) {
+    pet.openSettings()
+    return
+  }
   link?.send({ t: 'settings.open' })
   openDsh()
 }
@@ -868,14 +921,55 @@ function trayIcon(): Electron.NativeImage {
  */
 const SMOKE = process.argv.includes('--smoke')
 
+/** 真人桌宠: a 设计包 opened before the app was ready (macOS sends the file, Windows passes its path). */
+let designToOpen: string | undefined = STANDALONE ? designArg(process.argv) : undefined
+function openDesign(path: string): void {
+  if (pet === undefined) designToOpen = path
+  else pet.openDesign(path)
+}
+if (STANDALONE) {
+  app.on('open-file', (event, path) => {
+    event.preventDefault()
+    openDesign(path)
+  })
+}
+
 if (!app.requestSingleInstanceLock()) {
   app.quit()
+} else if (STANDALONE && app.isPackaged && insideZip()) {
+  // Windows shows a zip as a folder: a double click in there runs only this one file, out of Temp.
+  app.whenReady().then(() => {
+    dialog.showMessageBoxSync({ type: 'info', title: APP_NAME, message: '请先把压缩包解压出来，再打开', detail: `现在是在压缩包里直接打开的，这样运行不了。\n在压缩包上点右键 →"全部解压缩"，再打开解压出来的文件夹里的 ${APP_NAME}。`, buttons: ['好'] })
+    app.quit()
+  })
 } else {
-  app.on('second-instance', () => showInput())
+  app.on('second-instance', (_event, argv) => {
+    if (pet === undefined) {
+      showInput()
+      return
+    }
+    // 真人桌宠 started again: a 设计包 double-clicked, or just asked for.
+    const design = designArg(argv)
+    if (design !== undefined) pet.openDesign(design)
+    else pet.openSettings()
+  })
   app.whenReady().then(async () => {
     if (process.platform === 'darwin') app.dock?.hide()
     session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => callback(permission === 'media'))
-    if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('microphone') !== 'granted') {
+    if (STANDALONE) {
+      // Her brain is in here. What she wears is written before her window looks for it.
+      pet = new Standalone(expand(home), {
+        places: () => shownPlaces(),
+        setPlaces: next => setPlaces(next, true),
+        petScale: () => petScale(),
+        setPetScale: next => setPetScale(next, true),
+        changed: () => refreshTray(),
+      })
+      await pet.start()
+      nobody = pet.view().empty
+      looks = listLooks(expand(home), packsDir)
+      look = settings.look === undefined ? undefined : looks.find(l => l.id === settings.look)
+    } else if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('microphone') !== 'granted') {
       await systemPreferences.askForMediaAccess('microphone').catch(() => false)
     }
     // macOS shows "她" as the tray title; Windows and Linux need a picture.
@@ -890,7 +984,7 @@ if (!app.requestSingleInstanceLock()) {
     } else {
       pack = loadOrNothing(packPath, screenAspect())
     }
-    win = off && !SMOKE ? undefined : createWindow()
+    win = (off || nobody) && !SMOKE ? undefined : createWindow()
     if (!SMOKE) syncPet()
     if (SMOKE && win !== undefined) {
       const timer = setTimeout(() => app.exit(1), 60_000)
@@ -900,9 +994,17 @@ if (!app.requestSingleInstanceLock()) {
         setTimeout(() => app.exit(0), 1500)
       })
     }
-    globalShortcut.register(TALK_SHORTCUT, talk)
-    globalShortcut.register(BAR_SHORTCUT, openBar)
-    if (settings.holdKey === true) startHoldHook()
+    if (pet === undefined) {
+      globalShortcut.register(TALK_SHORTCUT, talk)
+      globalShortcut.register(BAR_SHORTCUT, openBar)
+      if (settings.holdKey === true) startHoldHook()
+    } else if (!SMOKE) {
+      // Nobody yet, or a 设计包 was what started the app: the window to put her in.
+      if (designToOpen !== undefined) pet.openDesign(designToOpen)
+      else if (nobody) pet.openSettings()
+      designToOpen = undefined
+      if (translocated()) void dialog.showMessageBox({ type: 'info', title: APP_NAME, message: `请把「${APP_NAME}」拖进"应用程序"文件夹`, detail: '现在是从下载的地方直接打开的。先退出，把它拖进"应用程序"，再从那里打开；不然下次可能找不到她。', buttons: ['知道了'] })
+    }
     setInterval(lookTick, 60_000)
     setInterval(reportPresence, PRESENCE_EVERY_MS)
     powerMonitor.on('lock-screen', reportPresence)
@@ -926,6 +1028,11 @@ if (!app.requestSingleInstanceLock()) {
       onMessage: (message: BrainMessage, audio?: Uint8Array) => {
         if (message.t === 'welcome') {
           cid = message.characters[0]?.cid
+          // 真人桌宠: she came in (a 设计包 was put in), or there is nobody any more.
+          if (pet !== undefined && nobody !== (cid === undefined)) {
+            nobody = cid === undefined
+            replaceWindow()
+          }
           micMode = message.config.mic
           focus = message.config.focus === true
           setOff(message.config.off === true, false)
@@ -1007,8 +1114,10 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll()
   stopHoldHook()
   link?.stop()
+  void pet?.stop()
 })
 // Closing her window ends the program, unless she was switched off: then only the tray stays, to call her back.
 app.on('window-all-closed', () => {
-  if (!off) app.quit()
+  // 真人桌宠 stays in the tray: its settings window closes, she may not be there yet, a new welcome replaces her window.
+  if (!off && !STANDALONE) app.quit()
 })
