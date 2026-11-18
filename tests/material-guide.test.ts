@@ -79,10 +79,10 @@ test('five templates; the whale girls keep the three things, the girlfriend and 
   // No maid outfit in ours.
   for (const style of GUIDE_STYLES) assert.ok(!/女仆|围裙|蕾丝头饰|玛丽珍/.test(DEFAULT_WHO[style]), style)
   // The three whale-girl descriptions name the three, in their own words.
-  for (const who of [DEFAULT_WHO.anime, DEFAULT_WHO.real, DEFAULT_WHO.chibi]) assert.ok(/鲸鱼尾巴(造型亚克力)?发卡/.test(who) && who.includes('DeepSeek') && /鲸鱼尾巴/.test(who))
+  for (const who of [DEFAULT_WHO.anime, DEFAULT_WHO.real, DEFAULT_WHO.chibi]) assert.ok(who.includes('鲸鱼尾巴发饰') && who.includes('DeepSeek') && /(腰后|身后)[^。]*鲸鱼尾巴/.test(who))
   const real = promptFor(GUIDE.find(i => i.id === 'base-portrait')!, DEFAULT_WHO.real, false, 'real')
   assert.ok(real.startsWith('写实真人摄影，商业级Cosplay角色设定图，展示一位身材高挑修长的成年亚洲女性coser，扮演蓝色鲸鱼娘'))
-  assert.ok(real.includes('写实摄影') && !real.includes('二次元'))
+  assert.ok(real.includes('写实真人') && real.includes('九头身') && !real.includes('二次元'))
   // The small her on the chat box is chibi and stands; she walks, flips and rolls.
   for (const id of ['avatar-walk', 'avatar-flip', 'avatar-roll']) assert.ok(GUIDE.some(i => i.id === id), id)
   assert.match(promptFor(GUIDE.find(i => i.id === 'avatar-still')!, DEFAULT_WHO.anime), /Q 版小人[\s\S]*站着/)
