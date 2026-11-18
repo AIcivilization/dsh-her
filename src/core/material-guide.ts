@@ -9,33 +9,176 @@
  * the same person everywhere.
  */
 
-/** Two looks of the same her: drawn, or a real cosplayer photographed. */
-export type GuideStyle = 'anime' | 'real'
+/**
+ * The five templates we start from: our whale girl three ways (drawn, a real
+ * cosplayer photographed, chibi), and a real girlfriend and boyfriend. Each
+ * has its own character, how it is drawn, its own scenes and its own opening.
+ */
+export type GuideStyle = 'anime' | 'real' | 'chibi' | 'gf' | 'bf'
+
+export const GUIDE_STYLES: GuideStyle[] = ['anime', 'real', 'chibi', 'gf', 'bf']
+
+interface Template {
+  label: string
+  /** The character, as detailed as a 定妆照 needs. */
+  who: string
+  /** How every picture is drawn, said once per prompt. */
+  look: string
+  /** The small self standing on the chat box. */
+  chibi: string
+  /** Our whale girl: the three must-haves, and her tail in every clip. */
+  whale: boolean
+  /** 他, not 她. */
+  he: boolean
+  purpose: string
+  /** Where the desktop scenes are, and how they move. */
+  scene: Record<'窗边' | '窗外' | '远处' | '窗外动' | '夜景' | '夜景动' | '色调' | '皮肤底', string>
+  /** The opening clip: how they come on. */
+  opening: string
+}
+
+const DRAWN_LOOK = '二次元动画风格，线条干净，色块清晰，高细节。'
+const REAL_LOOK = '写实摄影，真实皮肤和布料质感，柔和自然光，高清，不要插画感。'
+const DRAWN_CHIBI = 'Q 版小人，大约两头身，大头小身子，圆润可爱'
+const REAL_CHIBI = 'Q 版树脂手办（黏土人质感），大约两头身，大头小身子，真实微距摄影'
+
+const SEA: Template['scene'] = {
+  窗边: '靠海的窗边',
+  窗外: '白天平静的海面和几朵云',
+  远处: '海',
+  窗外动: '窗外的海面有细小的波光，云非常缓慢地移动',
+  夜景: '星空和月光下的海面',
+  夜景动: '星星微微闪烁，月光下的海面有缓慢的波光',
+  色调: '以海蓝和白为主',
+  皮肤底: '平静的浅海水面俯视图，极淡的水波纹和几缕光斑，颜色是很浅的海蓝到白色的柔和渐变',
+}
+
+const WHALE_PURPOSE = '这是为deepseek-harness设计鲸鱼娘的角色之一，要求：'
 
 /**
- * Our own whale girl (original, adult), in the two styles. The three things
- * every picture of her keeps are in both: the whale-tail hair accessory on
+ * Our whale girl (original, adult; no maid outfit). The three things every
+ * picture of her keeps are in each version: the whale-tail hair accessory on
  * top of her head, the DeepSeek whale logo on her skirt, the blue whale tail
  * behind her.
  */
-export const DEFAULT_WHO: Record<GuideStyle, string> = {
-  anime: '成年女性，二次元动画风格。雾蓝色及肩短发，发尾微微内扣，左耳前编着一条细细的三股辫，辫尾系一颗小珍珠；浅海玻璃一样的青绿色眼睛，眼神清亮，带一点俏皮。头顶右侧别着一枚深海蓝色的鲸鱼尾巴发卡，尾鳍向上翘起，边缘描一圈白线。上身是白色短袖立领衬衫，领口系一条浅蓝色细丝带；外面套一件短款深海蓝防风夹克，袖子挽到小臂，袖口一圈白色波浪滚边，拉链头是一枚白色小水滴。下身是深海蓝高腰百褶短裙，裙摆左下角绣着 DeepSeek 的蓝色小鲸鱼标志（白色描边）；腰间一条浅棕色细皮带，皮带扣是一枚小贝壳。脖子上一根细银链，吊坠是一颗半透明的海蓝色玻璃水滴。左手腕一只浅蓝色细手环。白色短袜，白色帆布鞋配珊瑚橙色鞋带。身后从腰后伸出一条圆润的深海蓝色鲸鱼尾巴，自然垂下、末端微微上卷，尾巴腹面是浅蓝色，带几道平行的白色细纹（像蓝鲸腹部的褶沟），尾鳍边缘一圈浅青色。整体配色：雾蓝、深海蓝、白，少量珊瑚橙点缀。',
-  real: '写实真人摄影，商业级Cosplay角色设定图，展示一位身材高挑修长的成年亚洲女性coser，扮演蓝色鲸鱼娘。她戴雾蓝色及肩短发假发，发尾微微内扣，左耳前编一条细三股辫，辫尾系一颗小珍珠；戴浅青绿色美瞳，妆容清透自然，笑容明朗。头顶右侧别着一枚深海蓝色的鲸鱼尾巴造型亚克力发卡，尾鳍向上翘起，边缘有白色描边。上身是白色短袖立领棉质衬衫，领口系一条浅蓝色细缎带；外搭一件短款深海蓝尼龙防风夹克，袖子挽到小臂，袖口缝一圈白色波浪滚边，拉链头是白色小水滴。下身是深海蓝高腰百褶短裙，裙摆左下角有一枚刺绣的 DeepSeek 蓝色小鲸鱼标志（白色描边）；腰间一条浅棕色细皮带，配贝壳形金属皮带扣。脖子上一根细银链，吊坠是半透明的海蓝色玻璃水滴。左手腕一只浅蓝色硅胶细手环。白色短袜，白色帆布鞋配珊瑚橙鞋带。腰后装着一条柔软的深海蓝色鲸鱼尾巴道具（短绒面料），自然垂到小腿、末端微微上卷，尾巴腹面浅蓝色、缝着几道平行的白色细条纹，尾鳍边缘一圈浅青色。真实皮肤质感，真实布料纹理，影棚柔光。',
+const TEMPLATES: Record<GuideStyle, Template> = {
+  anime: {
+    label: '二次元鲸鱼娘',
+    who: [
+      '成年女性，约二十岁，身高约 165 厘米，身材匀称，二次元动画风格，海边长大的蓝色鲸鱼娘。',
+      '发型：雾蓝色及肩短发，发尾微微内扣，轻薄的空气刘海，右侧几缕挑染成浅青色；左耳前编一条细细的三股辫，辫尾系一颗小珍珠。',
+      '五官：浅海玻璃一样的青绿色眼睛，瞳孔里有一圈水面反光似的浅色高光；眉毛细而柔，眼角微微上扬，带一点俏皮；脸颊淡淡的粉色，嘴角常带笑，笑起来露一点小虎牙。',
+      '头饰：头顶右侧别着一枚深海蓝色的鲸鱼尾巴发卡，约半个手掌大，两片尾鳍向上翘起，边缘描一圈白线，中间一道浅蓝色弧线。',
+      '上衣：白色短袖立领棉衬衫，胸前一排白色贝母小圆扣，领口系一条浅蓝色细丝带，打成小小的蝴蝶结；外面套一件短款深海蓝防风夹克，长度到腰，袖子挽到小臂，袖口和下摆一圈白色波浪滚边，左胸口袋上绣一道白色浪花线，拉链头是一枚白色小水滴。',
+      '下装：深海蓝高腰百褶短裙，长度到大腿中部，裙摆一圈白色细线；裙摆左下角绣着 DeepSeek 的蓝色小鲸鱼标志，白色描边，约掌心大；腰间一条浅棕色细皮带，皮带扣是一枚小贝壳。',
+      '配饰：脖子上一根细银链，吊坠是一颗半透明的海蓝色玻璃水滴；左手腕一只浅蓝色细手环，挂一个银色小锚；右手食指一枚细银戒。',
+      '鞋袜：白色短袜，袜口两道浅蓝细条纹；白色帆布鞋，系珊瑚橙色鞋带。',
+      '尾巴：从腰后伸出一条圆润的深海蓝色鲸鱼尾巴，长到小腿，自然垂下、末端微微上卷；尾巴腹面浅蓝色，有几道平行的白色细纹（像蓝鲸腹部的褶沟）；尾鳍是横着的两片，边缘一圈浅青色。',
+      '气质：开朗、好奇、有点小机灵，像刚从海边跑回来的女孩。',
+      '整体配色：雾蓝、深海蓝、白，少量珊瑚橙点缀。',
+    ].join('\n'),
+    look: DRAWN_LOOK, chibi: DRAWN_CHIBI, whale: true, he: false, purpose: WHALE_PURPOSE, scene: SEA,
+    opening: '一朵浪花从画面下方涌上来，水花散开，她从浪花里轻快地跃出，转了半圈，鲸鱼尾巴在身后划出一道弧线，稳稳落地，对着镜头挥手微笑，停在尾帧的姿势上。水花是透亮的海蓝色，落下时闪着细碎的光。',
+  },
+  real: {
+    label: '真人鲸鱼娘',
+    who: [
+      '写实真人摄影，商业级Cosplay角色设定图，展示一位身材高挑修长的成年亚洲女性coser，扮演蓝色鲸鱼娘。约二十二岁，身高约 170 厘米。',
+      '发型：雾蓝色及肩短发假发，发丝有自然光泽，发尾微微内扣，轻薄的空气刘海，右侧几缕挑染成浅青色；左耳前编一条细三股辫，辫尾系一颗真的小珍珠。',
+      '妆容：浅青绿色美瞳，清透的底妆，淡淡的蜜桃色腮红和唇色，下眼睑点一点细闪，像水光；笑容明朗。',
+      '头饰：头顶右侧别着一枚深海蓝色的鲸鱼尾巴造型亚克力发卡，约半个手掌大，两片尾鳍向上翘起，边缘有白色描边，中间一道浅蓝色弧线。',
+      '上衣：白色短袖立领棉质衬衫，胸前一排白色贝母小圆扣，领口系一条浅蓝色细缎带，打成小蝴蝶结；外搭一件短款深海蓝尼龙防风夹克，长度到腰，袖子挽到小臂，袖口和下摆缝一圈白色波浪滚边，左胸口袋绣一道白色浪花线，拉链头是白色小水滴。',
+      '下装：深海蓝高腰百褶短裙，长度到大腿中部，裙摆一圈白色细线；裙摆左下角有一枚刺绣的 DeepSeek 蓝色小鲸鱼标志，白色描边，约掌心大；腰间一条浅棕色细皮带，配贝壳形金属皮带扣。',
+      '配饰：脖子上一根细银链，吊坠是半透明的海蓝色玻璃水滴；左手腕一只浅蓝色硅胶细手环，挂一个银色小锚；右手食指一枚细银戒。',
+      '鞋袜：白色短袜，袜口两道浅蓝细条纹；白色帆布鞋，系珊瑚橙色鞋带。',
+      '尾巴：腰后装着一条柔软的深海蓝色鲸鱼尾巴道具（短绒面料，内有支撑），自然垂到小腿、末端微微上卷；尾巴腹面浅蓝色，缝着几道平行的白色细条纹；尾鳍是横着的两片，边缘一圈浅青色。',
+      '气质：开朗、好奇，笑起来很有感染力。',
+      '整体配色：雾蓝、深海蓝、白，少量珊瑚橙点缀。真实皮肤质感，真实布料纹理，影棚柔光。',
+    ].join('\n'),
+    look: REAL_LOOK, chibi: REAL_CHIBI, whale: true, he: false, purpose: WHALE_PURPOSE, scene: SEA,
+    opening: '画面下方先升起一串透亮的气泡和几缕海蓝色的光带，像在水下往上看。气泡越聚越多，在画面中间轻轻散开，她从光里走出来，身后的鲸鱼尾巴道具轻轻一甩，双手在胸前合成一个小小的鲸尾手势，对着镜头笑，停在尾帧的姿势上。气泡和光带是真实的质感，不要卡通。',
+  },
+  chibi: {
+    label: 'Q版鲸鱼娘',
+    who: [
+      'Q 版二次元角色，大约两头身：头和身体差不多一样大，圆脸，小短手小短腿，圆润可爱。她是一位成年鲸鱼娘的 Q 版形象。',
+      '发型：雾蓝色蓬松短发，发尾向内卷成圆圆的弧，头顶翘着一根呆毛；左耳前一条小小的三股辫，辫尾一颗小珍珠。',
+      '五官：大大的青绿色眼睛，占脸的三分之一，里面有两颗星星似的高光；小小的嘴，常张着笑；脸颊两团圆圆的粉色红晕。',
+      '头饰：头顶右侧一枚比例放大的深海蓝色鲸鱼尾巴发卡，两片尾鳍向上翘，边缘白线，很显眼。',
+      '上衣：白色短袖立领小衬衫，领口一个浅蓝色丝带蝴蝶结；外面一件短短的深海蓝防风夹克，袖口一圈白色波浪边，拉链头是白色小水滴。',
+      '下装：深海蓝百褶小短裙，裙摆正前方绣着一个大大的 DeepSeek 蓝色小鲸鱼标志，白色描边，Q 版里也一眼能认出来；腰间一条浅棕色细皮带，贝壳扣。',
+      '配饰：脖子上一颗海蓝色玻璃水滴吊坠；左手腕一只浅蓝色小手环。',
+      '鞋袜：白色短袜，圆头白色帆布鞋，珊瑚橙色鞋带。',
+      '尾巴：身后一条圆滚滚的深海蓝色鲸鱼尾巴，几乎和身体一样长，末端翘起来，腹面浅蓝色带白色细纹，尾鳍边缘浅青色。',
+      '气质：元气、爱闹、有点小得意。',
+      '整体配色：雾蓝、深海蓝、白，少量珊瑚橙点缀。',
+    ].join('\n'),
+    look: 'Q 版二次元风格，大约两头身，大头小身子，圆润可爱，线条干净圆滑，色块柔和，高细节。',
+    chibi: 'Q 版小人（就是她本来的样子），大约两头身，大头小身子，圆润可爱',
+    whale: true, he: false, purpose: WHALE_PURPOSE, scene: SEA,
+    opening: '一个圆滚滚的海蓝色大泡泡从画面下方慢慢飘上来，在画面中间停住，轻轻一颤，「啵」地破开，Q 版的她从里面蹦出来，在空中转了一圈，小尾巴一翘，稳稳落地，双手比个耶，眨一下眼，停在尾帧的姿势上。泡泡破开时溅出几颗小水珠。',
+  },
+  gf: {
+    label: '真人女友',
+    who: [
+      '写实真人摄影，角色设定图。一位虚构的成年亚洲女性，约二十五岁，不像任何真实的明星或公众人物。身高约 163 厘米，身材匀称自然。',
+      '发型：深栗色长发，长度到胸口，自然的大波浪，发丝有光泽；轻薄的空气刘海；左侧耳上别一枚小小的珍珠发夹。',
+      '五官：温柔的杏眼，深棕色瞳孔，淡淡的卧蚕；眉形自然；笑起来右边脸颊有一个浅浅的酒窝。',
+      '妆容：清透的日常淡妆，浅杏色眼影，豆沙色唇彩，淡淡的腮红。',
+      '上衣：奶油白色短款粗针织开衫，V 领，一排浅木色牛角扣，袖子长到手背；里面是一件浅燕麦色圆领棉 T 恤。',
+      '下装：浅蓝色高腰直筒牛仔裤，裤脚向上卷起一折，露出脚踝。',
+      '配饰：细金色锁骨链，吊坠是一弯小小的月亮；右耳一颗小珍珠耳钉；左手腕一只棕色细皮表带的小圆表；右手无名指一枚细细的素银戒。',
+      '鞋：米白色低帮帆布鞋。',
+      '气质：温柔、爱笑、有一点小迷糊，像下班路上会顺手给你带一杯热奶茶的女朋友。',
+      '整体配色：奶油白、燕麦色、浅牛仔蓝，暖色调。真实皮肤质感，真实布料纹理，自然柔光。',
+    ].join('\n'),
+    look: REAL_LOOK, chibi: REAL_CHIBI, whale: false, he: false,
+    purpose: '这是为deepseek-harness设计真人女友角色的素材之一，要求：',
+    scene: {
+      窗边: '洒满午后阳光的公寓窗边',
+      窗外: '安静的街道、一排梧桐树和几朵云',
+      远处: '街景',
+      窗外动: '窗外的梧桐叶轻轻摇动，阳光的光斑在窗台上慢慢移动',
+      夜景: '远处城市的点点灯火和夜空',
+      夜景动: '远处的灯火微微闪烁，夜空里的云慢慢飘',
+      色调: '以奶油白和暖木色为主',
+      皮肤底: '午后阳光透过纱帘落在浅色墙面上的柔和光影，颜色是很浅的奶油白到浅杏色的柔和渐变',
+    },
+    opening: '一阵暖风从画面左边吹过来，带着几片浅粉色的花瓣。她从画面右边走进来，被风吹得抬手拢了一下头发，转过身看到镜头，眼睛一亮，把耳边的头发别到耳后，笑着轻轻挥挥手，停在尾帧的姿势上。花瓣慢慢飘出画面。',
+  },
+  bf: {
+    label: '真人男友',
+    who: [
+      '写实真人摄影，角色设定图。一位虚构的成年亚洲男性，约二十七岁，不像任何真实的明星或公众人物。身高约 182 厘米，肩宽，身材修长结实。',
+      '发型：黑色短发，两侧剪短，头顶稍长、自然蓬松地向后梳，额前垂下几缕碎发。',
+      '五官：浓而整齐的眉毛，眼睛明亮温和，内双，鼻梁挺直，下颌线清晰，胡子刮得很干净；笑起来眼睛弯弯的。',
+      '上衣：白色圆领棉 T 恤，外面一件敞开的浅灰蓝色牛津纺衬衫，袖子挽到小臂，左胸一个贴袋。',
+      '下装：卡其色休闲长裤，九分，露出一点脚踝；深棕色细皮带，银色扣。',
+      '配饰：左手腕一只银色表盘、深棕色皮表带的手表；右手腕一根黑色编织绳手链。',
+      '鞋：白色皮质低帮小白鞋。',
+      '气质：温柔可靠，话不多但爱笑，会记得你说过的小事，像周末会陪你去散步的男朋友。',
+      '整体配色：白、浅灰蓝、卡其、深棕，干净清爽。真实皮肤质感，真实布料纹理，自然柔光。',
+    ].join('\n'),
+    look: REAL_LOOK, chibi: REAL_CHIBI, whale: false, he: true,
+    purpose: '这是为deepseek-harness设计真人男友角色的素材之一，要求：',
+    scene: {
+      窗边: '书房的大窗边',
+      窗外: '远处的城市天际线、蓝天和几朵云',
+      远处: '城市',
+      窗外动: '窗外的云非常缓慢地移动，阳光在书桌上轻轻晃动',
+      夜景: '城市的夜景和点点灯火',
+      夜景动: '远处的灯火微微闪烁，夜空里的云慢慢飘',
+      色调: '以浅灰、藏青和暖木色为主',
+      皮肤底: '清晨的浅色亚麻布纹理上落着淡淡的窗格光影，颜色是很浅的灰白到浅雾蓝的柔和渐变',
+    },
+    opening: '他从画面右边走进来，一只手拎着搭在肩上的外套，另一只手插在裤兜里。走到画面中间停下，像是听到有人叫他，转过头看向镜头，笑了一下，把外套换到另一只手，抬手打个招呼，停在尾帧的姿势上。',
+  },
 }
 
-export const STYLE_LABEL: Record<GuideStyle, string> = { anime: '二次元', real: '真人' }
-
-/** How a picture is drawn, said once per prompt. */
-const LOOK: Record<GuideStyle, string> = {
-  anime: '二次元动画风格，线条干净，色块清晰，高细节。',
-  real: '写实摄影，真实皮肤和布料质感，影棚柔光，高清，不要插画感。',
-}
-
-/** Her small self standing on the chat box: drawn chibi, or a chibi figurine photographed. */
-const CHIBI: Record<GuideStyle, string> = {
-  anime: 'Q 版小人，大约两头身，大头小身子，圆润可爱',
-  real: 'Q 版树脂手办（黏土人质感），大约两头身，大头小身子，真实微距摄影',
-}
+export const DEFAULT_WHO = Object.fromEntries(GUIDE_STYLES.map(st => [st, TEMPLATES[st].who])) as Record<GuideStyle, string>
+export const STYLE_LABEL = Object.fromEntries(GUIDE_STYLES.map(st => [st, TEMPLATES[st].label])) as Record<GuideStyle, string>
+/** Is this template our whale girl (the three must-haves go into its prompts)? */
+export const isWhale = (style: GuideStyle) => TEMPLATES[style].whale
 
 /** In every prompt that shows her. */
 export const MUST = '必须保留这三样：头顶的鲸鱼尾巴发饰；裙子（或短裤、长裤）上的 DeepSeek 蓝色小鲸鱼标志；身后的蓝色鲸鱼尾巴。'
@@ -72,9 +215,9 @@ export interface GuideItem {
 export const GUIDE_GROUPS: Array<{ id: GuideGroup; title: string; about: string }> = [
   { id: 'base', title: '一、基础人物（先做这个）', about: '先把人定下来。后面所有的图和视频都拿这里的图当参考，她才是同一个人。' },
   { id: 'avatar', title: '二、头像（对话框上的 Q 版小她）', about: '站在 dsh 对话框上沿的 Q 版全身小人，不大。平时站着，会来回走两步、翻个跟头、打个滚；说话、听你说、想事情、被摸头、打招呼时各有一段。都用绿幕做，传上来点「抠掉背景」。' },
-  { id: 'desktop', title: '三、桌面（壁纸里）', about: '铺满整个屏幕，在所有窗口后面。她在场景里：窗边、书桌、夜晚的海面。' },
+  { id: 'desktop', title: '三、桌面（壁纸里）', about: '铺满整个屏幕，在所有窗口后面。她在场景里：窗边、书桌、夜晚的窗外。' },
   { id: 'pet', title: '四、宠物（浮在桌面上、网页里的桌宠）', about: '只有她自己，背景透明，浮在所有窗口上面，能拖、能点。' },
-  { id: 'intro', title: '五、开机动画', about: '她出场时播一次的短片。' },
+  { id: 'intro', title: '五、开机动画', about: '她出场时播一次的短片。五套模版各有自己的开机画面。' },
   { id: 'skin', title: '六、皮肤背景图', about: '换 dsh 整个界面时用的背景图（皮肤的其余部分是颜色和字体，不用画）。' },
 ]
 
@@ -107,7 +250,7 @@ export const GUIDE: GuideItem[] = [
   {
     id: 'base-sheet', group: 'base', title: '三视图（正面、侧面、背面）', where: '显示在「总览」里她的名片旁；更重要的是：以后做任何图和视频，都把它传给工具当参考。', tool: '生图',
     size: '2048×1152（横版 16:9）', format: 'PNG',
-    rules: ['同一张图里三个全身像：正面、右侧面、背面，从左到右排开。', '三个像一样高，脚踩在同一条线上，姿势都是自然站立（手臂略微张开，方便看清衣服）。', '纯白或浅灰背景，不要文字标注。', '发型、服装、配饰、尾巴在三个角度要对得上。'],
+    rules: ['同一张图里三个全身像：正面、右侧面、背面，从左到右排开。', '三个像一样高，脚踩在同一条线上，姿势都是自然站立（手臂略微张开，方便看清衣服）。', '纯白或浅灰背景，不要文字标注。', '发型、服装、配饰〔、尾巴〕在三个角度要对得上。'],
     how: '把上一步的「定妆照」传给工具当参考图，再用提示词。',
     prompt: `参考图是这个角色的定妆照。${SAME}\n\n画这个角色的三视图设定稿：同一张图里从左到右三个全身像，依次是正面、右侧面、背面。三个像一样高，脚在同一条水平线上，自然站立，手臂略微张开。\n纯白背景，光线均匀，没有阴影。横版 16:9，三个像均匀排开，互不遮挡。${STYLE}\n${NO_TEXT}不要标注和箭头。\n\n人物设定：${WHO}`,
     upload: '素材库 → 三视图。传好后在那里点「设为她的三视图」。',
@@ -132,9 +275,9 @@ export const GUIDE: GuideItem[] = [
   {
     id: 'avatar-idle', group: 'avatar', title: '头像·站着（待机）', where: '平时站在对话框上的样子，循环播放。', tool: '图生视频',
     size: '512×512（正方形 1:1）', format: 'MP4（纯绿背景）→ 抠掉背景', length: '4–6 秒，循环',
-    rules: ['脚不离开原地：眨眼、轻轻左右晃、尾巴摆。', '首尾帧都用「头像·站姿图」（绿背景那张）。'],
+    rules: ['脚不离开原地：眨眼、轻轻左右晃〔、尾巴摆〕。', '首尾帧都用「头像·站姿图」（绿背景那张）。'],
     how: '首帧、尾帧都传「头像·站姿图」。',
-    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n画面里是${Q}。她站在原地：慢慢眨两次眼，身体轻轻左右晃一晃，尾巴摆了摆，头微微歪一下。动作小而可爱。\n${LOOP}${GREEN}${NO_TEXT}不要声音。`,
+    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n画面里是${Q}。她站在原地：慢慢眨两次眼，身体轻轻左右晃一晃，〔尾巴摆了摆，〕头微微歪一下。动作小而可爱。\n${LOOP}${GREEN}${NO_TEXT}不要声音。`,
     upload: '素材库 → 头像，名字如「站着」，然后点「抠掉背景」。', stage: '编排 → 头像 → 初始（和走动、翻跟头、打滚一起选上，选「随机」）。',
   },
   {
@@ -142,7 +285,7 @@ export const GUIDE: GuideItem[] = [
     size: '512×512（正方形 1:1）', format: 'MP4（纯绿背景）→ 抠掉背景', length: '5–6 秒，循环',
     rules: ['走的范围不出画面：向左走两三步，转身，走回原位，转回正面。', '脚一直踩在画面最下沿那条线上。'],
     how: '首帧、尾帧都传「头像·站姿图」。',
-    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n画面里是${Q}。她迈着小步子向画面左边走了两三步，尾巴一甩一甩；停下来转个身，再走回原来的位置，转回正面看向镜头。脚一直踩在画面最下沿，不离开画面。\n${LOOP}${GREEN}${NO_TEXT}不要声音。`,
+    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n画面里是${Q}。她迈着小步子向画面左边走了两三步，〔尾巴一甩一甩；〕停下来转个身，再走回原来的位置，转回正面看向镜头。脚一直踩在画面最下沿，不离开画面。\n${LOOP}${GREEN}${NO_TEXT}不要声音。`,
     upload: '素材库 → 头像，名字如「走动」，然后点「抠掉背景」。', stage: '编排 → 头像 → 初始（随机）。',
   },
   {
@@ -150,7 +293,7 @@ export const GUIDE: GuideItem[] = [
     size: '512×512（正方形 1:1）', format: 'MP4（纯绿背景）→ 抠掉背景', length: '3–4 秒',
     rules: ['原地向前翻一个跟头，稳稳落地，回到站姿。', '整个人一直在画面里，不出边。'],
     how: '首帧、尾帧都传「头像·站姿图」。',
-    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n画面里是${Q}。她蹲下一点，原地向前翻了一个圆滚滚的跟头，尾巴跟着画了个圈，稳稳落地，张开双手得意地笑，然后回到原来的站姿。整个人一直在画面里。\n${LOOP}${GREEN}${NO_TEXT}不要声音。`,
+    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n画面里是${Q}。她蹲下一点，原地向前翻了一个圆滚滚的跟头，〔尾巴跟着画了个圈，〕稳稳落地，张开双手得意地笑，然后回到原来的站姿。整个人一直在画面里。\n${LOOP}${GREEN}${NO_TEXT}不要声音。`,
     upload: '素材库 → 头像，名字如「翻跟头」，然后点「抠掉背景」。', stage: '编排 → 头像 → 初始（随机）。',
   },
   {
@@ -158,7 +301,7 @@ export const GUIDE: GuideItem[] = [
     size: '512×512（正方形 1:1）', format: 'MP4（纯绿背景）→ 抠掉背景', length: '4–5 秒',
     rules: ['躺下，打一个滚，坐起来，站回原位。', '一直在画面下半部分，不出边。'],
     how: '首帧、尾帧都传「头像·站姿图」。',
-    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n画面里是${Q}。她侧身躺倒，在原地开心地打了一个滚，尾巴拍了拍地面，坐起来伸个小懒腰，再站起来回到原来的站姿。一直在画面下半部分。\n${LOOP}${GREEN}${NO_TEXT}不要声音。`,
+    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n画面里是${Q}。她侧身躺倒，在原地开心地打了一个滚，〔尾巴拍了拍地面，〕坐起来伸个小懒腰，再站起来回到原来的站姿。一直在画面下半部分。\n${LOOP}${GREEN}${NO_TEXT}不要声音。`,
     upload: '素材库 → 头像，名字如「打滚」，然后点「抠掉背景」。', stage: '编排 → 头像 → 初始（随机）。',
   },
   {
@@ -166,7 +309,7 @@ export const GUIDE: GuideItem[] = [
     size: '512×512（正方形 1:1）', format: 'MP4（纯绿背景）→ 抠掉背景', length: '4–6 秒，循环',
     rules: ['站在原地，嘴一张一合，配一点手势。', '不要真的对口型：声音是程序合成的，这段只是「在说话」的样子。'],
     how: '首帧、尾帧都传「头像·站姿图」。',
-    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n画面里是${Q}。她站在原地看着镜头说话：嘴巴自然地一张一合，说得轻快，不时点一下头，两只小手比划着，尾巴轻轻摆。\n${LOOP}${GREEN}${NO_TEXT}不要声音。`,
+    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n画面里是${Q}。她站在原地看着镜头说话：嘴巴自然地一张一合，说得轻快，不时点一下头，两只小手比划着〔，尾巴轻轻摆〕。\n${LOOP}${GREEN}${NO_TEXT}不要声音。`,
     upload: '素材库 → 头像，名字如「说话」，然后点「抠掉背景」。', stage: '编排 → 加一个场景「说话时」，时机选「她开口」。',
   },
   {
@@ -182,7 +325,7 @@ export const GUIDE: GuideItem[] = [
     size: '512×512（正方形 1:1）', format: 'MP4（纯绿背景）→ 抠掉背景', length: '3–5 秒，循环',
     rules: ['眼睛看向斜上方，手指点着下巴，原地小步晃。'],
     how: '首帧、尾帧都传「头像·站姿图」。',
-    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n画面里是${Q}。她在思考：眼睛看向斜上方，一根手指点着下巴，原地踱了一小步又回来，尾巴慢慢摆。\n${LOOP}${GREEN}${NO_TEXT}`,
+    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n画面里是${Q}。她在思考：眼睛看向斜上方，一根手指点着下巴，原地踱了一小步又回来〔，尾巴慢慢摆〕。\n${LOOP}${GREEN}${NO_TEXT}`,
     upload: '素材库 → 头像，名字如「想一想」，然后点「抠掉背景」。', stage: '编排 → 加一个场景，时机选「她在想」。',
   },
   {
@@ -206,7 +349,7 @@ export const GUIDE: GuideItem[] = [
     size: '512×512（正方形 1:1）', format: 'MP4（纯绿背景）→ 抠掉背景', length: '4–6 秒，循环',
     rules: ['站着打哈欠、揉眼睛、点头打瞌睡。'],
     how: '首帧、尾帧都传「头像·站姿图」。',
-    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n画面里是${Q}。她困了：打一个小小的哈欠，用手背揉揉眼睛，站着头一点一点地打瞌睡，尾巴也耷拉下来，又努力睁开眼。\n${LOOP}${GREEN}${NO_TEXT}`,
+    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n画面里是${Q}。她困了：打一个小小的哈欠，用手背揉揉眼睛，站着头一点一点地打瞌睡，〔尾巴也耷拉下来，〕又努力睁开眼。\n${LOOP}${GREEN}${NO_TEXT}`,
     upload: '素材库 → 头像，名字如「困了」，然后点「抠掉背景」。', stage: '编排 → 加一个场景，时机选「时间段」，填 23-6。',
   },
   // ── desktop ─────────────────────────────────────────────────────────
@@ -215,23 +358,23 @@ export const GUIDE: GuideItem[] = [
     size: 'Mac：2560×1600（16:10）；Windows：2560×1440（16:9）', format: 'PNG 或 JPG',
     rules: ['她在画面右侧三分之一，左边留空：桌面图标一般在左边。', '画面上方不要有重要内容（Mac 的菜单栏在那儿）。', '色调柔和、不刺眼：这是一整天都看着的背景。'],
     how: '把「三视图」传给工具当参考图。',
-    prompt: `参考图是这个角色的三视图。${SAME}\n\n一张桌面壁纸：她坐在靠海的窗边，侧身看向窗外，一只手托着腮，窗外是白天平静的海面和几朵云，窗帘被风轻轻吹起。她在画面右侧三分之一处，左边三分之二是窗台、海和天空，留得很空。\n横版 16:10，色调柔和明亮，以海蓝和白为主。${STYLE}\n${NO_TEXT}`,
+    prompt: `参考图是这个角色的三视图。${SAME}\n\n一张桌面壁纸：她坐在{窗边}，侧身看向窗外，一只手托着腮，窗外是{窗外}，窗帘被风轻轻吹起。她在画面右侧三分之一处，左边三分之二是窗台、{远处}和天空，留得很空。\n横版 16:10，色调柔和明亮，{色调}。${STYLE}\n${NO_TEXT}`,
     upload: '素材库 → 桌面。', stage: '编排 → 桌面 → 初始。',
   },
   {
     id: 'desktop-day', group: 'desktop', title: '桌面·白天（循环视频）', where: '壁纸位置，一直循环。', tool: '图生视频',
     size: '和场景图一样：2560×1600 或 2560×1440（工具出不了这么大就 1920×1200 / 1920×1080）', format: 'MP4', length: '8–10 秒，循环',
-    rules: ['动的东西要少、要慢：窗帘、海面、云、她的头发和呼吸。', '她不要走动、不要大动作。'],
+    rules: ['动的东西要少、要慢：窗帘、窗外、云、她的头发和呼吸。', '她不要走动、不要大动作。'],
     how: '首帧、尾帧都传「桌面·场景图」。',
-    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n画面很安静：窗帘被风轻轻吹动，窗外的海面有细小的波光，云非常缓慢地移动。她坐在窗边看着海，慢慢眨眼，头发被风微微吹动，偶尔换一下托腮的手。所有动作都很慢、很轻。\n${LOOP}${NO_TEXT}不要声音。`,
+    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n画面很安静：窗帘被风轻轻吹动，{窗外动}。她坐在窗边看着窗外，慢慢眨眼，头发被风微微吹动，偶尔换一下托腮的手。所有动作都很慢、很轻。\n${LOOP}${NO_TEXT}不要声音。`,
     upload: '素材库 → 桌面，名字如「窗边白天」。', stage: '编排 → 桌面 → 初始。',
   },
   {
     id: 'desktop-night', group: 'desktop', title: '桌面·夜晚', where: '晚上自动换成这一段。', tool: '图生视频',
     size: '和场景图一样：2560×1600 或 2560×1440（工具出不了这么大就 1920×1200 / 1920×1080）', format: 'MP4', length: '8–10 秒，循环',
     rules: ['先用生图把「桌面·场景图」改成夜晚（同样的构图），再用它做首尾帧。', '夜里的画面要暗一些，不晃眼。'],
-    how: '第一步（生图）：传「桌面·场景图」，提示词写「同样的构图和人物，改成夜晚：窗外是星空和月光下的海面，屋里亮着一盏暖色的小灯」。第二步（图生视频）：首帧、尾帧都传这张夜晚的图，用下面的提示词。',
-    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n夜晚，很安静：星星微微闪烁，月光下的海面有缓慢的波光，小灯的暖光轻轻晃动。她抱着膝盖坐在窗边看星星，慢慢眨眼，头发微微动。所有动作都很慢。\n${LOOP}${NO_TEXT}不要声音。`,
+    how: '第一步（生图）：传「桌面·场景图」，提示词写「同样的构图和人物，改成夜晚：窗外是{夜景}，屋里亮着一盏暖色的小灯」。第二步（图生视频）：首帧、尾帧都传这张夜晚的图，用下面的提示词。',
+    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n夜晚，很安静：{夜景动}，小灯的暖光轻轻晃动。她抱着膝盖坐在窗边看着窗外，慢慢眨眼，头发微微动。所有动作都很慢。\n${LOOP}${NO_TEXT}不要声音。`,
     upload: '素材库 → 桌面，名字如「窗边夜晚」。', stage: '编排 → 加一个场景「夜晚」，时机选「时间段」，填 19-6。',
   },
   {
@@ -239,7 +382,7 @@ export const GUIDE: GuideItem[] = [
     size: '和场景图一样：2560×1600 或 2560×1440（工具出不了这么大就 1920×1200 / 1920×1080）', format: 'MP4', length: '8–10 秒，循环',
     rules: ['她在做自己的事：看书、趴着睡、玩手机。'],
     how: '先用生图做一张同构图的「她趴在窗台上睡着了」，再用它做首尾帧。',
-    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n她趴在窗台上睡着了：肩膀随着呼吸慢慢起伏，尾巴偶尔轻轻动一下，窗帘缓缓飘动，海面波光缓慢。非常安静。\n${LOOP}${NO_TEXT}不要声音。`,
+    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n她趴在窗台上睡着了：肩膀随着呼吸慢慢起伏，〔尾巴偶尔轻轻动一下，〕窗帘缓缓飘动，窗外的光影慢慢变化。非常安静。\n${LOOP}${NO_TEXT}不要声音。`,
     upload: '素材库 → 桌面，名字如「睡着了」。', stage: '编排 → 加一个场景，时机选「你很久没动」。',
   },
   {
@@ -262,9 +405,9 @@ export const GUIDE: GuideItem[] = [
   {
     id: 'pet-idle', group: 'pet', title: '宠物·站着（待机）', where: '平时浮在桌面上的样子，循环。', tool: '图生视频',
     size: '1080×1920 或 720×1280（9:16）', format: 'MP4（纯绿背景），传好后点「抠掉背景」变成透明 WebM', length: '5–8 秒，循环',
-    rules: ['脚不要动：站在原地。', '动作小：呼吸、眨眼、头发和尾巴轻摆。', '背景全程是同一种纯绿色，身上不要出现绿色。'],
+    rules: ['脚不要动：站在原地。', '动作小：呼吸、眨眼、头发〔和尾巴〕轻摆。', '背景全程是同一种纯绿色，身上不要出现绿色。'],
     how: '首帧、尾帧都传「宠物·站姿图」（绿背景那张）。',
-    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n她站在原地，双脚不动：自然地呼吸，慢慢眨眼，头发和尾巴轻轻摆动，身体微微左右晃一下。动作很小。\n${LOOP}${GREEN}${NO_TEXT}不要声音。`,
+    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n她站在原地，双脚不动：自然地呼吸，慢慢眨眼，头发〔和尾巴〕轻轻摆动，身体微微左右晃一下。动作很小。\n${LOOP}${GREEN}${NO_TEXT}不要声音。`,
     upload: '素材库 → 宠物，名字如「站着」，然后点「抠掉背景」。', stage: '编排 → 宠物 → 初始。',
   },
   {
@@ -280,7 +423,7 @@ export const GUIDE: GuideItem[] = [
     size: '1080×1920 或 720×1280（竖版 9:16）', format: 'MP4（纯绿背景）→ 抠掉背景', length: '5–8 秒，循环',
     rules: ['先用生图做一张「坐在地上抱着膝盖睡着」的绿背景图（参考三视图），再用它做首尾帧。'],
     how: '首帧、尾帧都传那张睡着的图。',
-    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n她坐在地上抱着膝盖睡着了：肩膀随着呼吸慢慢起伏，头轻轻点一下，尾巴偶尔动一动。非常安静。\n${LOOP}${GREEN}${NO_TEXT}不要声音。`,
+    prompt: `首帧和尾帧是同一张图。${STILL_CAMERA}\n\n她坐在地上抱着膝盖睡着了：肩膀随着呼吸慢慢起伏，头轻轻点一下〔，尾巴偶尔动一动〕。非常安静。\n${LOOP}${GREEN}${NO_TEXT}不要声音。`,
     upload: '素材库 → 宠物，名字如「睡着」，然后点「抠掉背景」。', stage: '编排 → 「夜晚」那个场景的宠物格子。',
   },
   // ── intro ───────────────────────────────────────────────────────────
@@ -289,7 +432,7 @@ export const GUIDE: GuideItem[] = [
     size: '1280×800（16:10）或 1280×720', format: 'MP4；想要透明就用纯绿背景，传好后点「抠掉背景」', length: '3–5 秒，不循环',
     rules: ['有头有尾：从没有到出现，最后停在一个好看的姿势上。', '短：超过 5 秒就嫌长了。'],
     how: '尾帧传「宠物·站姿图」或「定妆照」（首帧可以不给，让工具自己发挥出场方式）。',
-    prompt: `尾帧是参考图。${STILL_CAMERA}\n\n一朵浪花从画面下方涌上来，水花散开，她从浪花里轻快地跃出，转了半圈，稳稳落地，对着镜头挥手微笑，停在尾帧的姿势上。水花是透亮的海蓝色。\n${GREEN}${NO_TEXT}不要声音。`,
+    prompt: `尾帧是参考图。${STILL_CAMERA}\n\n{开场}\n${GREEN}${NO_TEXT}不要声音。`,
     upload: '皮肤 → 开机动画 → 上传。',
   },
   // ── skin ────────────────────────────────────────────────────────────
@@ -298,43 +441,60 @@ export const GUIDE: GuideItem[] = [
     size: '2560×1600（16:10）', format: 'JPG 或 WebP，1 MB 以内',
     rules: ['细节要少、对比要低：上面要放很多字。', '做两张更好：一张浅色的（配浅色模式）、一张深色的（配深色模式）。', '不要有人物的脸：她自己会出现在界面上。'],
     how: '只用提示词。',
-    prompt: `一张用作软件界面背景的图：平静的浅海水面俯视图，极淡的水波纹和几缕光斑，颜色是很浅的海蓝到白色的柔和渐变。细节很少，对比度很低，整体干净、安静。\n横版 16:10。没有人物，没有物体。${NO_TEXT}`,
+    prompt: `一张用作软件界面背景的图：{皮肤底}。细节很少，对比度很低，整体干净、安静。\n横版 16:10。没有人物，没有物体。${NO_TEXT}`,
     upload: '皮肤 → 上传皮肤（和 skin.json 放在同一个文件夹里）。', noHer: true,
   },
 ]
 
-/** Is this the description we ship (either style), not one of the user's own? */
-const isOurs = (who: string) => who.trim() === '' || who.trim() === DEFAULT_WHO.anime || who.trim() === DEFAULT_WHO.real
+/** Which of our templates this description is, or none (the user's own). Empty means the template's own. */
+const templateOf = (who: string, style: GuideStyle): GuideStyle | undefined =>
+  who.trim() === '' ? style : GUIDE_STYLES.find(st => TEMPLATES[st].who === who.trim())
+
+/**
+ * A text of the guide for one template: the tail lines 〔…〕 only for the
+ * whale girl, its own scenes and opening, and 他 for him.
+ */
+export function adapt(text: string, style: GuideStyle = 'anime'): string {
+  const t = TEMPLATES[style]
+  let out = text.replace(/〔([^〕]*)〕/g, (_, kept: string) => t.whale ? kept : '')
+  for (const [key, value] of Object.entries(t.scene)) out = out.split(`{${key}}`).join(value)
+  out = out.split('{开场}').join(t.opening)
+  return t.he ? out.replace(/她/g, '他') : out
+}
 
 /** The prompt with the character's description in it, drawn in `style`. */
 export function fillPrompt(prompt: string, who: string, style: GuideStyle = 'anime'): string {
-  return prompt
-    .split(WHO).join(who.trim() === '' ? DEFAULT_WHO[style] : who.trim())
-    .split(STYLE).join(LOOK[style])
-    .split(Q).join(CHIBI[style])
+  const t = TEMPLATES[style]
+  return adapt(prompt, style)
+    .split(WHO).join(who.trim() === '' ? t.who : who.trim())
+    .split(STYLE).join(t.look)
+    .split(Q).join(t.chibi)
 }
 
 /** The line in front of a prompt that says what it is for (it helps the tool keep to the brief). */
-export function purposeLine(who: string): string {
-  return isOurs(who) ? '这是为deepseek-harness设计鲸鱼娘的角色之一，要求：' : '这是为deepseek-harness设计的角色素材之一，要求：'
+export function purposeLine(who: string, style: GuideStyle = 'anime'): string {
+  const ours = templateOf(who, style)
+  return ours === undefined ? '这是为deepseek-harness设计的角色素材之一，要求：' : TEMPLATES[ours].purpose
 }
 
 /**
  * A material's whole prompt, to paste as it is: what it is for (when
  * `purpose`), the prompt with your character in it, the three things every
- * picture of her keeps (ours only), and its size (and, for a clip, how long),
- * so nothing has to be typed into the tool beside it.
+ * picture of her keeps (our whale girl only), and its size (and, for a clip,
+ * how long), so nothing has to be typed into the tool beside it.
  */
 export function promptFor(item: GuideItem, who: string, purpose = true, style: GuideStyle = 'anime'): string {
   const size = item.tool === '图生视频'
     ? `视频尺寸：${item.size}${item.length === undefined ? '' : `；时长：${item.length}`}。`
     : `图片尺寸：${item.size}；格式：${item.format}。`
-  const must = item.noHer === true || !isOurs(who) ? [] : [MUST]
-  return [...(purpose ? [purposeLine(who)] : []), fillPrompt(item.prompt, who, style), ...must, size].join('\n')
+  const ours = templateOf(who, style)
+  const must = item.noHer === true || ours === undefined || !TEMPLATES[ours].whale ? [] : [MUST]
+  return [...(purpose ? [purposeLine(who, style)] : []), fillPrompt(item.prompt, who, style), ...must, size].join('\n')
 }
 
 /** The whole guide as a document (docs/素材规格与提示词.md). */
-export function guideMarkdown(own?: string): string {
+export function guideMarkdown(own?: string, style: GuideStyle = 'anime'): string {
+  const text = (s: string) => adapt(s, style)
   const out: string[] = [
     '# 素材规格与提示词',
     '',
@@ -369,37 +529,38 @@ export function guideMarkdown(own?: string): string {
     '2. 传到素材库后，在那个素材上点**「抠掉背景」**：程序用 ffmpeg 把背景色去掉，生成一个带透明的 WebM（原文件留着）。',
     '3. 抠得不干净（边上一圈绿、身上缺了一块）：多半是背景不均匀或衣服上有相近的颜色，换一次生成，或把背景换成纯蓝色再试。',
     '',
-    '## 你的人物（两版）',
-    '',
-    '默认是我们自己的鲸鱼娘，有**二次元**和**真人**（真人 Cosplay 摄影）两版，下面每条提示词也都给了两版。换成你自己的人物：把这一段整个替换掉（在 dsh 的素材指南页面里填一次就行）。',
-    '',
-    '每一张有她的图、每一段有她的视频，都**必须保留这三样**：头顶的鲸鱼尾巴发饰；裙子（或短裤、长裤）上的 DeepSeek 蓝色小鲸鱼标志；身后的蓝色鲸鱼尾巴。提示词里已经写上了。',
-    '',
-    '**二次元版：**',
-    '',
-    '```',
-    own ?? DEFAULT_WHO.anime,
-    '```',
-    '',
-    ...(own === undefined ? ['**真人版：**', '', '```', DEFAULT_WHO.real, '```', ''] : []),
+    ...(own === undefined
+      ? [
+        '## 五套初始模版',
+        '',
+        `我们给了五套模版：${GUIDE_STYLES.map(st => `**${STYLE_LABEL[st]}**`).join('、')}。下面每条提示词都有五版，点开你要的那一版复制。换成你自己的人物：在 dsh 的素材指南页面里选一套最接近的模版，把人物设定改成你的。`,
+        '',
+        '三套鲸鱼娘的每一张图、每一段视频，都**必须保留这三样**：头顶的鲸鱼尾巴发饰；裙子（或短裤、长裤）上的 DeepSeek 蓝色小鲸鱼标志；身后的蓝色鲸鱼尾巴。提示词里已经写上了。真人女友和真人男友是虚构的成年人，不像任何真实的人。',
+        '',
+        '每套各有自己的场景和开机画面：鲸鱼娘在海边，女友在洒满阳光的公寓，男友在书房；开机画面分别是浪花、气泡和光带、大泡泡、带花瓣的风、走进画面打招呼。',
+        '',
+        ...GUIDE_STYLES.flatMap(st => [`**${STYLE_LABEL[st]}：**`, '', '```', DEFAULT_WHO[st], '```', '']),
+        '下面「要求」「怎么做」这些说明按二次元鲸鱼娘写；女友和男友没有尾巴，场景按各自的来，提示词里都已经换好了。',
+        '',
+      ]
+      : ['## 你的人物', '', '```', own, '```', '']),
   ]
   for (const group of GUIDE_GROUPS) {
-    out.push(`## ${group.title}`, '', group.about, '')
+    out.push(`## ${group.title}`, '', text(group.about), '')
     for (const item of GUIDE.filter(i => i.group === group.id)) {
       out.push(
-        `### ${item.title}`, '',
-        `- **用在哪儿**：${item.where}`,
+        `### ${text(item.title)}`, '',
+        `- **用在哪儿**：${text(item.where)}`,
         `- **用什么做**：${item.tool}`,
         `- **尺寸**：${item.size}`,
         `- **格式**：${item.format}`,
         ...(item.length === undefined ? [] : [`- **时长**：${item.length}`]),
-        `- **要求**：`, ...item.rules.map(rule => `  - ${rule}`),
-        `- **怎么做**：${item.how}`,
-        `- **做好后**：${item.upload}${item.stage === undefined ? '' : ` 然后：${item.stage}`}`,
+        `- **要求**：`, ...item.rules.map(rule => `  - ${text(rule)}`),
+        `- **怎么做**：${text(item.how)}`,
+        `- **做好后**：${text(item.upload)}${item.stage === undefined ? '' : ` 然后：${text(item.stage)}`}`,
         ...(own !== undefined
-          ? ['', '提示词（直接复制）：', '', '```', promptFor(item, own), '```', '']
-          : ['', '提示词·二次元版（直接复制）：', '', '```', promptFor(item, DEFAULT_WHO.anime, true, 'anime'), '```', '',
-            '提示词·真人版（直接复制）：', '', '```', promptFor(item, DEFAULT_WHO.real, true, 'real'), '```', '']),
+          ? ['', '提示词（直接复制）：', '', '```', promptFor(item, own, true, style), '```', '']
+          : ['', ...GUIDE_STYLES.flatMap(st => [`<details><summary>提示词·${STYLE_LABEL[st]}</summary>`, '', '```', promptFor(item, DEFAULT_WHO[st], true, st), '```', '', '</details>', ''])]),
       )
     }
   }

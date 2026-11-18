@@ -287,6 +287,7 @@ body[data-ds-dark-theme] .her-page{--her-ink:var(--her-bar-accent,#86b4ff);--her
 .her-seg{flex:none;display:inline-flex;padding:2px;border-radius:999px;background:${FIELD};border:1px solid ${LINE}}
 .her-seg button{border:none;background:none;color:${MUTED};font:inherit;font-size:12px;padding:3px 12px;border-radius:999px;cursor:pointer}
 .her-seg button.on{background:${INK};color:${ON_INK};font-weight:600}
+.her-seg.wrap{flex:0 1 auto;flex-wrap:wrap;max-width:100%;border-radius:14px}
 .her-places{padding-top:12px;padding-bottom:12px}
 .her-places-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
 .her-place-tile{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 6px 9px;border:1px solid ${LINE};border-radius:12px;background:${FIELD};cursor:pointer;text-align:center;transition:border-color .12s,background .12s}

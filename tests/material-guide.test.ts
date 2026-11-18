@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { DEFAULT_WHO, fillPrompt, GUIDE, GUIDE_GROUPS, guideMarkdown, MUST, promptFor, WHO } from '../src/core/material-guide.ts'
+import { adapt, DEFAULT_WHO, fillPrompt, GUIDE, GUIDE_GROUPS, GUIDE_STYLES, guideMarkdown, MUST, promptFor, WHO } from '../src/core/material-guide.ts'
 import { cleanVeil, DEFAULT_VEIL } from '../src/dsh/web-body.ts'
 
 test('the document in docs/ is the one the guide writes (run scripts/make-material-doc.mjs after changing the guide)', () => {
@@ -59,16 +59,27 @@ test('every prompt to copy says what it is for and its size, a clip how long; no
   assert.ok(promptFor(GUIDE.find(i => i.id === 'base-portrait')!, '银发的狐狸少女').startsWith('这是为deepseek-harness设计的角色素材之一'))
 })
 
-test('two versions of her, drawn and real; every prompt that shows her keeps the three things, none has a marker left', () => {
-  for (const style of ['anime', 'real'] as const) {
+test('five templates; the whale girls keep the three things, the girlfriend and boyfriend have no tail; no marker left', () => {
+  assert.deepEqual(GUIDE_STYLES, ['anime', 'real', 'chibi', 'gf', 'bf'])
+  for (const style of GUIDE_STYLES) {
+    const whale = ['anime', 'real', 'chibi'].includes(style)
     for (const item of GUIDE) {
       const prompt = promptFor(item, DEFAULT_WHO[style], true, style)
-      assert.ok(!/\{(人物|画风|Q版)\}/.test(prompt), `${style} ${item.id}`)
-      assert.equal(prompt.includes(MUST), item.noHer !== true, `${style} ${item.id}`)
+      assert.ok(!/\{[^}]{1,4}\}|〔|〕/.test(prompt), `${style} ${item.id}`)
+      assert.equal(prompt.includes(MUST), whale && item.noHer !== true, `${style} ${item.id}`)
+      if (!whale) assert.ok(!/尾巴|鲸鱼/.test(prompt), `${style} ${item.id}`)
+      if (style === 'bf') assert.ok(!prompt.includes('她'), item.id)
     }
   }
-  // Both descriptions name the three, in their own words.
-  for (const who of [DEFAULT_WHO.anime, DEFAULT_WHO.real]) assert.ok(/鲸鱼尾巴(造型亚克力)?发卡/.test(who) && who.includes('DeepSeek') && /鲸鱼尾巴/.test(who))
+  // Every template has its own opening.
+  const intro = GUIDE.find(i => i.id === 'intro')!
+  assert.equal(new Set(GUIDE_STYLES.map(st => fillPrompt(intro.prompt, '', st))).size, 5)
+  assert.ok(promptFor(GUIDE.find(i => i.id === 'base-portrait')!, DEFAULT_WHO.gf, true, 'gf').startsWith('这是为deepseek-harness设计真人女友角色的素材之一'))
+  assert.ok(adapt('她〔和尾巴〕', 'bf') === '他' && adapt('她〔和尾巴〕', 'anime') === '她和尾巴')
+  // No maid outfit in ours.
+  for (const style of GUIDE_STYLES) assert.ok(!/女仆|围裙|蕾丝头饰|玛丽珍/.test(DEFAULT_WHO[style]), style)
+  // The three whale-girl descriptions name the three, in their own words.
+  for (const who of [DEFAULT_WHO.anime, DEFAULT_WHO.real, DEFAULT_WHO.chibi]) assert.ok(/鲸鱼尾巴(造型亚克力)?发卡/.test(who) && who.includes('DeepSeek') && /鲸鱼尾巴/.test(who))
   const real = promptFor(GUIDE.find(i => i.id === 'base-portrait')!, DEFAULT_WHO.real, false, 'real')
   assert.ok(real.startsWith('写实真人摄影，商业级Cosplay角色设定图，展示一位身材高挑修长的成年亚洲女性coser，扮演蓝色鲸鱼娘'))
   assert.ok(real.includes('写实摄影') && !real.includes('二次元'))
