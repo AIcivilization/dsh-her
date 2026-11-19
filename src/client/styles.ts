@@ -441,6 +441,8 @@ a.her-btn.disabled{opacity:.45;pointer-events:none}
 .her-card .her-versions{border:none;padding:0;margin:0}
 .her-versions b{font-weight:600;color:${TEXT}}
 .her-versions code{font-size:11px}
+.her-versions .her-star{margin-left:auto;gap:5px;text-decoration:none}
+.her-star-n{font-weight:600;padding:0 6px;border-radius:999px;background:${FIELD};color:${TEXT}}
 .her-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px}
 .her-head h1{font-size:21px;font-weight:650;margin:0}
 .her-head-right{display:flex;align-items:center;gap:10px}
