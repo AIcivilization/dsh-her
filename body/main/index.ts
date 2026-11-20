@@ -257,6 +257,42 @@ function playIntro(path: string): void {
   void intro.loadFile(join(__dirname, 'intro.html'), { query: { src: pathToFileURL(path).href } })
 }
 
+type PixelIntro = NonNullable<Extract<BrainMessage, { t: 'intro' }>['pixel']>
+
+/**
+ * A 像素动画 as her opening clip (docs/像素动画设计.md §6): the sandboxed
+ * player page in a window of its own over the middle of the screen, as big as
+ * its look says; no preload, no Node, and the page's CSP allows no network.
+ * The code is handed to the page once it has loaded; it closes itself at the
+ * end, on a click, or when the code fails.
+ */
+function playPixelIntro(pixel: PixelIntro): void {
+  if (off) return
+  const area = screen.getPrimaryDisplay().workArea
+  const share = Math.min(1, Math.max(0.2, pixel.look.size))
+  const size = { width: Math.round(area.width * share), height: Math.round(area.height * share) }
+  const intro = new BrowserWindow({
+    ...size, x: Math.round(area.x + (area.width - size.width) / 2), y: Math.round(area.y + (area.height - size.height) / 2),
+    frame: false, transparent: true, hasShadow: false, resizable: false, skipTaskbar: true, alwaysOnTop: true, focusable: false, show: false, backgroundColor: '#00000000',
+    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+  })
+  intro.setAlwaysOnTop(true, 'screen-saver')
+  // Nothing from the page opens or goes anywhere.
+  intro.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  intro.webContents.on('will-navigate', event => event.preventDefault())
+  const hex = /^#([0-9a-f]{6})$/i.exec(pixel.look.color)?.[1] ?? '7fb6ff'
+  const ink = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16))
+  const command = { t: 'play', code: pixel.code, look: { ...pixel.look, size: 1 }, ink, mode: 'once', cap: 8, fade: true }
+  intro.webContents.once('did-finish-load', () => {
+    void intro.webContents.executeJavaScript(`window.__pixelStart && window.__pixelStart(${JSON.stringify(command)})`).catch(() => intro.destroy())
+    intro.showInactive()
+  })
+  // However the code behaves, the window goes after the longest clip.
+  const guard = setTimeout(() => { if (!intro.isDestroyed()) intro.destroy() }, 12_000)
+  intro.once('closed', () => clearTimeout(guard))
+  void intro.loadFile(join(__dirname, 'pixel.html'))
+}
+
 /**
  * Switch her off or call her back. Off: her window and the talk bar close
  * (no picture, no microphone, no voice); the brain also stops her speaking
@@ -813,8 +849,17 @@ function toPage(channel: string, ...args: unknown[]): void {
 }
 
 ipcMain.handle('config', (event): BodyConfig => (petWin !== undefined && petPack !== undefined && event.sender === petWin.webContents
-  ? { mode: 'overlay', platform: process.platform, pack: petPack, her: herSize(petPack, look === undefined ? undefined : cleanPlace(look.place?.pet)), debug, mute: true, pet: true }
-  : { mode, platform: process.platform, pack, her: herSize(), debug, mute, ...(petWin !== undefined ? { bubble: false } : {}), ...(unseen() ? { unseen: true } : {}) }))
+  ? { mode: 'overlay', platform: process.platform, pack: petPack, her: herSize(petPack, look === undefined ? undefined : cleanPlace(look.place?.pet)), debug, mute: true, pet: true, ...(pixelCells > 0 ? { pixel: pixelCells } : {}) }
+  : { mode, platform: process.platform, pack, her: herSize(), debug, mute, ...(petWin !== undefined ? { bubble: false } : {}), ...(unseen() ? { unseen: true } : {}), ...(pixelCells > 0 ? { pixel: pixelCells } : {}) }))
+
+/** 像素化显示, from the brain (her character's setting): a change draws her windows again. */
+let pixelCells = 0
+function setPixel(cells: number | undefined): void {
+  const next = typeof cells === 'number' && cells > 0 ? Math.round(cells) : 0
+  if (next === pixelCells) return
+  pixelCells = next
+  replaceWindow()
+}
 /** The floating window beside the wallpaper one only shows and is touched: the other one speaks, listens and answers the brain. */
 const fromPet = (sender: Electron.WebContents) => petWin !== undefined && !petWin.isDestroyed() && sender === petWin.webContents
 const PET_SENDS = new Set(['touch', 'interrupt'])
@@ -934,6 +979,7 @@ if (!app.requestSingleInstanceLock()) {
           if (message.config.tray !== undefined && message.config.tray !== (settings.noTray !== true)) setTray(message.config.tray)
           if (message.config.holdKey !== undefined && message.config.holdKey !== (settings.holdKey === true)) setHoldKey(message.config.holdKey, false)
           if (message.config.petScale !== undefined) setPetScale(message.config.petScale, false)
+          setPixel(message.config.pixel)
           refreshTray()
           reportPacks()
           reportMode()
@@ -950,10 +996,12 @@ if (!app.requestSingleInstanceLock()) {
           if (message.tray !== undefined) setTray(message.tray)
           if (message.holdKey !== undefined) setHoldKey(message.holdKey, false)
           if (message.petScale !== undefined) setPetScale(message.petScale, false)
+          if ('pixel' in message) setPixel(message.pixel)
           if (message.places !== undefined || message.tray !== undefined || message.holdKey !== undefined || message.petScale !== undefined) reportPrefs()
           return
         } else if (message.t === 'intro') {
-          playIntro(message.path)
+          if (message.pixel !== undefined) playPixelIntro(message.pixel)
+          else playIntro(message.path)
           return
         } else if (message.t === 'mode') {
           switchMode(message.mode)

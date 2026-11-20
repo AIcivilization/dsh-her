@@ -1,6 +1,6 @@
 // Calls to the plugin's endpoints on DSH's own authenticated `/api` channel.
 
-import type { SkinsView, StageView, StateView, VoicesView } from '../dsh/api.ts'
+import type { PixelsView, SkinsView, StageView, StateView, VoicesView } from '../dsh/api.ts'
 import type { ManualInstall } from '../dsh/body-install.ts'
 import type { DesignChoice, DesignPreview, InstalledDesign } from '../dsh/design-packs.ts'
 import { isRemotePage } from '../core/where.ts'
@@ -8,7 +8,7 @@ import type { LookProject, WorkshopCard } from '../core/workshop.ts'
 import type { ProjectStatus } from '../dsh/workshop.ts'
 import type { ClipUse, ClipsView } from '../pack/types.ts'
 
-export type { SkinsView, StageView, StateView, VoicesView }
+export type { PixelsView, SkinsView, StageView, StateView, VoicesView }
 export type { DesignChoice, DesignPreview, InstalledDesign }
 export type DesignsList = { installed: InstalledDesign[]; exportable: { character: string; stage?: { scenes: number; materials: number; skipped: string[] }; sheet?: string; skin?: string; intro?: string } }
 
@@ -135,6 +135,11 @@ export const herApi = {
   skinsRemove: (id: string) => post<SkinsView>('/skins/remove', { id }),
   introSet: (change: Record<string, unknown>) => post<SkinsView>('/intro/set', change),
   introPlay: () => post<Record<string, never>>('/intro/play'),
+  pixelsGet: () => post<PixelsView>('/pixels/get'),
+  pixelsCode: (id: string) => post<{ code: string }>('/pixels/code', { id }),
+  pixelsAdd: (input: { name: string; code: string; info: unknown; thumb?: string; frameMs?: number }) => post<PixelsView & { id: string }>('/pixels/add', input),
+  pixelsRemove: (id: string) => post<PixelsView>('/pixels/remove', { id }),
+  pixelsBackground: (change: Record<string, unknown>) => post<PixelsView>('/pixels/background', { change }),
   stageRestore: (id: string) => post<StageView>('/stage/restore', { id }),
   libraryRename: (row: string, from: string, to: string) => post<StageView>('/library/rename', { row, from, to }),
   libraryRemove: (row: string, name: string) => post<StageView>('/library/remove', { row, name }),

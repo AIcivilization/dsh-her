@@ -10,13 +10,14 @@
  */
 
 /**
- * The five templates we start from: our whale girl three ways (drawn, a real
- * cosplayer photographed, chibi), and a real girlfriend and boyfriend. Each
- * has its own character, how it is drawn, its own scenes and its own opening.
+ * The six templates we start from: our whale girl four ways (drawn, a real
+ * cosplayer photographed, chibi, pixel art), and a real girlfriend and
+ * boyfriend. Each has its own character, how it is drawn, its own scenes and
+ * its own opening.
  */
-export type GuideStyle = 'anime' | 'real' | 'chibi' | 'gf' | 'bf'
+export type GuideStyle = 'anime' | 'real' | 'chibi' | 'pixel' | 'gf' | 'bf'
 
-export const GUIDE_STYLES: GuideStyle[] = ['anime', 'real', 'chibi', 'gf', 'bf']
+export const GUIDE_STYLES: GuideStyle[] = ['anime', 'real', 'chibi', 'pixel', 'gf', 'bf']
 
 interface Template {
   label: string
@@ -35,12 +36,29 @@ interface Template {
   scene: Record<'窗边' | '窗外' | '远处' | '窗外动' | '夜景' | '夜景动' | '色调' | '皮肤底', string>
   /** The opening clip: how they come on. */
   opening: string
+  /** Said in every clip's prompt (clips have no 画风 line): pixel art keeps its grid. */
+  clip?: string
 }
 
 const DRAWN_LOOK = '高质量二次元插画，日系动画美型画风，线条干净细腻，光影柔和有层次，服装面料、刺绣和饰品的细节精致，高细节，高清。'
 const REAL_LOOK = '高端商业摄影，写实真人，真实的皮肤和面料质感，服装做工精良，柔和的影棚灯光，高清；拍全身时机位略低，显得腿长；不要插画感，不要塑料感。'
 const DRAWN_CHIBI = 'Q 版小人，大约两头身，大头小身子，圆润可爱'
 const REAL_CHIBI = 'Q 版树脂手办（黏土人质感），大约两头身，大头小身子，真实微距摄影'
+
+/** Pixel art (docs/像素动画设计.md §11): crisp squares, few colours, and a clip keeps its grid. */
+const PIXEL_LOOK = '16-bit 像素画（pixel art），像 SNES 时代的角色立绘和场景：清晰的方形像素边缘，每个像素格大小一致，有限调色板（不超过 32 色），纯色块加少量规则的抖动网点，没有抗锯齿，没有模糊，没有渐变噪点，没有写实光影；细节精致，轮廓干净。如果是视频：保持像素风，像素格子大小全程不变，动作按帧一格一格地动，不要平滑插帧，不要运动模糊。'
+const PIXEL_CHIBI = 'Q 版像素小人，大约两头身，大头小身子，大约 32 × 48 个像素格的比例，圆润可爱'
+
+const PIXEL_SEA: Template['scene'] = {
+  窗边: '像素风海边小木屋的窗边',
+  窗外: '像素风的平静海面、几朵方块云和远处的小灯塔',
+  远处: '像素海',
+  窗外动: '窗外的像素海面一格一格地闪着波光，方块云非常缓慢地移动',
+  夜景: '像素星空和月光下的像素海面',
+  夜景动: '像素星星一明一暗地闪烁，月光下的海面一格一格地闪着波光',
+  色调: '以海蓝、白和少量珊瑚粉为主，调色板不超过 32 色',
+  皮肤底: '像素风的浅海水面俯视图，几道一格宽的浅色波纹和稀疏的像素光点，颜色是很浅的海蓝到白色，色块平涂',
+}
 
 const SEA: Template['scene'] = {
   窗边: '靠海的窗边',
@@ -115,6 +133,24 @@ const TEMPLATES: Record<GuideStyle, Template> = {
     chibi: 'Q 版小人（就是她本来的样子），大约两头身，大头小身子，圆润可爱',
     whale: true, he: false, purpose: WHALE_PURPOSE, scene: SEA,
     opening: '一个圆滚滚的海蓝色大泡泡从画面下方慢慢飘上来，在画面中间停住，轻轻一颤，「啵」地破开，Q 版的她从里面蹦出来，在空中转了一圈，小尾巴一翘，稳稳落地，双手比个耶，眨一下眼，停在尾帧的姿势上。泡泡破开时溅出几颗小水珠。',
+  },
+  pixel: {
+    label: '像素鲸鱼娘',
+    who: [
+      '成年女性鲸鱼娘的 16-bit 像素画立绘，约二十二岁。虽然是像素画，身材比例要像成年女性：身材高挑纤细，约七到八头身，腰线高而纤细，双腿修长笔直，站姿挺拔。',
+      '她有一头及腰的银白色长发，用三四个色阶画出光泽，发尾渐变成浅海蓝；侧分刘海，脸侧垂下两缕细长鬓发；左耳前一条细细的三股辫，辫尾一个白色像素点当珍珠。',
+      '小巧的脸，像素画的大眼睛是浅海青绿色，每只眼睛里有一两个白色高光像素；眼神温柔，嘴角含笑，脸颊各一个淡粉色像素点。',
+      '头顶右侧斜戴一枚银色的鲸鱼尾巴发饰，两片尾鳍向上扬起，用银白和浅蓝两个色阶画出镂空感，尾端垂下两条一格宽的珍珠流苏。',
+      '她穿一条像素风的海浪礼裙：上身是珍珠白立领无袖上衣，领口一圈银色像素浪纹，胸前一列小扣子；双肩一层半透明的深海蓝薄纱短披肩（用抖动网点表现透明），边缘像浪花一样卷起；腰间一条银色细链腰带，正中一个小贝壳扣。',
+      '裙子是前短后长的不对称剪裁：前摆到膝盖上方，后摆垂到脚踝；裙摆分成好几层，颜色一层层从珍珠白过渡到雾蓝、海蓝、深海蓝，每层边缘一排闪光像素点像海面波光。裙子正面左下方是 DeepSeek 的蓝色小鲸鱼标志，用像素画清楚地画出来，一眼能认出。',
+      '腿上是浅色丝袜，脚上是银白色细带高跟凉鞋。脖子上一条珍珠颈链，正中一颗海玻璃水滴吊坠（两三个浅青色像素）。',
+      '腰后伸出一条修长的深海蓝色鲸鱼尾巴，长到小腿，向一侧弯出优雅的弧线；尾巴腹面浅蓝色，有几道平行的白色像素细纹；末端两片宽大的尾鳍，鳍缘是浅青色。',
+      '气质温柔、优雅又灵动。配色以珍珠白、银白、雾蓝、海蓝、深海蓝为主，银色点缀，不用金色；整套调色板不超过 32 色。',
+      '避免：矮胖、短腿、头大身小、比例失调、像素格大小不一、模糊、抗锯齿、写实质感。',
+    ].join('\n'),
+    look: PIXEL_LOOK, chibi: PIXEL_CHIBI, whale: true, he: false, purpose: WHALE_PURPOSE, scene: PIXEL_SEA,
+    clip: '保持 16-bit 像素画风：像素格子大小全程不变，颜色是平涂的色块，动作按帧一格一格地动，不要平滑插帧，不要运动模糊，不要变成写实或普通动画。',
+    opening: '一道像素浪花从画面下方一格一格地涌上来，浪尖碎成方块水花；一条深海蓝的像素鲸鱼尾巴从浪里升起来，用力一拍，水花四溅，她从水花里跳出来，落地，对着镜头挥手微笑，停在尾帧的姿势上。全程是像素画，像素格大小不变，水花是浅蓝和白色的方块。（不想做视频：在「像素动画」里选自带的「鲸尾出水」当开机动画，也是这个感觉。）',
   },
   gf: {
     label: '真人女友',
@@ -216,7 +252,7 @@ export const GUIDE_GROUPS: Array<{ id: GuideGroup; title: string; about: string 
   { id: 'avatar', title: '二、头像（对话框上的 Q 版小她）', about: '站在 dsh 对话框上沿的 Q 版全身小人，不大。平时站着，会来回走两步、翻个跟头、打个滚；说话、听你说、想事情、被摸头、打招呼时各有一段。都用绿幕做，传上来点「抠掉背景」。' },
   { id: 'desktop', title: '三、桌面（壁纸里）', about: '铺满整个屏幕，在所有窗口后面。她在场景里：窗边、书桌、夜晚的窗外。' },
   { id: 'pet', title: '四、宠物（浮在桌面上、网页里的桌宠）', about: '只有她自己，背景透明，浮在所有窗口上面，能拖、能点。' },
-  { id: 'intro', title: '五、开机动画', about: '她出场时播一次的短片。五套模版各有自己的开机画面。' },
+  { id: 'intro', title: '五、开机动画', about: '她出场时播一次的短片。六套模版各有自己的开机画面；也可以不用视频，在「像素动画」里选一个用代码画的。' },
   { id: 'skin', title: '六、皮肤背景图', about: '换 dsh 整个界面时用的背景图（皮肤的其余部分是颜色和字体，不用画）。' },
 ]
 
@@ -488,7 +524,8 @@ export function promptFor(item: GuideItem, who: string, purpose = true, style: G
     : `图片尺寸：${item.size}；格式：${item.format}。`
   const ours = templateOf(who, style)
   const must = item.noHer === true || ours === undefined || !TEMPLATES[ours].whale ? [] : [MUST]
-  return [...(purpose ? [purposeLine(who, style)] : []), fillPrompt(item.prompt, who, style), ...must, size].join('\n')
+  const clip = item.tool === '图生视频' ? TEMPLATES[style].clip : undefined
+  return [...(purpose ? [purposeLine(who, style)] : []), fillPrompt(item.prompt, who, style), ...(clip === undefined ? [] : [clip]), ...must, size].join('\n')
 }
 
 /** The whole guide as a document (docs/素材规格与提示词.md). */
@@ -530,13 +567,13 @@ export function guideMarkdown(own?: string, style: GuideStyle = 'anime'): string
     '',
     ...(own === undefined
       ? [
-        '## 五套初始模版',
+        '## 六套初始模版',
         '',
-        `我们给了五套模版：${GUIDE_STYLES.map(st => `**${STYLE_LABEL[st]}**`).join('、')}。下面每条提示词都有五版，点开你要的那一版复制。换成你自己的人物：在 dsh 的素材指南页面里选一套最接近的模版，把人物设定改成你的。`,
+        `我们给了六套模版：${GUIDE_STYLES.map(st => `**${STYLE_LABEL[st]}**`).join('、')}。下面每条提示词都有六版，点开你要的那一版复制。换成你自己的人物：在 dsh 的素材指南页面里选一套最接近的模版，把人物设定改成你的。`,
         '',
-        '三套鲸鱼娘的每一张图、每一段视频，都**必须保留这三样**：头顶的鲸鱼尾巴发饰；裙子（或短裤、长裤）上的 DeepSeek 蓝色小鲸鱼标志；身后的蓝色鲸鱼尾巴。提示词里已经写上了。真人女友和真人男友是虚构的成年人，不像任何真实的人。',
+        '四套鲸鱼娘的每一张图、每一段视频，都**必须保留这三样**：头顶的鲸鱼尾巴发饰；裙子（或短裤、长裤）上的 DeepSeek 蓝色小鲸鱼标志；身后的蓝色鲸鱼尾巴。提示词里已经写上了。真人女友和真人男友是虚构的成年人，不像任何真实的人。',
         '',
-        '每套各有自己的场景和开机画面：鲸鱼娘在海边，女友在洒满阳光的公寓，男友在书房；开机画面分别是浪花、气泡和光带、大泡泡、带花瓣的风、走进画面打招呼。',
+        '每套各有自己的场景和开机画面：鲸鱼娘在海边（像素版在像素海边小屋），女友在洒满阳光的公寓，男友在书房；开机画面分别是浪花、气泡和光带、大泡泡、像素浪花和鲸尾、带花瓣的风、走进画面打招呼。像素鲸鱼娘要在「像素动画」页打开「像素化显示」，她在屏幕上才是干净整齐的像素格。',
         '',
         ...GUIDE_STYLES.flatMap(st => [`**${STYLE_LABEL[st]}：**`, '', '```', DEFAULT_WHO[st], '```', '']),
         '下面「要求」「怎么做」这些说明按二次元鲸鱼娘写；女友和男友没有尾巴，场景按各自的来，提示词里都已经换好了。',

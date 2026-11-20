@@ -32,6 +32,7 @@ const PATHS: Record<string, ReactNode> = {
   copy: <><rect x="7" y="7" width="9.5" height="9.5" rx="1.5" /><path d="M13 7V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v6.5A1.5 1.5 0 0 0 5 13h2" /></>,
   guide: <><path d="M10 5.5C8.5 4.3 6.5 4 4 4v11c2.5 0 4.5.3 6 1.5 1.5-1.2 3.5-1.5 6-1.5V4c-2.5 0-4.5.3-6 1.5z" /><path d="M10 5.5v11" /></>,
   eye: <><path d="M2.5 10S5.5 5 10 5s7.5 5 7.5 5-3 5-7.5 5-7.5-5-7.5-5z" /><circle cx="10" cy="10" r="2" /></>,
+  pixel: <><rect x="3.5" y="3.5" width="4" height="4" /><rect x="8" y="8" width="4" height="4" /><rect x="12.5" y="3.5" width="4" height="4" /><rect x="3.5" y="12.5" width="4" height="4" /><rect x="12.5" y="12.5" width="4" height="4" /></>,
 }
 
 export type IconName = keyof typeof PATHS

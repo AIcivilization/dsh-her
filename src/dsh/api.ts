@@ -14,6 +14,8 @@ import type { ClipUse, ClipsView } from '../pack/types.ts'
 import type { Stage } from '../pack/stage.ts'
 import type { Skin } from '../core/skin.ts'
 import type { IntroSettings } from '../core/intro.ts'
+import type { PixelBackground, PixelLook } from '../core/pixel.ts'
+import type { PixelEntry } from './pixels.ts'
 import type { VoicesConfig } from '../voice/external.ts'
 import type { LibraryRow, Material } from './library.ts'
 import type { StageVersion } from './stage-store.ts'
@@ -50,6 +52,20 @@ export interface SkinsView {
   introClips: Material[]
   /** The skin in use has an opening clip of its own. */
   skinIntro: boolean
+}
+
+/** 像素动画 for the page (docs/像素动画设计.md §8): all of them, the chat background, the opening clip. */
+export interface PixelsView {
+  items: PixelEntry[]
+  background: PixelBackground
+  intro: IntroSettings
+}
+
+/** The opening clip a dsh page plays: a clip's address, or a 像素动画 and how it is drawn. */
+export interface WebIntro {
+  url?: string
+  pixel?: { id: string; look: PixelLook }
+  when: 'every' | 'daily'
 }
 
 /** Her small picture in the page, and its moving version when she has one. */
@@ -181,6 +197,12 @@ export interface ApiRuntime {
   skinsRemove(id: string): SkinsView
   introSet(change: Partial<IntroSettings>): SkinsView
   introPlay(): void
+  /** 像素动画 (docs/像素动画设计.md): the list, a file's code, keeping one the page has tried, the chat background. */
+  pixelsGet(): PixelsView
+  pixelsCode(id: string): string
+  pixelsAdd(input: { name: string; code: string; info: unknown; thumb?: unknown; frameMs?: unknown }): PixelsView & { id: string }
+  pixelsRemove(id: string): PixelsView
+  pixelsBackground(change: unknown): PixelsView
   stagePlay(on: boolean): StageView
   stageSave(stage: unknown): StageView
   stageRestore(id: string): StageView
@@ -206,7 +228,7 @@ export interface ApiRuntime {
   bodyOpenFolder(): void
   /** The web body: whether to show, her config, a message from the page, the setting. */
   /** `remote`: the page is open on another device than the one running dsh. */
-  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; pill: boolean; veil: WebVeil; mode: WebMode; place: WebPlace; scope: WebScope; focus: boolean; open?: string; page?: SettingsPage; chat?: boolean; avatar?: AvatarView; skin?: { id: string; rev: number }; intro?: { url: string; when: 'every' | 'daily' } }
+  webStatus(screen: { w: number; h: number; scale: number } | undefined, remote: boolean): { show: boolean; pill: boolean; veil: WebVeil; mode: WebMode; place: WebPlace; scope: WebScope; focus: boolean; open?: string; page?: SettingsPage; chat?: boolean; avatar?: AvatarView; skin?: { id: string; rev: number }; intro?: WebIntro; pixelBg?: PixelBackground }
   /** A new folder for files coming from the browser, and importing it as a pack (with no desktop body). */
   webNewBatch(): string
   importBatch(batch: string, name?: string): Promise<void>
@@ -321,6 +343,12 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
         patch.voice = { id: body.voice === undefined ? current.id : str(body.voice, '音色'), speed: body.speed === undefined ? current.speed : num(body.speed, '语速') }
       }
       if (body.onboarded !== undefined) patch.onboarded = body.onboarded === true
+      if (body.pixel !== undefined) {
+        // 0 or null: off; else how many pixels high she is drawn.
+        const cells = body.pixel === null ? 0 : num(body.pixel, '像素化显示')
+        if (cells !== 0 && (cells < 32 || cells > 480)) throw new ApiError('像素化显示的高度要在 32 到 480 之间')
+        patch.pixel = cells === 0 ? undefined : Math.round(cells)
+      }
       if (body.model !== undefined) {
         if (body.model === null) patch.model = undefined
         else {
@@ -363,8 +391,18 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
       if (typeof body.dsh === 'boolean') change.dsh = body.dsh
       if (body.when === 'every' || body.when === 'daily') change.when = body.when
       if (typeof body.source === 'string') change.source = body.source
+      if (typeof body.look === 'object' && body.look !== null) change.look = body.look as PixelLook
       return { ...rt.introSet(change) }
     },
+    '/pixels/get': async () => ({ ...rt.pixelsGet() }),
+    '/pixels/code': async body => ({ code: rt.pixelsCode(str(body.id, '像素动画')) }),
+    '/pixels/add': async body => {
+      const code = str(body.code, '代码')
+      if (code.length > 400_000) throw new ApiError('文件太大了')
+      return { ...rt.pixelsAdd({ name: typeof body.name === 'string' ? body.name : '', code, info: body.info, thumb: body.thumb, frameMs: body.frameMs }) }
+    },
+    '/pixels/remove': async body => ({ ...rt.pixelsRemove(str(body.id, '像素动画')) }),
+    '/pixels/background': async body => ({ ...rt.pixelsBackground(body.change) }),
     '/intro/play': async () => {
       rt.introPlay()
       return {}
@@ -481,7 +519,7 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
     '/designs/apply': async body => {
       const c = (body.choice ?? {}) as Record<string, unknown>
       const flag = (key: string) => c[key] === true
-      return { ...rt.designApply(str(body.token, '设计包'), { character: flag('character'), switchTo: flag('switchTo'), skin: flag('skin'), wearSkin: flag('wearSkin'), intro: flag('intro'), setIntro: flag('setIntro'), materials: flag('materials') }) }
+      return { ...rt.designApply(str(body.token, '设计包'), { character: flag('character'), switchTo: flag('switchTo'), skin: flag('skin'), wearSkin: flag('wearSkin'), intro: flag('intro'), setIntro: flag('setIntro'), materials: flag('materials'), pixels: flag('pixels'), pixelBackground: flag('pixelBackground') }) }
     },
     '/web/veil': async body => {
       rt.webSetVeil({ ...(typeof body.dim === 'number' ? { dim: body.dim } : {}), ...(typeof body.blur === 'number' ? { blur: body.blur } : {}) })

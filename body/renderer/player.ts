@@ -24,6 +24,7 @@
 import type { PackClipInfo, PackInfo, PackLayout } from '../shared/types.ts'
 import { Director } from './director.ts'
 import { StackedView } from './stacked.ts'
+import { PixelView } from './pixel-view.ts'
 
 const FADE_S = 0.3
 /** Seconds before a clip's end at which the next one is chosen (and preloaded or faded in). */
@@ -36,7 +37,7 @@ export interface Slot {
   video: HTMLVideoElement
   /** The element on screen: the video itself, or its WebGL canvas. */
   shown: HTMLElement
-  view?: StackedView
+  view?: { drawNow(): void }
   clip?: PackClipInfo
 }
 
@@ -57,7 +58,8 @@ export class Player {
   private readonly byId: Map<string, PackClipInfo>
   private readonly events: PlayerEvents
 
-  constructor(stage: HTMLElement, pack: PackInfo, events: PlayerEvents) {
+  /** `pixel`: 像素化显示, how many pixels high (0: as the clip is). */
+  constructor(stage: HTMLElement, pack: PackInfo, events: PlayerEvents, pixel = 0) {
     this.byId = new Map(pack.clips.map(c => [c.id, c]))
     this.director = new Director(pack.clips, pack.macros, pack.start)
     this.events = events
@@ -66,7 +68,7 @@ export class Player {
         if (this.director.wanted === 'idle' && Date.now() - this.lastInteraction > SLEEP_AFTER_MS) this.director.setState('sleep')
       }, 30_000)
     }
-    this.slots = [0, 1].map(() => makeSlot(stage, pack.layout))
+    this.slots = [0, 1].map(() => makeSlot(stage, pack.layout, pixel))
     for (const slot of this.slots) {
       slot.video.addEventListener('timeupdate', () => this.nearEnd(slot))
       slot.video.addEventListener('ended', () => this.ended(slot))
@@ -209,15 +211,21 @@ async function load(slot: Slot, clip: PackClipInfo): Promise<void> {
   slot.view?.drawNow()
 }
 
-function makeSlot(stage: HTMLElement, layout: PackLayout): Slot {
+function makeSlot(stage: HTMLElement, layout: PackLayout, pixel: number): Slot {
   const video = document.createElement('video')
   video.muted = true
   video.playsInline = true
   video.preload = 'auto'
   stage.append(video)
+  if (layout !== 'stacked' && pixel > 0) {
+    video.classList.add('source')
+    const view = new PixelView(video, pixel)
+    stage.append(view.canvas)
+    return { video, shown: view.canvas, view }
+  }
   if (layout !== 'stacked') return { video, shown: video }
   video.classList.add('source')
-  const view = new StackedView(video)
+  const view = new StackedView(video, pixel)
   stage.append(view.canvas)
   return { video, shown: view.canvas, view }
 }

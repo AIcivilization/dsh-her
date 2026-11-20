@@ -210,6 +210,7 @@ export function SkinCard() {
           <span className="her-row" style={{ margin: 0, flexWrap: 'nowrap' }}>
             <select className="her-select" style={{ width: 'auto' }} value={intro.source} onChange={e => void herApi.introSet({ source: e.target.value }).then(r => take(r))}>
               <option value="skin">{view.skinIntro ? '皮肤自带的' : '皮肤自带的（这套没有）'}</option>
+              {intro.source.startsWith('pixel:') && <option value={intro.source}>像素动画（在「像素动画」页里选）</option>}
               {view.introClips.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
             </select>
             <button className="her-btn" onClick={() => clip.current?.click()}>上传…</button>

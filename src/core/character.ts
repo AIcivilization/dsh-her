@@ -27,6 +27,8 @@ export interface Character {
   sheet?: string
   /** The wizard has been completed once. */
   onboarded: boolean
+  /** 像素化显示 (docs/像素动画设计.md §11.3): her clips drawn so many pixels high, with square edges; absent: as they are. */
+  pixel?: number
 }
 
 export function loadCharacter(dir: string, defaults: Character): Character {

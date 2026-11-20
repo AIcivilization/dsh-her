@@ -16,6 +16,7 @@ import { parseStage, renameMaterial, type Stage } from '../pack/stage.ts'
 import type { Characters } from './characters.ts'
 import type { Library, LibraryRow } from './library.ts'
 import type { Skins } from './skins.ts'
+import type { Pixels } from './pixels.ts'
 import { StageStore } from './stage-store.ts'
 import { writePlay } from './stage-play.ts'
 
@@ -32,6 +33,8 @@ export interface DesignDepsDisk {
   /** Her opening clip: which 素材库 clip, how often (undefined: it is not one of the 素材库's). */
   intro: () => { source?: string; when: 'every' | 'daily' }
   setIntro: (source: string, when: 'every' | 'daily') => void
+  /** 像素动画 (docs/像素动画设计.md §9). */
+  pixels: Pixels
   /** After materials came in: look at them against the spec. */
   examine: () => void
 }
@@ -44,7 +47,10 @@ export interface DesignPreview {
   character?: { name: string; persona: string }
   stage?: { scenes: number }
   skin?: { name: string }
-  intro?: { name: string; when: 'every' | 'daily' }
+  intro?: { name: string; when: 'every' | 'daily'; pixel?: boolean }
+  /** 像素动画 in it (file names), and the one for dsh's chat background. */
+  pixels?: string[]
+  background?: string
   materials: Record<DesignRow, number>
   bytes: number
   skipped: string[]
@@ -61,6 +67,9 @@ export interface DesignChoice {
   wearSkin: boolean
   intro: boolean
   setIntro: boolean
+  /** Its 像素动画 into the list; the one it names behind dsh's conversation. */
+  pixels?: boolean
+  pixelBackground?: boolean
   /** Materials into the 素材库 when there is no character to take them. */
   materials: boolean
 }
@@ -127,7 +136,9 @@ export class DesignPacks {
       ...(m.character === undefined ? {} : { character: { name: m.character.name, persona: m.character.persona.slice(0, 200) } }),
       ...(stage?.stage === undefined ? {} : { stage: { scenes: stage.stage.scenes.length } }),
       ...(skinName === undefined ? {} : { skin: { name: skinName } }),
-      ...(m.intro === undefined ? {} : { intro: { name: m.intro.material, when: m.intro.when } }),
+      ...(m.intro === undefined ? {} : { intro: { name: m.intro.material ?? m.intro.pixel ?? '', when: m.intro.when, ...(m.intro.pixel === undefined ? {} : { pixel: true }) } }),
+      ...(plan.pixelFiles.length === 0 ? {} : { pixels: plan.pixelFiles.map(f => f.file) }),
+      ...(m.background === undefined ? {} : { background: m.background.pixel }),
       materials: Object.fromEntries(DESIGN_ROWS.map(r => [r, plan.materials[r].length])) as Record<DesignRow, number>,
       bytes: plan.bytes,
       skipped: plan.skipped,
@@ -196,10 +207,37 @@ export class DesignPacks {
       if (skipped.length > 0) notes.push(`皮肤里没收的文件：${skipped.join('、')}`)
       if (choice.wearSkin) skins.use(id)
     }
-    if (choice.intro && m.intro !== undefined) {
+    // 像素动画: each file once, whichever part asked for it.
+    const pixelIds = new Map<string, string>()
+    const pixel = (file: string): string | undefined => {
+      const known = pixelIds.get(file)
+      if (known !== undefined) return known
+      const found = plan.pixelFiles.find(f => f.file === file)
+      if (found === undefined) return undefined
+      try {
+        const id = this.deps.pixels.addUntried(`${file.replace(/\.js$/i, '')}（${m.name}）`.slice(0, 40), found.code)
+        pixelIds.set(file, id)
+        return id
+      } catch (error) {
+        notes.push(`像素动画 ${file} 没装：${(error as Error).message}`)
+        return undefined
+      }
+    }
+    if (choice.pixels === true) for (const f of plan.pixelFiles) pixel(f.file)
+    if (choice.intro && m.intro?.material !== undefined) {
       record.materials += put('intro', m.intro.material)
       const name = renamed.intro?.[m.intro.material] ?? m.intro.material
       if (choice.setIntro && library.path('intro', name) !== undefined) this.deps.setIntro(name, m.intro.when)
+    }
+    if (choice.intro && m.intro?.pixel !== undefined) {
+      const id = pixel(m.intro.pixel)
+      if (id !== undefined && choice.setIntro) this.deps.setIntro(`pixel:${id}`, m.intro.when)
+    }
+    if (choice.pixelBackground === true && m.background !== undefined) {
+      const id = pixel(m.background.pixel)
+      if (id !== undefined) {
+        this.deps.pixels.setBackground({ on: true, id, ...(m.background.opacity === undefined ? {} : { opacity: m.background.opacity }), ...(m.background.style === undefined ? {} : { look: { style: m.background.style } }) })
+      }
     }
     if (record.materials > 0) this.deps.examine()
     const list = this.installed()

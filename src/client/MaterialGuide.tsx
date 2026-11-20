@@ -59,7 +59,7 @@ const readWho = (cid: string, style: GuideStyle) => {
   }
 }
 
-export function MaterialGuide({ cid, onLibrary, onSkin }: { cid: string; onLibrary: () => void; onSkin: () => void }) {
+export function MaterialGuide({ cid, onLibrary, onSkin, onPixels }: { cid: string; onLibrary: () => void; onSkin: () => void; onPixels?: () => void }) {
   const [style, setStyle] = useState<GuideStyle>(() => {
     try {
       const kept = localStorage.getItem(STYLE_KEY)
@@ -127,8 +127,14 @@ export function MaterialGuide({ cid, onLibrary, onSkin }: { cid: string; onLibra
           </span>
           {who !== DEFAULT_WHO[style] && <button className="her-btn small" onClick={() => save(DEFAULT_WHO[style])}>换回默认的{STYLE_LABEL[style]}</button>}
         </div>
-        <p className="her-muted">五套初始模版：二次元、真人（Cosplay 摄影）、Q版三种鲸鱼娘，加真人女友和真人男友，各有自己的场景和开机画面，下面每条提示词跟着切换。选一套最接近的，再把人物设定改成你的。写一次，每条提示词里的人物设定都会换成它；派生的图只写动作和场景，外貌交给参考图，所以这段主要用在定妆照和三视图上。</p>
+        <p className="her-muted">六套初始模版：二次元、真人（Cosplay 摄影）、Q版、像素四种鲸鱼娘，加真人女友和真人男友，各有自己的场景和开机画面，下面每条提示词跟着切换。选一套最接近的，再把人物设定改成你的。写一次，每条提示词里的人物设定都会换成它；派生的图只写动作和场景，外貌交给参考图，所以这段主要用在定妆照和三视图上。</p>
         <textarea className="her-textarea" rows={9} value={who} onChange={e => save(e.target.value)} aria-label="你的人物设定" />
+        {style === 'pixel' && (
+          <div className="her-setrow">
+            <div><b>像素风记得打开「像素化显示」</b><span>生图、生视频工具做出来的像素画常常有点糊、格子会跳。在「像素动画」页打开「像素化显示」，她在屏幕上就是干净整齐的像素格；开机动画也可以直接用自带的「鲸尾出水」像素动画。</span></div>
+            {onPixels !== undefined && <button className="her-btn" onClick={onPixels}>去设置</button>}
+          </div>
+        )}
         {isWhale(style) && <p className="her-faint"><b>鲸鱼娘的每条提示词都带着：</b>{MUST.replace('必须保留这三样：', '')}{who === DEFAULT_WHO[style] ? '' : '（换成你自己的人物后就不再加，按你的设定来）'}</p>}
         <div className="her-setrow">
           <div><b>提示词前面加一句用途说明</b><span>「{purposeLine(who, style)}」：让生图、生视频的工具知道这是做什么用的。每条提示词后面都已经带上了尺寸（视频还有时长）。</span></div>

@@ -19,7 +19,7 @@ const mb = (bytes: number) => (bytes < 1024 * 1024 ? `${Math.max(1, Math.round(b
 export function DesignPacks({ state, apply }: { state: StateView; apply: Apply }) {
   const [list, setList] = useState<DesignsList>()
   const [preview, setPreview] = useState<DesignPreview>()
-  const [choice, setChoice] = useState<DesignChoice>({ character: true, switchTo: true, skin: true, wearSkin: false, intro: true, setIntro: true, materials: true })
+  const [choice, setChoice] = useState<DesignChoice>({ character: true, switchTo: true, skin: true, wearSkin: false, intro: true, setIntro: true, materials: true, pixels: true, pixelBackground: false })
   const [read, setRead] = useState(false)
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState<UploadProgress>()
@@ -42,7 +42,7 @@ export function DesignPacks({ state, apply }: { state: StateView; apply: Apply }
       const answer = await uploadFile(zip, `/api/dsh-her/web/upload?design=1&path=${encodeURIComponent(zip.name)}`, setProgress) as { preview?: DesignPreview }
       if (answer.preview !== undefined) {
         setPreview(answer.preview)
-        setChoice({ character: answer.preview.character !== undefined, switchTo: true, skin: answer.preview.skin !== undefined, wearSkin: answer.preview.character === undefined, intro: answer.preview.intro !== undefined, setIntro: true, materials: true })
+        setChoice({ character: answer.preview.character !== undefined, switchTo: true, skin: answer.preview.skin !== undefined, wearSkin: answer.preview.character === undefined, intro: answer.preview.intro !== undefined, setIntro: true, materials: true, pixels: answer.preview.pixels !== undefined, pixelBackground: answer.preview.background !== undefined })
       }
     } catch (error) {
       setNote({ kind: 'error', text: (error as Error).message })
@@ -107,8 +107,14 @@ export function DesignPacks({ state, apply }: { state: StateView; apply: Apply }
               {p.skin !== undefined && choice.skin && (
                 <label className="her-setrow sub"><div><b>马上换上这套皮肤</b><span>不换的话，在「皮肤」里点它试。</span></div><input type="checkbox" checked={choice.wearSkin} onChange={toggle('wearSkin')} /></label>
               )}
+              {p.pixels !== undefined && (
+                <label className="her-setrow"><div><b>像素动画 {p.pixels.length} 个</b><span>{p.pixels.join('、')}：放进「像素动画」。它们是代码，只在隔离的环境里运行，连不了网，读不到你的文件。</span></div><input type="checkbox" checked={choice.pixels === true} onChange={toggle('pixels')} /></label>
+              )}
+              {p.background !== undefined && (
+                <label className="her-setrow"><div><b>dsh 对话背景用「{p.background}」</b><span>在对话后面播这个像素动画（点一下空白处播一遍）。</span></div><input type="checkbox" checked={choice.pixelBackground === true} onChange={toggle('pixelBackground')} /></label>
+              )}
               {p.intro !== undefined && (
-                <label className="her-setrow"><div><b>开机动画「{p.intro.name}」</b><span>放进素材库。</span></div><input type="checkbox" checked={choice.intro} onChange={toggle('intro')} /></label>
+                <label className="her-setrow"><div><b>开机动画「{p.intro.name}」</b><span>{p.intro.pixel === true ? '一个像素动画，放进「像素动画」。' : '放进素材库。'}</span></div><input type="checkbox" checked={choice.intro} onChange={toggle('intro')} /></label>
               )}
               {p.intro !== undefined && choice.intro && (
                 <label className="her-setrow sub"><div><b>设成开机动画</b><span>{p.intro.when === 'every' ? '每次她出场都播' : '每天第一次出场时播'}。</span></div><input type="checkbox" checked={choice.setIntro} onChange={toggle('setIntro')} /></label>

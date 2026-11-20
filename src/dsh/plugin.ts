@@ -54,7 +54,8 @@ import { designTools, herLookTools, undoSvg, type DesignDeps } from './design-to
 import { DesignSession } from './design-session.ts'
 import { Secrets } from '../voice/secrets.ts'
 import { cleanVoices, ExternalVoices, SECRET_FIELDS, type PluginVoice } from '../voice/external.ts'
-import { cleanIntro, type IntroSettings } from '../core/intro.ts'
+import { cleanIntro, introPixel, type IntroSettings } from '../core/intro.ts'
+import { Pixels } from './pixels.ts'
 import { checkMaterial, cleanSvg } from '../pack/material-check.ts'
 import { StageStore } from './stage-store.ts'
 import { Characters } from './characters.ts'
@@ -124,6 +125,8 @@ export function explainModelError(message: string, model: string): string {
 }
 
 /** This plugin's version, from its package.json (two folders up from src/dsh and lib/dsh alike). */
+/** The first body that draws a 像素动画 as its opening clip. */
+const PIXEL_BODY = '0.8.5'
 const PLUGIN_VERSION = (JSON.parse(readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8')) as { version: string }).version
 
 /** The newest published plugin: npm itself, or its China mirror where that cannot be reached. */
@@ -395,7 +398,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     mkdirSync(paths.root, { recursive: true })
     writeFileSync(offFile, `${JSON.stringify({ off: next })}\n`)
     if (next) cut()
-    else for (const body of server?.bodies ?? []) setTimeout(() => playIntro(message => body.send(message)), 800)
+    else for (const body of server?.bodies ?? []) setTimeout(() => playIntro(message => body.send(message), false, body.hello.body.version), 800)
     // The desktop closes or opens her window; the page hides or shows her at its next look (web/status).
     server?.broadcast({ t: 'config', off: next })
     log({ event: 'off', off: next })
@@ -1123,6 +1126,8 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     return { ...(stage === undefined ? {} : { stage }), problems, library: materials, missing, packs: packs.filter(p => !p.id.startsWith(`${STAGE_LOOK}-`)), versions: stages.versions(), playing: readPlay(dir).on, playNotes }
   }
   const skins = new Skins(paths.root)
+  /** 像素动画 (docs/像素动画设计.md): shared, like skins. */
+  const pixels = new Pixels(paths.root)
   /** Voices and listening from outside services; their keys in the keychain (or secrets.json). */
   const secrets = new Secrets(paths.root)
   const externalVoices = new ExternalVoices(paths.root, secrets)
@@ -1151,17 +1156,31 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     }
     return library.path('intro', settings.source)
   }
-  /** She comes out on a desktop body: the clip, when it is on and its time has come. */
-  const playIntro = (send: (message: BrainMessage) => void, force = false) => {
+  /** The opening clip is there to play: its file, or its 像素动画. */
+  const introReady = (settings = introSettings()): boolean => {
+    const pixel = introPixel(settings)
+    return pixel === undefined ? introPath(settings) !== undefined : pixels.code(pixel) !== undefined
+  }
+  /**
+   * She comes out on a desktop body: the clip, when it is on and its time has
+   * come. A 像素动画 goes as its code, to a body new enough to draw it.
+   */
+  const playIntro = (send: (message: BrainMessage) => void, force = false, bodyVersion?: string) => {
     const settings = introSettings()
-    const path = introPath(settings)
-    if (path === undefined || (!force && (!settings.on || herOff))) return
+    if (!introReady(settings) || (!force && (!settings.on || herOff))) return
+    const pixel = introPixel(settings)
+    if (pixel !== undefined && bodyVersion !== undefined && compareVersions(bodyVersion, PIXEL_BODY) < 0) {
+      log({ event: 'intro', skipped: `body ${bodyVersion} draws no 像素动画` })
+      return
+    }
     const today = dayOf(new Date())
     if (!force && settings.when === 'daily' && settings.lastDay === today) return
-    send({ t: 'intro', path })
+    if (pixel !== undefined) send({ t: 'intro', path: '', pixel: { code: pixels.code(pixel) ?? '', look: settings.look } })
+    else send({ t: 'intro', path: introPath(settings) ?? '' })
     saveIntro({ ...settings, lastDay: today })
-    log({ event: 'intro', force })
+    log({ event: 'intro', force, ...(pixel === undefined ? {} : { pixel }) })
   }
+  const pixelsView = () => ({ items: pixels.list(), background: pixels.background(), intro: introSettings() })
   const skinView = () => ({
     skins: skins.list().map(e => ({ ...e.skin, problems: e.problems, rev: e.rev })),
     current: skins.current() ?? null,
@@ -1319,6 +1338,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     current: () => ({ cid, dir, character }),
     intro: () => { const settings = introSettings(); return { ...(settings.source === 'skin' ? {} : { source: settings.source }), when: settings.when } },
     setIntro: (source, when) => saveIntro(cleanIntro({ ...introSettings(), on: true, source, when })),
+    pixels,
     examine: () => examineLater(),
   })
 
@@ -1379,6 +1399,8 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     saveCharacter: patch => {
       const next: Character = { ...character, ...patch, voice: { ...character.voice, ...patch.voice } }
       if ('model' in patch && patch.model === undefined) delete next.model
+      if ('pixel' in patch && patch.pixel === undefined) delete next.pixel
+      const pixelChanged = next.pixel !== character.pixel
       const problem = invalidCharacter(next)
       if (problem !== undefined) throw new Error(problem)
       const modelChanged = JSON.stringify(next.model) !== JSON.stringify(character.model)
@@ -1391,6 +1413,12 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
         log({ event: 'model', ...(route() ?? {}) })
       }
       voice?.setVoice(next.voice.id, next.voice.speed)
+      if (pixelChanged) {
+        // Her windows draw her again, pixelated or not; the page's body loads again.
+        server?.broadcast({ t: 'config', pixel: next.pixel ?? 0 })
+        webBody.reload()
+        log({ event: 'pixel-display', cells: next.pixel ?? 0 })
+      }
       log({ event: 'character', name: next.name, voice: next.voice.id, onboarded: next.onboarded })
       return next
     },
@@ -1478,10 +1506,32 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       saveIntro(cleanIntro({ ...introSettings(), ...change }))
       return skinView()
     },
+    pixelsGet: () => pixelsView(),
+    pixelsCode: id => {
+      const code = pixels.code(id)
+      if (code === undefined) throw new Error('没有这个像素动画')
+      return code
+    },
+    pixelsAdd: input => {
+      const id = pixels.add(input)
+      log({ event: 'pixel', action: 'add', id })
+      return { ...pixelsView(), id }
+    },
+    pixelsRemove: id => {
+      pixels.remove(id)
+      // What used it goes back to what comes with her.
+      if (pixels.background().id === id) pixels.setBackground({ id: 'builtin:tail' })
+      if (introPixel(introSettings()) === id) saveIntro(cleanIntro({ ...introSettings(), source: 'skin' }))
+      return pixelsView()
+    },
+    pixelsBackground: change => {
+      pixels.setBackground(change)
+      return pixelsView()
+    },
     introPlay: () => {
       const bodies = server?.bodies ?? []
       if (bodies.length === 0) throw new Error('桌面程序没连上；网页里打开 dsh 时会播')
-      for (const body of bodies) playIntro(message => body.send(message), true)
+      for (const body of bodies) playIntro(message => body.send(message), true, body.hello.body.version)
     },
     characterNew: ({ name, copy }) => {
       const list = people.list()
@@ -1665,14 +1715,19 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       const skinId = skins.current()
       const skin = skinId === undefined ? undefined : { id: skinId, rev: skins.get(skinId)?.rev ?? 0 }
       const intro = introSettings()
-      const introAt = intro.on && intro.dsh && !herOff ? introPath(intro) : undefined
+      const introOn = intro.on && intro.dsh && !herOff && introReady(intro)
+      const pixelIntro = introOn ? introPixel(intro) : undefined
+      const introAt = introOn && pixelIntro === undefined ? introPath(intro) : undefined
       const introClip = introAt === undefined ? undefined : intro.source === 'skin'
         ? `/api/dsh-her/web/skin-file?id=${encodeURIComponent(skinId ?? '')}&f=${encodeURIComponent(introAt.split(/[/\\]/).pop() ?? '')}`
         : `/api/dsh-her/web/library-file?row=intro&name=${encodeURIComponent(intro.source)}`
+      const pixelBg = herOff ? undefined : pixels.worn()
       return {
         show: webShown(remote), pill: pillShown(), veil: webBody.veil(), mode: webBody.mode, place, scope, focus: initiative.focused,
         ...(open === undefined ? {} : { open }), ...(page === undefined ? {} : { page }), ...(chat ? { chat } : {}), ...(avatar === undefined ? {} : { avatar }),
         ...(skin === undefined ? {} : { skin }), ...(introClip === undefined ? {} : { intro: { url: introClip, when: intro.when } }),
+        ...(pixelIntro === undefined ? {} : { intro: { pixel: { id: pixelIntro, look: intro.look }, when: intro.when } }),
+        ...(pixelBg === undefined ? {} : { pixelBg }),
       }
     },
     importBatch: async (batch, name) => {
@@ -1711,7 +1766,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       return projectStatus(found.project, found.dir)
     },
     // Beside a desktop body she keeps quiet, unless that desktop is on another computer than this page.
-    webConfig: remote => webBody.config(desktopConnected() && !remote, placePrefs.petScale ?? 1),
+    webConfig: remote => ({ ...webBody.config(desktopConnected() && !remote, placePrefs.petScale ?? 1), ...(character.pixel === undefined ? {} : { pixel: character.pixel }) }),
     webSend: message => onBodyMessage(withCid(message), undefined, 'web'),
     webSetMode: (mode: WebMode) => {
       webBody.mode = mode
@@ -2061,7 +2116,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       welcome: client => {
         bodyPack = client.hello.packs[0] ?? bodyPack
         // She comes out: her opening clip, when there is one (a body that shows her, not a text client).
-        if (client.hello.packs.length > 0) setTimeout(() => playIntro(message => client.send(message)), 1500)
+        if (client.hello.packs.length > 0) setTimeout(() => playIntro(message => client.send(message), false, client.hello.body.version), 1500)
         // Another character was chosen since this body last dressed: what she wears.
         if (client.hello.packs.length > 0 && people.needsDress('desktop')) {
           const id = readPlay(dir).on ? STAGE_LOOK_ID : character.look
@@ -2076,7 +2131,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
           v: PROTOCOL_VERSION,
           sessionId: session?.sessionId ?? '',
           characters: [{ cid, name: character.name, mode: 'overlay' }],
-          config: { mic: config.voice.mic, bargeIn: true, focus: initiative.focused, off: herOff, ...bodyPrefs() },
+          config: { mic: config.voice.mic, bargeIn: true, focus: initiative.focused, off: herOff, ...bodyPrefs(), ...(character.pixel === undefined ? {} : { pixel: character.pixel }) },
         }
       },
       message: (_client, message, audio) => onBodyMessage(message, audio),

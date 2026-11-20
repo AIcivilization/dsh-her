@@ -21,6 +21,11 @@ import type { AvatarView } from '../dsh/api.ts'
 import type { FloatHost } from './web-bridge.ts'
 import { TalkBar } from '../../body/renderer/talk-bar.ts'
 import { wearSaved } from './skin-wear.ts'
+import { wearPixelBackground } from './pixel-bg.ts'
+import { inkOf, PixelFrame } from './pixel/host.ts'
+import { herApi } from './api.ts'
+import type { WebIntro } from '../dsh/api.ts'
+import type { PixelBackground } from '../core/pixel.ts'
 import { openChatMode } from './chat-mode.ts'
 import type { SettingsPage, TalkView } from '../protocol/index.ts'
 
@@ -586,9 +591,10 @@ export function mountWebFloat(): () => void {
     if (document.hidden) return
     try {
       const res = await fetch('/api/dsh-her/web/status', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ screen: { w: screen.width, h: screen.height, scale: devicePixelRatio }, remote: isRemotePage(location.protocol, location.hostname) }) })
-      const value = await res.json() as { ok: boolean; chat?: boolean; show?: boolean; pill?: boolean; veil?: Veil; place?: Place; scope?: Scope; avatar?: AvatarView; focus?: boolean; open?: string; page?: SettingsPage; skin?: { id: string; rev: number }; intro?: { url: string; when: 'every' | 'daily' } }
+      const value = await res.json() as { ok: boolean; chat?: boolean; show?: boolean; pill?: boolean; veil?: Veil; place?: Place; scope?: Scope; avatar?: AvatarView; focus?: boolean; open?: string; page?: SettingsPage; skin?: { id: string; rev: number }; intro?: WebIntro; pixelBg?: PixelBackground }
       if (value.ok) {
         void wearSaved(value.skin)
+        wearPixelBackground(value.pixelBg)
         if (value.intro !== undefined) playIntroOnce(value.intro)
         focus = value.focus === true
         // "完整对话" from the desktop's talk bar: this page opens her conversation.
@@ -613,7 +619,7 @@ export function mountWebFloat(): () => void {
 
   /** Her opening clip, once when this page opens (and once a day, when so set); a click skips it. */
   let introDone = false
-  const playIntroOnce = (intro: { url: string; when: 'every' | 'daily' }) => {
+  const playIntroOnce = (intro: WebIntro) => {
     if (introDone) return
     introDone = true
     const today = new Date().toDateString()
@@ -626,6 +632,28 @@ export function mountWebFloat(): () => void {
     const veil = document.createElement('div')
     veil.style.cssText = 'position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.25);cursor:pointer'
     veil.title = '点一下跳过'
+    if (intro.pixel !== undefined) {
+      // A 像素动画 (docs/像素动画设计.md §6): drawn in its sandbox over the page, a click skips it.
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) return
+      const pixel = intro.pixel
+      veil.style.background = 'rgba(0,0,0,.12)'
+      const frame = new PixelFrame()
+      const end = () => {
+        frame.destroy()
+        veil.remove()
+      }
+      frame.on(event => { if (event.t === 'ended' || event.t === 'problem') end() })
+      veil.onclick = end
+      veil.append(frame.el)
+      setTimeout(end, 12_000)
+      void herApi.pixelsCode(pixel.id).then(result => {
+        if (!result.ok) return end()
+        document.body.append(veil)
+        frame.play(result.code, pixel.look, inkOf(pixel.look.color, '--dsw-alias-brand-primary'), { mode: 'once', cap: 8, fade: true })
+      })
+      return
+    }
+    if (intro.url === undefined) return
     const video = document.createElement('video')
     video.src = new URL(intro.url, document.baseURI).href
     video.muted = true
