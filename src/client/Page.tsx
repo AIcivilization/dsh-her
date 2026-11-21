@@ -396,7 +396,7 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
                 <p className="her-muted">人设、记忆、对话、素材、皮肤都在这台电脑上的 <code>~/.dsh-her</code>，不上传。key 在系统钥匙串里。</p>
                 <p className="her-muted">跑在 {platformName(state.platform)} 上{remotePage ? '，你是从别的设备打开这个网页的' : ''}。</p>
                 <div className="her-row">
-                  <a className="her-btn" href="https://github.com/AIcivilization/dsh-her#readme" target="_blank" rel="noreferrer">使用说明</a>
+                  <a className="her-btn" href="https://github.com/AIcivilization/dsh-her/blob/main/docs/使用说明.md" target="_blank" rel="noreferrer">使用说明</a>
                   <a className="her-btn" href="https://github.com/AIcivilization/dsh-her/blob/main/docs/素材规格与提示词.md" target="_blank" rel="noreferrer">素材规格</a>
                   <a className="her-btn" href="https://github.com/AIcivilization/dsh-her/issues" target="_blank" rel="noreferrer">反馈问题</a>
                 </div>
