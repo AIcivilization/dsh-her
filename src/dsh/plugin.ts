@@ -58,6 +58,7 @@ import { cleanIntro, introPixel, type IntroSettings } from '../core/intro.ts'
 import { Pixels } from './pixels.ts'
 import { PixelDrafts } from './pixel-drafts.ts'
 import { PixelChats } from './pixel-chat.ts'
+import { forOlderPlayers } from '../core/pixel-compat.ts'
 import { checkMaterial, cleanSvg } from '../pack/material-check.ts'
 import { StageStore } from './stage-store.ts'
 import { Characters } from './characters.ts'
@@ -1179,7 +1180,8 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     }
     const today = dayOf(new Date())
     if (!force && settings.when === 'daily' && settings.lastDay === today) return
-    if (pixel !== undefined) send({ t: 'intro', path: '', pixel: { code: pixels.code(pixel) ?? '', look: settings.look } })
+    // The desktop builds its own player: an older one has no g.sprite, so the file brings it along.
+    if (pixel !== undefined) send({ t: 'intro', path: '', pixel: { code: forOlderPlayers(pixels.code(pixel) ?? ''), look: settings.look } })
     else send({ t: 'intro', path: introPath(settings) ?? '' })
     saveIntro({ ...settings, lastDay: today })
     log({ event: 'intro', force, ...(pixel === undefined ? {} : { pixel }) })

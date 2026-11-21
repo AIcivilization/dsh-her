@@ -193,3 +193,28 @@ test('the example in the instructions runs as it says', () => {
   for (let x = 0; x < 192; x++) if (g.get(x, 54) > 0) right = x
   assert.ok(right > 40 && right < 70, `the fish is a quarter of the way along (${right})`)
 })
+
+test('a file with g.sprite brings it along to a player without it, and draws the same', async () => {
+  const { forOlderPlayers } = await import('../src/core/pixel-compat.ts')
+  const plain = BUILTIN_PIXELS[0]!.code
+  assert.equal(forOlderPlayers(plain), plain, 'no sprite, no change')
+  const code = `export const info = { name: '鱼', grid: [64, 36], fps: 12, seconds: 0 }
+const FISH = ['..99.', '9999a', '..99.']
+export function frame(g, t) {
+  g.clear()
+  g.sprite(10 + t * 4, 18, FISH, { scale: 2.5, center: true, flip: t > 1, palette: { a: '#000000' } })
+}`
+  const draw = (file: string, old: boolean) => {
+    const anim = load(file)
+    const g = makeGrid(64, 36, 'mono')
+    if (old) delete (g as { sprite?: unknown }).sprite
+    anim.setup?.(g)
+    anim.frame!(g, 2, 24)
+    return [...g.data]
+  }
+  const wrapped = forOlderPlayers(code)
+  assert.notEqual(wrapped, code)
+  assert.deepEqual(cleanPixelInfo(load(wrapped).info).info?.name, '鱼')
+  assert.deepEqual(draw(wrapped, true), draw(code, false), 'the shim draws as the grid does')
+  assert.deepEqual(draw(wrapped, false), draw(code, false), 'a player with g.sprite uses its own')
+})
