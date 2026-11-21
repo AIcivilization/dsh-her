@@ -12,7 +12,7 @@ function load(code: string): Anim {
   return new Function(`${script}\nreturn __anim`)() as Anim
 }
 
-/** Play a file the way the player does (every third frame, 6 s): what it drew, and its slowest frame. */
+/** Play a file the way the player does (every third frame, 6 s): what it drew, and its slowest frame after the first few (a slow machine's first frames are still being compiled). */
 function play(code: string): { drawn: number; slowest: number } {
   const anim = load(code)
   const { info, problems } = cleanPixelInfo(anim.info)
@@ -24,7 +24,7 @@ function play(code: string): { drawn: number; slowest: number } {
   for (let n = 0; n < 6 * info!.fps; n += 3) {
     const started = performance.now()
     anim.frame!(g, n / info!.fps, n)
-    slowest = Math.max(slowest, performance.now() - started)
+    if (n >= 9) slowest = Math.max(slowest, performance.now() - started)
     for (let i = 3; i < g.data.length; i += 4) if (g.data[i]! > 0) drawn++
   }
   return { drawn, slowest }

@@ -124,9 +124,11 @@ for (let j = 0; j < 4; j++) {
     const c = H * (0.12 + 0.18 * i) + (g.noise(x / (40 * U), i + Z, t * P.speed) - 0.5) * H * 0.35
     const col = g.noise(x / (9 * U), i * 5 + Z, t * P.speed * 3)
     if (col < 0.35) continue
+    const top = (col - 0.35) * 1.6
     for (let d = 0; d < h; d++) {
-      const v = (col - 0.35) * 1.6 * (1 - d / h) * (0.6 + 0.4 * Math.sin(d * 0.5 - t * 3 + x * 0.05))
+      const v = top * (1 - d / h) * (0.6 + 0.4 * Math.sin(d * 0.5 - t * 3 + x * 0.05))
       if (v > 0.04) g.set(x, c + d, v, K)
+      else if (top * (1 - d / h) < 0.04) break
     }
   }
 }`,
