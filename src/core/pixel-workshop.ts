@@ -12,9 +12,10 @@ export interface InfoChange {
   seconds?: number
 }
 
-/** The grids the page offers: 粗, 中, 默认, 细. */
+/** The grids the page offers, coarse to fine (the finest is the largest a file may have). */
 export const WORKSHOP_GRIDS: Array<{ label: string; grid: [number, number] }> = [
   { label: '粗', grid: [128, 72] }, { label: '中', grid: [160, 90] }, { label: '默认', grid: [192, 108] }, { label: '细', grid: [256, 144] },
+  { label: '很细', grid: [320, 180] }, { label: '最细', grid: [384, 216] },
 ]
 export const WORKSHOP_FPS = [12, 15, 24, 30]
 

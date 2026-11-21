@@ -67,6 +67,8 @@ const p = (t / 4) % 2, x = p < 1 ? p * g.w : (2 - p) * g.w
 g.sprite(x, g.h / 2 + Math.sin(t * 3) * 4, FISH, { scale: 3, center: true, flip: p >= 1 })
 \`\`\`
 
+要细腻，就画大、画细：人物至少 32 行高，info.grid 用 [256, 144] 或更细（最细 [384, 216]），scale 用 1 或 2。用彩色（color: 'color'）时，palette 给每块颜色配三层深浅（亮面、本色、暗面），外面描一圈深色轮廓，眼睛至少 2 × 2 格、加一格高光。
+
 g.sprite 是新加的：用了它的动画，放到很旧的 dsh-her 里会播不了。
 
 ## 规矩

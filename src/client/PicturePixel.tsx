@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { makePicture, type Picture, type Rgba } from '../core/pixel-picture.ts'
 
-const HEIGHTS = [24, 32, 40, 48, 64]
+const HEIGHTS = [32, 48, 64, 96, 128]
 const INK: [number, number, number] = [159, 216, 255]
 
 /** The picture's pixels, at most 512 on its longer side. */
@@ -51,9 +51,10 @@ function draw(canvas: HTMLCanvasElement, picture: Picture): void {
 export function PicturePixel({ file, onUse, onCancel }: { file: File; onUse: (picture: Picture) => Promise<void>; onCancel: () => void }) {
   const [source, setSource] = useState<Rgba>()
   const [problem, setProblem] = useState<string>()
-  const [height, setHeight] = useState(40)
+  const [height, setHeight] = useState(64)
   const [color, setColor] = useState(false)
   const [cut, setCut] = useState(true)
+  const [edge, setEdge] = useState(true)
   const [busy, setBusy] = useState(false)
   const canvas = useRef<HTMLCanvasElement>(null)
 
@@ -65,8 +66,8 @@ export function PicturePixel({ file, onUse, onCancel }: { file: File; onUse: (pi
 
   // A fresh copy each time: taking the background away changes the pixels.
   const picture = useMemo(
-    () => (source === undefined ? undefined : makePicture({ data: new Uint8ClampedArray(source.data), w: source.w, h: source.h }, { height, color, cutBackground: cut })),
-    [source, height, color, cut],
+    () => (source === undefined ? undefined : makePicture({ data: new Uint8ClampedArray(source.data), w: source.w, h: source.h }, { height, color, cutBackground: cut, outline: edge })),
+    [source, height, color, cut, edge],
   )
   useEffect(() => { if (picture !== undefined && canvas.current !== null) draw(canvas.current, picture) }, [picture])
 
@@ -84,6 +85,7 @@ export function PicturePixel({ file, onUse, onCancel }: { file: File; onUse: (pi
           </span>
           <div className="her-ws-set">
             <b>多少格高</b>
+            <span className="her-faint">越高越细腻；96、128 适合人物</span>
             <span className="her-seg" role="group" aria-label="多少格高">
               {HEIGHTS.map(h => <button key={h} className={height === h ? 'on' : ''} onClick={() => setHeight(h)}>{h}</button>)}
             </span>
@@ -95,6 +97,7 @@ export function PicturePixel({ file, onUse, onCancel }: { file: File; onUse: (pi
               <button className={color ? 'on' : ''} onClick={() => setColor(true)}>彩色（只能画成方块）</button>
             </span>
           </div>
+          {color && <label className="her-muted"><input type="checkbox" checked={edge} onChange={e => setEdge(e.target.checked)} /> 加一圈深色描边（轮廓更清楚）</label>}
           {picture.background !== 'clear' && (
             <label className="her-muted"><input type="checkbox" checked={cut} onChange={e => setCut(e.target.checked)} /> 去掉纯色背景</label>
           )}

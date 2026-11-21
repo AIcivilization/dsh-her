@@ -2,7 +2,8 @@
  * 图片转精灵 (docs/像素工坊设计.md §5): a picture, in the page, becomes a
  * pixel picture for `g.sprite`: its plain background taken away, cut to what
  * is in it, shrunk to so many cells high, and written as characters (mono:
- * '1'–'9' by how light; colour: up to 16 letters and their colours). Only
+ * '1'–'9' by how light; colour: up to 32 letters and their colours, with a
+ * dark outline if wanted). Only
  * the characters go into the file: the picture is not kept or sent. Pure: it
  * works on RGBA pixels, so it runs in the page and in tests.
  */
@@ -14,11 +15,13 @@ export interface Rgba {
 }
 
 export interface PictureOptions {
-  /** How many cells high (8–96). */
+  /** How many cells high (8–128). */
   height: number
   color: boolean
   /** Take away a plain background that reaches the edges. */
   cutBackground: boolean
+  /** Colour only: a ring of cells round it, each a darker shade of what it touches (a cell more each way). */
+  outline?: boolean
 }
 
 export interface Picture {
@@ -32,8 +35,12 @@ export interface Picture {
 }
 
 /** The widest a picture may be, in cells. */
-export const PICTURE_MAX_W = 96
-const LETTERS = 'abcdefghijklmnop'
+export const PICTURE_MAX_W = 192
+/** The tallest, in cells. */
+export const PICTURE_MAX_H = 128
+/** The most colours, a letter each. */
+export const PICTURE_COLORS = 32
+const LETTERS = 'abcdefghijklmnopqrstuvwxyzABCDEF'
 
 const lum = (r: number, g: number, b: number) => 0.2126 * r + 0.7152 * g + 0.0722 * b
 const hex = (r: number, g: number, b: number) => `#${[r, g, b].map(v => Math.round(v).toString(16).padStart(2, '0')).join('')}`
@@ -89,6 +96,25 @@ export function cutBackground(img: Rgba, tolerance = 48): boolean {
       if (q < 0 || seen[q] === 1 || !near(q)) continue
       seen[q] = 1
       stack.push(q)
+    }
+  }
+  // A green or blue screen: a bright, strong colour no one wears by chance.
+  // Then the patches it leaves shut in (between an arm and the body) go too,
+  // and the screen's colour that has spilt onto the edge is taken out.
+  const channels = [br, bg, bb]
+  const key = channels.indexOf(Math.max(br, bg, bb))
+  if (Math.max(br, bg, bb) - Math.min(br, bg, bb) < 90) return true
+  for (let p = 0; p < w * h; p++) if (near(p)) data[p * 4 + 3] = 0
+  const gone = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && data[(y * w + x) * 4 + 3]! < 128
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4
+      if (data[i + 3]! < 128) continue
+      let edge = false
+      for (let dy = -2; dy <= 2 && !edge; dy++) for (let dx = -2; dx <= 2 && !edge; dx++) edge = gone(x + dx, y + dy)
+      if (!edge) continue
+      const others = [0, 1, 2].filter(c => c !== key).map(c => data[i + c]!)
+      data[i + key] = Math.min(data[i + key]!, Math.max(...others))
     }
   }
   return true
@@ -164,7 +190,7 @@ export function monoRows(img: Rgba): string[] {
 }
 
 /** Colour: up to `most` colours (median cut), a letter each. */
-export function colorRows(img: Rgba, most = 16): { rows: string[]; palette: Record<string, string> } {
+export function colorRows(img: Rgba, most = PICTURE_COLORS): { rows: string[]; palette: Record<string, string> } {
   const { data, w, h } = img
   const pixels: number[] = []
   for (let p = 0; p < w * h; p++) if (data[p * 4 + 3] !== 0) pixels.push(p)
@@ -220,13 +246,42 @@ export function colorRows(img: Rgba, most = 16): { rows: string[]; palette: Reco
   return { rows, palette }
 }
 
+/**
+ * A dark outline, as pixel art has: the picture with a cell of room each
+ * way, and each empty cell beside it (up, down, left, right) filled with
+ * a third of the colour it touches, so a red coat gets a dark red edge.
+ */
+export function outline(img: Rgba): Rgba {
+  const w = img.w + 2, h = img.h + 2
+  const out = new Uint8ClampedArray(w * h * 4)
+  for (let y = 0; y < img.h; y++) out.set(img.data.subarray(y * img.w * 4, (y + 1) * img.w * 4), ((y + 1) * w + 1) * 4)
+  const solid = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && out[(y * w + x) * 4 + 3] !== 0
+  const ring: Array<[number, number, number, number]> = []
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (solid(x, y)) continue
+      let r = 0, g = 0, b = 0, n = 0
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        if (!solid(x + dx, y + dy)) continue
+        const i = ((y + dy) * w + x + dx) * 4
+        r += out[i]!; g += out[i + 1]!; b += out[i + 2]!; n++
+      }
+      if (n > 0) ring.push([(y * w + x) * 4, r / n / 3, g / n / 3, b / n / 3])
+    }
+  }
+  for (const [i, r, g, b] of ring) {
+    out[i] = r; out[i + 1] = g; out[i + 2] = b; out[i + 3] = 255
+  }
+  return { data: out, w, h }
+}
+
 /** The whole way: a picture's pixels (changed in place) to a pixel picture. */
 export function makePicture(img: Rgba, options: PictureOptions): Picture {
   const border = edges(img.w, img.h)
   const clear = border.filter(p => img.data[p * 4 + 3]! < 128).length >= border.length * 0.5
   const background: Picture['background'] = clear ? 'clear' : options.cutBackground && cutBackground(img) ? 'cut' : 'kept'
   const box = cropBox(img)
-  let th = Math.max(8, Math.min(96, Math.round(options.height)))
+  let th = Math.max(8, Math.min(PICTURE_MAX_H, Math.round(options.height)))
   let tw = Math.max(1, Math.round(box.w / box.h * th))
   if (tw > PICTURE_MAX_W) {
     tw = PICTURE_MAX_W
@@ -234,9 +289,13 @@ export function makePicture(img: Rgba, options: PictureOptions): Picture {
   }
   const small = shrink(img, box, tw, th)
   if (!options.color) return { rows: monoRows(small), w: tw, h: th, background }
-  const { rows, palette } = colorRows(small)
-  return { rows, palette, w: tw, h: th, background }
+  const edged = options.outline === true ? outline(small) : small
+  const { rows, palette } = colorRows(edged)
+  return { rows, palette, w: edged.w, h: edged.h, background }
 }
+
+/** The grids a picture's file may start on, coarsest first (as the workshop offers them, from 默认 up). */
+const PICTURE_GRIDS: Array<[number, number]> = [[192, 108], [256, 144], [320, 180], [384, 216]]
 
 /**
  * A 像素动画 file with the picture in it, floating gently, to start from:
@@ -244,11 +303,13 @@ export function makePicture(img: Rgba, options: PictureOptions): Picture {
  */
 export function pictureCode(picture: Picture, name: string): string {
   const color = picture.palette !== undefined
+  // The coarsest grid it fits in at eight tenths, so a tall picture is not cut off.
+  const grid = PICTURE_GRIDS.find(([gw, gh]) => picture.w <= gw * 0.8 && picture.h <= gh * 0.8) ?? PICTURE_GRIDS[PICTURE_GRIDS.length - 1]!
   const rows = picture.rows.map(r => `  '${r}',`).join('\n')
   const palette = color ? `\nconst PALETTE = ${JSON.stringify(picture.palette).replace(/"(\w)":/g, '$1: ').replace(/,/g, ', ')}\n` : ''
   return `// 🖼 用图片转的像素图（${picture.w} × ${picture.h} 格）。
 // PICTURE 就是那张图：要它动，就移动、翻转、缩放它，或者复制一份改几格（眨眼、张嘴、抬手）轮着换；不要整个重画。
-export const info = { name: ${JSON.stringify(name)}, author: '', grid: [192, 108], fps: 24, seconds: 0, color: '${color ? 'color' : 'mono'}' }
+export const info = { name: ${JSON.stringify(name)}, author: '', grid: [${grid[0]}, ${grid[1]}], fps: 24, seconds: 0, color: '${color ? 'color' : 'mono'}' }
 
 const PICTURE = [
 ${rows}
