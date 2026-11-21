@@ -9,7 +9,12 @@ import { PIXEL_LIMITS } from './pixel.ts'
 export function pixelSpec(): string {
   return `请帮我写一个「dsh-her 像素动画」文件（JavaScript）。我想要的动画是：【在这里写你想要的画面，比如：一只像素小鲸鱼从左边游到右边，吐出几个泡泡】
 
-## 这是什么
+${pixelFormat()}`
+}
+
+/** The format and its rules, without the request (像素工坊's AI gets this). */
+export function pixelFormat(): string {
+  return `## 这是什么
 
 dsh-her 会运行这个文件，每一帧调用一次 frame(g, t, n)。你只需要往一张粗格子（比如 192 × 108 格）里填数，不用管屏幕大小和颜色：引擎会把格子画成方块、圆点或代码小字，颜色由用户选。
 
@@ -37,12 +42,32 @@ export function frame(g, t, n) { }  // 每帧调用：t 是秒（从 0 开始）
 - g.rgb(x, y, r, g, b, a = 1)：color 模式下按 0–255 给颜色
 - g.rect(x, y, w, h, v, a)、g.circle(cx, cy, r, v, a)、g.line(x0, y0, x1, y1, v, a)：方块、实心圆、线
 - g.text(x, y, '文字', v, a)：5 × 7 像素字，只有英文字母、数字和常用符号（小写会画成大写），每个字占 6 格宽；返回画了多宽
+- g.sprite(x, y, 图, 选项)：画一张像素图（画角色、动物、物件就用它）。图是一组字符串，一个字符一格：'.' 和空格不画；'1'–'9' 是亮度（9 最亮，'0' 是全暗，会盖住下面）；'#' 和字母默认最亮。选项都可以不写：{ scale: 3（每格放大几倍）, flip: true（左右翻转）, flipY: true（上下翻转）, center: true（x、y 是图的中心）, palette: { a: '#ffcc00', b: 0.5 }（字母的颜色或亮度；单色动画里颜色按深浅算）, a: 1（透明度）}。返回画了多宽
 - g.get(x, y)：读一格（亮度 × 透明度，0–1）
 - g.random()：随机数 0–1，每次播放结果一样
 - g.noise(x, y, z)：平滑噪声 0–1，用来做水、云、火、闪烁
 - g.ease.linear / in / out / inOut / outBack / sine (p)：缓动，p 是 0–1
 - 坐标可以是小数，会取整；超出格子的会自动忽略；后画的盖住先画的
 - 也可以用 Math 里的所有东西
+
+## 画角色、动物、物件
+
+先用 g.sprite 画像素图，比用圆和线拼像得多。动起来靠移动、翻转、放大缩小，以及换图：多画几张（睁眼、眨眼；张嘴、闭嘴；迈左脚、迈右脚），按时间轮着用。比如：
+
+\`\`\`js
+const FISH = [          // 头朝右，'0' 是眼睛
+  '....9999...',
+  '9.99999999.',
+  '.9999999909',
+  '9.99999999.',
+  '....9999...',
+]
+// 在 frame 里：从左游到右，到头翻过来游回去
+const p = (t / 4) % 2, x = p < 1 ? p * g.w : (2 - p) * g.w
+g.sprite(x, g.h / 2 + Math.sin(t * 3) * 4, FISH, { scale: 3, center: true, flip: p >= 1 })
+\`\`\`
+
+g.sprite 是新加的：用了它的动画，放到很旧的 dsh-her 里会播不了。
 
 ## 规矩
 

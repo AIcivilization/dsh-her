@@ -16,6 +16,8 @@ import type { Skin } from '../core/skin.ts'
 import type { IntroSettings } from '../core/intro.ts'
 import type { PixelBackground, PixelLook } from '../core/pixel.ts'
 import type { PixelEntry } from './pixels.ts'
+import type { DraftSummary, DraftView } from './pixel-drafts.ts'
+import type { ChatView } from './pixel-chat.ts'
 import type { VoicesConfig } from '../voice/external.ts'
 import type { LibraryRow, Material } from './library.ts'
 import type { StageVersion } from './stage-store.ts'
@@ -59,6 +61,8 @@ export interface PixelsView {
   items: PixelEntry[]
   background: PixelBackground
   intro: IntroSettings
+  /** 像素工坊's drafts not thrown away (docs/像素工坊设计.md). */
+  drafts: DraftSummary[]
 }
 
 /** The opening clip a dsh page plays: a clip's address, or a 像素动画 and how it is drawn. */
@@ -203,6 +207,21 @@ export interface ApiRuntime {
   pixelsAdd(input: { name: string; code: string; info: unknown; thumb?: unknown; frameMs?: unknown }): PixelsView & { id: string }
   pixelsRemove(id: string): PixelsView
   pixelsBackground(change: unknown): PixelsView
+  /** 像素工坊 (docs/像素工坊设计.md): drafts and their versions; saving one as a 像素动画. */
+  draftNew(from?: string): DraftView
+  draftGet(id: string): DraftView
+  draftAdd(id: string, code: string, note: string, look?: unknown): DraftView
+  draftPick(id: string, n: number): DraftView
+  draftSet(id: string, change: { name?: unknown; look?: unknown; auto?: unknown }): DraftView
+  draftSave(id: string, tried: { info: unknown; thumb?: unknown; frameMs?: unknown }): PixelsView & { pixel: string; draft: DraftView }
+  draftRemove(id: string): PixelsView
+  /** 像素工坊's AI (docs/像素工坊设计.md §3): the chat, saying something, stopping it, the page's answer to a try, the session to open in dsh. */
+  chatView(id: string): ChatView
+  chatSend(id: string, text: string): Promise<ChatView>
+  chatStop(id: string): ChatView
+  chatNote(id: string, text: string): ChatView
+  chatProbe(id: string, req: string, result: unknown): void
+  chatSession(id: string): Promise<string>
   stagePlay(on: boolean): StageView
   stageSave(stage: unknown): StageView
   stageRestore(id: string): StageView
@@ -403,6 +422,29 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
     },
     '/pixels/remove': async body => ({ ...rt.pixelsRemove(str(body.id, '像素动画')) }),
     '/pixels/background': async body => ({ ...rt.pixelsBackground(body.change) }),
+    '/pixels/draft/new': async body => ({ draft: rt.draftNew(typeof body.from === 'string' && body.from !== '' ? body.from : undefined) }),
+    '/pixels/draft/get': async body => ({ draft: rt.draftGet(str(body.id, '草稿')) }),
+    '/pixels/draft/add': async body => {
+      const code = str(body.code, '代码')
+      if (code.length > 400_000) throw new ApiError('文件太大了')
+      return { draft: rt.draftAdd(str(body.id, '草稿'), code, typeof body.note === 'string' ? body.note : '', body.look) }
+    },
+    '/pixels/draft/pick': async body => {
+      if (typeof body.n !== 'number' || !Number.isInteger(body.n)) throw new ApiError('哪一版？')
+      return { draft: rt.draftPick(str(body.id, '草稿'), body.n) }
+    },
+    '/pixels/draft/set': async body => ({ draft: rt.draftSet(str(body.id, '草稿'), { name: body.name, look: body.look, auto: body.auto }) }),
+    '/pixels/draft/save': async body => ({ ...rt.draftSave(str(body.id, '草稿'), { info: body.info, thumb: body.thumb, frameMs: body.frameMs }) }),
+    '/pixels/draft/remove': async body => ({ ...rt.draftRemove(str(body.id, '草稿')) }),
+    '/pixels/chat/view': async body => ({ chat: rt.chatView(str(body.id, '草稿')) }),
+    '/pixels/chat/send': async body => ({ chat: await rt.chatSend(str(body.id, '草稿'), str(body.text, '要说的话')) }),
+    '/pixels/chat/stop': async body => ({ chat: rt.chatStop(str(body.id, '草稿')) }),
+    '/pixels/chat/note': async body => ({ chat: rt.chatNote(str(body.id, '草稿'), str(body.text, '要说的话')) }),
+    '/pixels/chat/probe': async body => {
+      rt.chatProbe(str(body.id, '草稿'), str(body.req, '试跑'), body.result)
+      return {}
+    },
+    '/pixels/chat/session': async body => ({ sessionId: await rt.chatSession(str(body.id, '草稿')) }),
     '/intro/play': async () => {
       rt.introPlay()
       return {}

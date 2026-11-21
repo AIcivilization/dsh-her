@@ -7,6 +7,7 @@
 
 import type { PixelInfo, PixelLook } from '../../core/pixel.ts'
 import { parseHex } from '../../core/pixel-grid.ts'
+import type { Sketch } from '../../core/pixel-sketch.ts'
 
 declare const __PIXEL_PLAYER_HTML__: string
 
@@ -17,7 +18,7 @@ export type PixelEvent =
   | { t: 'playing'; info: PixelInfo }
   | { t: 'ended' }
   | { t: 'problem'; problems: string[] }
-  | { t: 'probe'; ok: boolean; info?: PixelInfo; problems: string[]; warnings: string[]; thumb?: string; frameMs?: number }
+  | { t: 'probe'; ok: boolean; info?: PixelInfo; problems: string[]; warnings: string[]; thumb?: string; frameMs?: number; sketches?: Sketch[] }
 
 export interface PlayOptions {
   mode: 'once' | 'loop'
@@ -77,8 +78,8 @@ export class PixelFrame {
     void this.send({ t: 'play', code, look, ink, ...options })
   }
 
-  probe(code: string, ink: Rgb): void {
-    void this.send({ t: 'probe', code, ink })
+  probe(code: string, ink: Rgb, sketch = false): void {
+    void this.send({ t: 'probe', code, ink, ...(sketch ? { sketch } : {}) })
   }
 
   setInk(ink: Rgb): void {
@@ -120,8 +121,8 @@ export function inkOf(color: string, themeVar = '--dsw-alias-label-secondary'): 
   return parseCssColor(value) ?? [127, 138, 153]
 }
 
-/** Try a file in a sandbox of its own: what is wrong, or its info and a still. */
-export function probePixel(code: string, ink: Rgb): Promise<Extract<PixelEvent, { t: 'probe' }>> {
+/** Try a file in a sandbox of its own: what is wrong, or its info and a still (and, with `sketch`, three frames in characters for the AI). */
+export function probePixel(code: string, ink: Rgb, sketch = false): Promise<Extract<PixelEvent, { t: 'probe' }>> {
   const frame = new PixelFrame()
   frame.el.style.cssText += ';position:fixed;left:-10000px;top:0;width:320px;height:180px'
   document.body.append(frame.el)
@@ -136,6 +137,6 @@ export function probePixel(code: string, ink: Rgb): Promise<Extract<PixelEvent, 
       if (event.t === 'probe') done(event)
       else if (event.t === 'problem') done({ t: 'probe', ok: false, problems: event.problems, warnings: [] })
     })
-    frame.probe(code, ink)
+    frame.probe(code, ink, sketch)
   })
 }

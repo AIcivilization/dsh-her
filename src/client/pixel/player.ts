@@ -14,6 +14,7 @@
 
 import { PIXEL_LIMITS, errorLine, onceSeconds, wrapPixelCode, type PixelInfo, type PixelLook } from '../../core/pixel.ts'
 import { Painter, type Rgb } from './paint.ts'
+import { sketchFrame, sketchStats, type Sketch } from '../../core/pixel-sketch.ts'
 
 declare const __PIXEL_WORKER__: string
 
@@ -21,7 +22,7 @@ type Command =
   | { t: 'play'; code: string; look: PixelLook; ink: Rgb; mode: 'once' | 'loop'; cap?: number; fade?: boolean }
   | { t: 'stop' }
   | { t: 'ink'; ink: Rgb }
-  | { t: 'probe'; code: string; ink: Rgb }
+  | { t: 'probe'; code: string; ink: Rgb; sketch?: boolean }
 
 const standalone = window.parent === window
 const send = (message: unknown) => {
@@ -218,17 +219,24 @@ async function probe(command: Extract<Command, { t: 'probe' }>): Promise<void> {
     const mid = Math.floor(last / 2)
     let slowest = 0
     let still: Uint8ClampedArray | undefined
-    for (const n of [0, 1, mid, last]) {
+    // For the AI (像素工坊): three frames as characters, at a fifth, half and nine tenths of the way.
+    const looks = command.sketch === true ? [Math.floor(last * 0.2), mid, Math.floor(last * 0.9)] : []
+    const sketches: Sketch[] = []
+    for (const n of [...new Set([0, 1, ...looks, mid, last])].sort((a, b) => a - b)) {
       const f = await anim.frame(n, n / info.fps)
       if (n > 0) slowest = Math.max(slowest, f.ms)
       if (n === mid) still = f.data
+      if (looks.includes(n)) {
+        const [w, h] = info.grid
+        sketches.push({ t: Math.round(n / info.fps * 10) / 10, text: sketchFrame(f.data, w, h, info.color === 'mono'), stats: sketchStats(f.data, w, h, info.color === 'mono') })
+      }
     }
     if (slowest > 60) throw new Error(`每帧要 ${Math.round(slowest)} 毫秒，太慢（要在 ${PIXEL_LIMITS.frameMs} 毫秒以内）`)
     if (slowest > 16) warnings.push(`每帧要 ${Math.round(slowest)} 毫秒，有点慢，电脑差一点会卡（最好在 ${PIXEL_LIMITS.frameMs} 毫秒以内）`)
     let empty = true
     for (let i = 3; i < still!.length && empty; i += 4) if (still![i]! > 0 && (info.color === 'color' || still![i - 3]! > 0)) empty = false
     if (empty) warnings.push('中间那一帧什么都没画：看看 frame 里有没有填格子')
-    send({ t: 'probe', ok: true, info, problems: [], warnings, thumb: Painter.thumb(info, still!, command.ink), frameMs: Math.round(slowest * 10) / 10 })
+    send({ t: 'probe', ok: true, info, problems: [], warnings, thumb: Painter.thumb(info, still!, command.ink), frameMs: Math.round(slowest * 10) / 10, ...(sketches.length > 0 ? { sketches } : {}) })
   } catch (error) {
     send({ t: 'probe', ok: false, problems: (error as Error).message.split('\n'), warnings })
   } finally {

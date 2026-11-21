@@ -2,6 +2,8 @@
 
 import type { PixelsView, SkinsView, StageView, StateView, VoicesView } from '../dsh/api.ts'
 import type { ManualInstall } from '../dsh/body-install.ts'
+import type { DraftSummary, DraftView } from '../dsh/pixel-drafts.ts'
+import type { ChatView } from '../dsh/pixel-chat.ts'
 import type { DesignChoice, DesignPreview, InstalledDesign } from '../dsh/design-packs.ts'
 import { isRemotePage } from '../core/where.ts'
 import type { LookProject, WorkshopCard } from '../core/workshop.ts'
@@ -9,6 +11,7 @@ import type { ProjectStatus } from '../dsh/workshop.ts'
 import type { ClipUse, ClipsView } from '../pack/types.ts'
 
 export type { PixelsView, SkinsView, StageView, StateView, VoicesView }
+export type { DraftSummary, DraftView, ChatView }
 export type { DesignChoice, DesignPreview, InstalledDesign }
 export type DesignsList = { installed: InstalledDesign[]; exportable: { character: string; stage?: { scenes: number; materials: number; skipped: string[] }; sheet?: string; skin?: string; intro?: string } }
 
@@ -140,6 +143,19 @@ export const herApi = {
   pixelsAdd: (input: { name: string; code: string; info: unknown; thumb?: string; frameMs?: number }) => post<PixelsView & { id: string }>('/pixels/add', input),
   pixelsRemove: (id: string) => post<PixelsView>('/pixels/remove', { id }),
   pixelsBackground: (change: Record<string, unknown>) => post<PixelsView>('/pixels/background', { change }),
+  draftNew: (from?: string) => post<{ draft: DraftView }>('/pixels/draft/new', from === undefined ? {} : { from }),
+  draftGet: (id: string) => post<{ draft: DraftView }>('/pixels/draft/get', { id }),
+  draftAdd: (id: string, code: string, note: string, look?: object) => post<{ draft: DraftView }>('/pixels/draft/add', { id, code, note, ...(look === undefined ? {} : { look }) }),
+  draftPick: (id: string, n: number) => post<{ draft: DraftView }>('/pixels/draft/pick', { id, n }),
+  draftSet: (id: string, change: { name?: string; look?: object; auto?: boolean }) => post<{ draft: DraftView }>('/pixels/draft/set', { id, ...change }),
+  draftSave: (id: string, tried: { info: unknown; thumb?: string; frameMs?: number }) => post<PixelsView & { pixel: string; draft: DraftView }>('/pixels/draft/save', { id, ...tried }),
+  draftRemove: (id: string) => post<PixelsView>('/pixels/draft/remove', { id }),
+  chatView: (id: string) => post<{ chat: ChatView }>('/pixels/chat/view', { id }),
+  chatSend: (id: string, text: string) => post<{ chat: ChatView }>('/pixels/chat/send', { id, text }),
+  chatStop: (id: string) => post<{ chat: ChatView }>('/pixels/chat/stop', { id }),
+  chatNote: (id: string, text: string) => post<{ chat: ChatView }>('/pixels/chat/note', { id, text }),
+  chatProbe: (id: string, req: string, result: unknown) => post<Record<string, never>>('/pixels/chat/probe', { id, req, result }),
+  chatSession: (id: string) => post<{ sessionId: string }>('/pixels/chat/session', { id }),
   stageRestore: (id: string) => post<StageView>('/stage/restore', { id }),
   libraryRename: (row: string, from: string, to: string) => post<StageView>('/library/rename', { row, from, to }),
   libraryRemove: (row: string, name: string) => post<StageView>('/library/remove', { row, name }),

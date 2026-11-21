@@ -10,6 +10,7 @@ import { herApi, type PixelsView } from './api.ts'
 import type { Apply } from './parts.tsx'
 import { inkOf, PixelFrame, probePixel, type Rgb } from './pixel/host.ts'
 import { pixelSpec } from '../core/pixel-spec.ts'
+import { PixelWorkshop } from './PixelWorkshop.tsx'
 import { STYLE_NAME, PIXEL_STYLES, type PixelInfo, type PixelLook, type PixelStyle } from '../core/pixel.ts'
 
 type Note = { kind: 'ok' | 'error'; text: string }
@@ -86,6 +87,7 @@ export function PixelCard({ onSkin, pixel, apply }: { onSkin: () => void; pixel:
   const [paste, setPaste] = useState('')
   const [busy, setBusy] = useState(false)
   const [problems, setProblems] = useState<string[]>()
+  const [workshop, setWorkshop] = useState<string>()
   const file = useRef<HTMLInputElement>(null)
   const previewBox = useRef<HTMLDivElement>(null)
 
@@ -114,8 +116,20 @@ export function PixelCard({ onSkin, pixel, apply }: { onSkin: () => void; pixel:
     return () => { cancelled = true }
   }, [view])
 
+  if (workshop !== undefined) {
+    return <PixelWorkshop id={workshop} onClose={() => {
+      setWorkshop(undefined)
+      void herApi.pixelsGet().then(r => take(r))
+    }} />
+  }
   if (view === undefined) return null
   const items = view.items
+  /** 像素工坊 on a new draft: empty, or from one of the list. */
+  const make = async (from?: string) => {
+    const r = await herApi.draftNew(from)
+    if (!r.ok) return setNote({ kind: 'error', text: r.message })
+    setWorkshop(r.draft.id)
+  }
   const infoOf = (item: Item) => item.info ?? thumbs[item.id]?.info
   const thumbOf = (item: Item) => item.thumb ?? thumbs[item.id]?.thumb
   const bg = view.background
@@ -261,11 +275,18 @@ export function PixelCard({ onSkin, pixel, apply }: { onSkin: () => void; pixel:
         <div className="her-card-head">
           <h2>我的像素动画</h2>
           <span className="her-row" style={{ margin: 0 }}>
-            <button className="her-btn small primary" disabled={busy} onClick={() => file.current?.click()}>上传 .js…</button>
+            <button className="her-btn small primary" onClick={() => void make()}>🎲 做一个</button>
+            <button className="her-btn small" disabled={busy} onClick={() => file.current?.click()}>上传 .js…</button>
           </span>
           <input ref={file} type="file" accept=".js,.mjs,.txt,text/javascript" hidden onChange={e => { void pickFile(e.target.files); e.target.value = '' }} />
         </div>
-        <p className="her-muted">一个像素动画就是一个 .js 文件：它往一张粗格子里填数，怎么画、什么颜色由这里决定。让大模型照着下面的「给大模型的说明」写一个，上传或者粘贴进来就能用。</p>
+        <p className="her-muted">一个像素动画就是一个 .js 文件：它往一张粗格子里填数，怎么画、什么颜色由这里决定。点「做一个」进像素工坊，掷骰子随机出一个；或者让大模型照着下面的「给大模型的说明」写一个，上传或者粘贴进来。</p>
+        {view.drafts.length > 0 && (
+          <div className="her-row her-ws-drafts">
+            <span className="her-muted">没做完的：</span>
+            {view.drafts.map(d => <button key={d.id} className="her-btn small" title={`${d.versions} 版`} onClick={() => setWorkshop(d.id)}>{d.name}{d.saved === undefined ? '' : ' ✓'}</button>)}
+          </div>
+        )}
         <div className="her-grid her-pixels">
           {items.map(item => {
             const thumb = thumbOf(item)
@@ -276,6 +297,7 @@ export function PixelCard({ onSkin, pixel, apply }: { onSkin: () => void; pixel:
                 </button>
                 <b>{item.name}</b>
                 <small>{item.builtin ? `自带 · ${item.about ?? ''}` : describe(infoOf(item))}</small>
+                <button className="her-btn small" onClick={() => void make(item.id)}>{item.builtin ? '照着做一个' : '接着改'}</button>
                 {!item.builtin && (
                   <button className="her-btn small" onClick={() => {
                     if (window.confirm(`移走「${item.name}」？它会放进 pixels/.removed，不会直接删掉；用着它的地方改回自带的。`)) void herApi.pixelsRemove(item.id).then(r => take(r, '移走了。'))

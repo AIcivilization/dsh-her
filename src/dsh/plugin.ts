@@ -56,6 +56,8 @@ import { Secrets } from '../voice/secrets.ts'
 import { cleanVoices, ExternalVoices, SECRET_FIELDS, type PluginVoice } from '../voice/external.ts'
 import { cleanIntro, introPixel, type IntroSettings } from '../core/intro.ts'
 import { Pixels } from './pixels.ts'
+import { PixelDrafts } from './pixel-drafts.ts'
+import { PixelChats } from './pixel-chat.ts'
 import { checkMaterial, cleanSvg } from '../pack/material-check.ts'
 import { StageStore } from './stage-store.ts'
 import { Characters } from './characters.ts'
@@ -1128,6 +1130,8 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
   const skins = new Skins(paths.root)
   /** 像素动画 (docs/像素动画设计.md): shared, like skins. */
   const pixels = new Pixels(paths.root)
+  /** 像素工坊's drafts (docs/像素工坊设计.md). */
+  const drafts = new PixelDrafts(paths.root)
   /** Voices and listening from outside services; their keys in the keychain (or secrets.json). */
   const secrets = new Secrets(paths.root)
   const externalVoices = new ExternalVoices(paths.root, secrets)
@@ -1180,7 +1184,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     saveIntro({ ...settings, lastDay: today })
     log({ event: 'intro', force, ...(pixel === undefined ? {} : { pixel }) })
   }
-  const pixelsView = () => ({ items: pixels.list(), background: pixels.background(), intro: introSettings() })
+  const pixelsView = () => ({ items: pixels.list(), background: pixels.background(), intro: introSettings(), drafts: drafts.list() })
   const skinView = () => ({
     skins: skins.list().map(e => ({ ...e.skin, problems: e.problems, rev: e.rev })),
     current: skins.current() ?? null,
@@ -1197,6 +1201,11 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
   const design = new DesignSession({
     home: paths.root, room: join(dir, 'room'), title: session?.title ?? `她 · ${character.name}`,
     services: () => services, route: () => route(), tools: () => designTools(designDeps), logger: ctx.logger,
+  })
+  /** 像素工坊's AI: a session per draft, in her workspace, apart from the design session. */
+  const pixelChats = new PixelChats({
+    drafts, room: join(dir, 'room'), title: session?.title ?? `她 · ${character.name}`,
+    services: () => services, route: () => route(), logger: ctx.logger,
   })
   /** Files put into the 素材库 by hand (or before this version) are looked at in the background, one at a time. */
   let examining = false
@@ -1528,6 +1537,39 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       pixels.setBackground(change)
       return pixelsView()
     },
+    draftNew: from => {
+      if (from === undefined) return drafts.create()
+      const entry = pixels.get(from)
+      const code = pixels.code(from)
+      if (entry === undefined || code === undefined) throw new Error('没有这个像素动画')
+      // One's own goes on being itself when saved again; one that comes with her is copied.
+      return entry.builtin
+        ? drafts.create({ code, note: `照着「${entry.name}」`, name: `我的${entry.name}` })
+        : drafts.create({ code, note: `「${entry.name}」`, name: entry.name, saved: entry.id })
+    },
+    draftGet: id => drafts.get(id),
+    draftAdd: (id, code, note, look) => drafts.add(id, code, note, look),
+    draftPick: (id, n) => drafts.pick(id, n),
+    draftSet: (id, change) => drafts.set(id, change),
+    draftSave: (id, tried) => {
+      const draft = drafts.get(id)
+      if (draft.code === '') throw new Error('还没有画面：先掷一次骰子')
+      const input = { name: draft.name, label: draft.name, code: draft.code, info: tried.info, thumb: tried.thumb, frameMs: tried.frameMs }
+      const pixel = draft.saved !== undefined && pixels.get(draft.saved)?.builtin === false ? pixels.update(draft.saved, input) : pixels.add(input)
+      log({ event: 'pixel', action: 'workshop-save', id: pixel })
+      return { ...pixelsView(), pixel, draft: drafts.markSaved(id, pixel) }
+    },
+    draftRemove: id => {
+      pixelChats.forget(id)
+      drafts.remove(id)
+      return pixelsView()
+    },
+    chatView: id => pixelChats.view(id),
+    chatSend: (id, text) => pixelChats.send(id, text),
+    chatStop: id => pixelChats.stop(id),
+    chatNote: (id, text) => pixelChats.addNote(id, text),
+    chatProbe: (id, req, result) => pixelChats.answerProbe(id, req, result),
+    chatSession: id => pixelChats.sessionOf(id),
     introPlay: () => {
       const bodies = server?.bodies ?? []
       if (bodies.length === 0) throw new Error('桌面程序没连上；网页里打开 dsh 时会播')

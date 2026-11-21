@@ -23,10 +23,31 @@ export interface PixelGrid {
   line(x0: number, y0: number, x1: number, y1: number, c?: Paint, a?: number): void
   /** 5 × 7 letters (A–Z, 0–9, common signs; lower case drawn as upper), 6 cells apart; the width drawn. */
   text(x: number, y: number, s: string, c?: Paint, a?: number): number
+  /**
+   * A pixel picture (docs/像素工坊设计.md §4): rows of characters, one a cell.
+   * '.' and ' ' are left alone; '0'–'9' a brightness (9 the brightest); a
+   * letter its colour in `palette`, or else the brightest. The width drawn.
+   */
+  sprite(x: number, y: number, rows: string | readonly string[], options?: SpriteOptions): number
   random(): number
   /** Smooth noise, 0–1. */
   noise(x: number, y?: number, z?: number): number
   ease: Ease
+}
+
+export interface SpriteOptions {
+  /** How many cells a character takes each way (0.25–16). */
+  scale?: number
+  /** Mirrored left to right. */
+  flip?: boolean
+  /** Upside down. */
+  flipY?: boolean
+  /** `x`, `y` are its middle, not its top left. */
+  center?: boolean
+  /** A character's colour ('#rrggbb', or a brightness); in mono, a colour counts by how light it is. */
+  palette?: Record<string, Paint>
+  /** Its alpha, 0–1. */
+  a?: number
 }
 
 export interface Ease {
@@ -190,6 +211,39 @@ export function makeGrid(w: number, h: number, mode: 'mono' | 'color'): PixelGri
         at += 6
       }
       return at - Math.floor(x)
+    },
+    sprite: (x, y, rows, options = {}) => {
+      const lines = (typeof rows === 'string' ? rows.split('\n') : Array.isArray(rows) ? rows : []).slice(0, 400).map(r => String(r).slice(0, 400))
+      const width = lines.reduce((m, r) => Math.max(m, r.length), 0)
+      const height = lines.length
+      const scale = Math.min(16, Math.max(0.25, Number.isFinite(options.scale) ? options.scale! : 1))
+      const al = clamp01(options.a ?? 1)
+      const left = options.center === true ? x - (width * scale) / 2 : x
+      const top = options.center === true ? y - (height * scale) / 2 : y
+      const paints = new Map<string, [number, number, number]>()
+      const paintOf = (ch: string): [number, number, number] => {
+        let p = paints.get(ch)
+        if (p === undefined) {
+          const own = options.palette?.[ch]
+          p = channels(own !== undefined ? own : ch >= '0' && ch <= '9' ? Number(ch) / 9 : 1)
+          paints.set(ch, p)
+        }
+        return p
+      }
+      for (let row = 0; row < height; row++) {
+        const line = lines[row]!
+        const sy = options.flipY === true ? height - 1 - row : row
+        for (let col = 0; col < line.length; col++) {
+          const ch = line[col]!
+          if (ch === '.' || ch === ' ') continue
+          const [r, g, b] = paintOf(ch)
+          const sx = options.flip === true ? width - 1 - col : col
+          const x0 = Math.floor(left + sx * scale), y0 = Math.floor(top + sy * scale)
+          const x1 = Math.max(x0 + 1, Math.floor(left + (sx + 1) * scale)), y1 = Math.max(y0 + 1, Math.floor(top + (sy + 1) * scale))
+          for (let yy = y0; yy < y1; yy++) for (let xx = x0; xx < x1; xx++) put(xx, yy, r, g, b, al)
+        }
+      }
+      return Math.round(width * scale)
     },
     random: () => random(),
     noise: (x, y, z) => noise3(x, y, z),

@@ -80,19 +80,30 @@ export class Pixels {
    * Keep a file the page has tried: its code, and what the try found (info,
    * a still, the slowest frame). A file we cannot run is refused here too.
    */
-  add(input: { name: string; code: string; info: unknown; thumb?: unknown; frameMs?: unknown }): string {
+  add(input: { name: string; code: string; info: unknown; thumb?: unknown; frameMs?: unknown; label?: string }): string {
+    return this.put(undefined, input)
+  }
+
+  /** Write over one of one's own (像素工坊's 保存 again); its name may change, its id does not. `label`: the name shown, instead of the file's own. */
+  update(id: string, input: { name: string; code: string; info: unknown; thumb?: unknown; frameMs?: unknown; label?: string }): string {
+    if (!FOLDER.test(id) || !existsSync(join(this.root, id, 'anim.js'))) throw new Error('没有这个像素动画')
+    return this.put(id, input)
+  }
+
+  private put(existing: string | undefined, input: { name: string; code: string; info: unknown; thumb?: unknown; frameMs?: unknown; label?: string }): string {
     const wrapped = wrapPixelCode(input.code)
     if (wrapped.script === undefined) throw new Error(wrapped.problems.join('；'))
     const { info, problems } = cleanPixelInfo(input.info)
     if (info === undefined) throw new Error(problems.join('；'))
-    let id = [input.name, info.name].map(pixelId).find(n => n !== '') ?? `pixel-${Date.now().toString(36)}`
-    for (let n = 2; existsSync(join(this.root, id)); n++) id = `${id.replace(/-\d+$/, '')}-${n}`
+    let id = existing ?? [input.name, info.name].map(pixelId).find(n => n !== '') ?? `pixel-${Date.now().toString(36)}`
+    if (existing === undefined) for (let n = 2; existsSync(join(this.root, id)); n++) id = `${id.replace(/-\d+$/, '')}-${n}`
     const dir = join(this.root, id)
     mkdirSync(dir, { recursive: true })
     writeFileSync(join(dir, 'anim.js'), input.code)
     const thumb = typeof input.thumb === 'string' && input.thumb.length < 600_000 && THUMB.test(input.thumb) ? input.thumb : undefined
+    const name = input.label !== undefined && input.label.trim() !== '' ? input.label.trim().slice(0, 40) : info.name
     writeFileSync(join(dir, 'meta.json'), `${JSON.stringify({
-      name: info.name, info, ...(thumb === undefined ? {} : { thumb }),
+      name, info, ...(thumb === undefined ? {} : { thumb }),
       ...(typeof input.frameMs === 'number' && Number.isFinite(input.frameMs) ? { frameMs: input.frameMs } : {}), added: Date.now(),
     }, null, 2)}\n`)
     return id

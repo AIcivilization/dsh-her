@@ -152,3 +152,44 @@ test('a 设计包 brings 像素动画 in pixels/, as its opening clip or chat ba
   assert.equal(plan.manifest.background?.opacity, 0.6)
   assert.ok(problems.some(p => p.includes('sea.js')))
 })
+
+test('g.sprite: a picture in characters, scaled, mirrored, centred, with a palette', () => {
+  const g = makeGrid(16, 8, 'mono')
+  const ART = ['9.', '45', '#a']
+  assert.equal(g.sprite(1, 1, ART), 2)
+  assert.equal(g.get(1, 1), 1)
+  assert.equal(g.get(2, 1), 0, "'.' is left alone")
+  assert.ok(Math.abs(g.get(1, 2) - 4 / 9) < 0.01)
+  assert.equal(g.get(1, 3), 1, "'#' is the brightest")
+  g.clear()
+  assert.equal(g.sprite(0, 0, ART, { scale: 2, flip: true }), 4)
+  assert.equal(g.get(2, 0), 1, 'mirrored: the 9 is on the right')
+  assert.equal(g.get(3, 1), 1, 'two cells each way')
+  assert.equal(g.get(0, 0), 0)
+  g.clear()
+  g.sprite(8, 4, ['99', '99'], { center: true, flipY: true })
+  assert.deepEqual([g.get(7, 3), g.get(8, 4), g.get(6, 4)], [1, 1, 0])
+  // A palette: in mono a colour counts by how light it is; '0' covers what is under it.
+  g.clear()
+  g.rect(0, 0, 16, 8, 1)
+  g.sprite(0, 0, 'ab0', { palette: { a: '#000000', b: 0.5 } })
+  assert.deepEqual([g.get(0, 0), Math.round(g.get(1, 0) * 100) / 100, g.get(2, 0), g.get(3, 0)], [0, 0.5, 0, 1])
+  const c = makeGrid(4, 1, 'color')
+  c.sprite(0, 0, 'a', { palette: { a: '#ff8800' } })
+  assert.deepEqual([...c.data.slice(0, 4)], [255, 136, 0, 255])
+  // Off the grid, or nonsense, draws nothing and does not throw.
+  g.clear()
+  g.sprite(-50, -50, ['999'], { scale: 1000 })
+  g.sprite(0, 0, undefined as never)
+})
+
+test('the example in the instructions runs as it says', () => {
+  const spec = pixelSpec()
+  const art = /const FISH = \[[^\]]+\]/.exec(spec)![0]
+  const anim = load(`export const info = { name: '鱼', grid: [192, 108], fps: 24, seconds: 0 }\n${art}\nexport function frame(g, t) {\n  g.clear()\n${/const p = [^\n]+\ng\.sprite[^\n]+/.exec(spec)![0]}\n}`)
+  const g = makeGrid(192, 108, 'mono')
+  anim.frame!(g, 1, 24)
+  let right = 0
+  for (let x = 0; x < 192; x++) if (g.get(x, 54) > 0) right = x
+  assert.ok(right > 40 && right < 70, `the fish is a quarter of the way along (${right})`)
+})

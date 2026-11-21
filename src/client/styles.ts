@@ -543,4 +543,66 @@ a.her-btn.disabled{opacity:.45;pointer-events:none}
 .her-pixel-min{width:58px!important;min-height:26px!important;padding:2px 6px!important}
 .her-pixel-spec{white-space:pre-wrap;font-size:12px;line-height:1.55;max-height:420px;overflow:auto;padding:10px;border-radius:8px;background:${FIELD}}
 .her-pixel-problems{margin-top:8px}
+.her-pixel .her-btn+.her-btn{margin-top:0}
+.her-ws-drafts{align-items:center;gap:6px}
+.her-card:has(>.her-ws){container-type:inline-size}
+.her-ws{display:grid;grid-template-columns:minmax(0,1fr);grid-template-areas:"main" "chat" "side";gap:16px;align-items:start}
+@container (min-width:720px){
+  .her-ws{grid-template-columns:minmax(0,1fr) minmax(260px,320px);grid-template-areas:"main chat" "side chat"}
+  .her-ws-chat{position:sticky;top:8px;height:min(640px,calc(100vh - 120px))}
+}
+.her-ws-main{grid-area:main;min-width:0}
+.her-ws-side{grid-area:side}
+.her-ws-chat{grid-area:chat;display:flex;flex-direction:column;gap:8px;min-width:0;min-height:320px;max-height:640px;padding:10px;border:1px solid ${LINE};border-radius:12px;background:${LAYER1}}
+.her-ws-chat-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.her-ws-chat-head b{font-weight:600}
+.her-ws-msgs{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:2px}
+.her-msg{max-width:92%;padding:6px 10px;border-radius:12px;font-size:13px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+.her-msg.you{align-self:flex-end;background:${INK};color:${ON_INK};border-bottom-right-radius:4px}
+.her-msg.ai{align-self:flex-start;background:${LAYER2};border-bottom-left-radius:4px}
+.her-msg.note{align-self:center;max-width:100%;padding:2px 8px;font-size:12px;color:${MUTED};background:none}
+.her-msg.note.bad{color:${WARN}}
+.her-ws-hello{color:${MUTED};font-size:13px}
+.her-ws-hello p{margin:0 0 8px}
+.her-ws-ideas{display:flex;flex-direction:column;gap:6px}
+.her-ws-ideas button{text-align:left;border:1px dashed ${LINE};background:none;color:${TEXT};font:inherit;font-size:13px;padding:6px 10px;border-radius:10px;cursor:pointer}
+.her-ws-ideas button:hover{background:${HOVER}}
+.her-ws-say{display:flex;gap:6px;align-items:flex-end}
+.her-ws-say .her-textarea{flex:1;min-height:0;resize:none;font-size:13px}
+.her-ws-chat>.her-faint{margin:0;font-size:11px}
+.her-ws-stage{position:relative;aspect-ratio:16/9;border-radius:10px;overflow:hidden;background:${FIELD};border:1px solid ${LINE}}
+.her-ws-frame{position:absolute;inset:0}
+.her-ws-empty{position:absolute;inset:0;display:grid;place-items:center;padding:16px;text-align:center;color:${FAINT}}
+.her-ws-problem{position:absolute;left:8px;right:8px;bottom:6px;margin:0}
+.her-vchips{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+.her-vchips button{border:1px solid ${LINE};background:none;color:${MUTED};font:inherit;font-size:12px;padding:2px 9px;border-radius:999px;cursor:pointer}
+.her-vchips button.on{background:${INK};border-color:${INK};color:${ON_INK};font-weight:600}
+.her-ws-side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.her-ws-side>.her-ws-dice{grid-column:1/-1}
+.her-ws-dice>.her-btn{margin-left:auto;flex:none}
+.her-ws-picture{grid-column:1/-1;display:flex;flex-direction:column;gap:8px;padding:10px;border:1px dashed ${LINE};border-radius:12px}
+.her-ws-picture>b{font-weight:600}
+.her-ws-picture-view{align-self:flex-start;max-width:100%;image-rendering:pixelated;border-radius:6px}
+.her-ws-picture .her-faint{margin:0}
+.her-ws-set{display:flex;flex-direction:column;gap:6px}
+.her-ws-set>b{font-size:13px;font-weight:600}
+.her-ws-dice{display:flex;align-items:center;gap:12px}
+.her-ws-dice>div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.her-ws-dice span{font-size:12px}
+.her-die{flex:none;width:60px;height:60px;border-radius:16px;display:grid;place-items:center;font-size:32px;line-height:1;border:1px solid ${LINE};background:${LAYER2};cursor:pointer;box-shadow:0 2px 0 ${LINE}}
+.her-die:hover{background:${HOVER}}
+.her-die:disabled{cursor:default}
+.her-die.rolling{animation:her-die .18s linear infinite}
+@keyframes her-die{0%{transform:rotate(-10deg)}50%{transform:rotate(10deg) translateY(-3px)}100%{transform:rotate(-10deg)}}
+@media (prefers-reduced-motion:reduce){.her-die.rolling{animation:none}}
+.her-wheel-box{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.her-wheel{position:relative;flex:none;width:120px;height:120px;border-radius:50%;corner-shape:round;touch-action:none;cursor:crosshair;border:1px solid ${LINE}}
+.her-wheel.off{opacity:.45}
+.her-wheel i{position:absolute;width:14px;height:14px;border-radius:50%;corner-shape:round;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.45);transform:translate(-50%,-50%);pointer-events:none}
+.her-wheel-side{display:flex;flex-direction:column;gap:6px;min-width:0}
+.her-wheel-chip{align-self:flex-start;font-size:11px;padding:1px 8px;border-radius:999px;color:#fff;text-shadow:0 0 2px rgba(0,0,0,.6)}
+.her-ws-foot{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid ${LINE}}
+.her-ws-foot .her-input{flex:1 1 160px;width:auto;min-width:0}
+@container (min-width:560px) and (max-width:719px), (min-width:1040px){.her-ws-side{display:grid;grid-template-columns:1fr 1fr;gap:12px 18px}}
+.her-ws-side .her-seg button{white-space:nowrap}
 `
