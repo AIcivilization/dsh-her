@@ -1,4 +1,32 @@
-# dsh-her
+<div align="center">
+
+# 🐳 dsh-her
+
+**鲸鱼娘的身体引擎** · 住在壁纸里、浮在桌面上、住在网页和手机里<br>
+会说话、会听、会先开口、记得你
+
+*A body engine for AI desktop companions — a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin.*
+
+[![npm](https://img.shields.io/npm/v/dsh-her?color=2b6cb0&label=npm&logo=npm)](https://www.npmjs.com/package/dsh-her)
+[![下载量](https://img.shields.io/npm/dm/dsh-her?color=2b6cb0&label=%E4%B8%8B%E8%BD%BD%E9%87%8F)](https://www.npmjs.com/package/dsh-her)
+[![Release](https://img.shields.io/github/v/release/AIcivilization/dsh-her?color=0e7490&label=release&logo=github)](https://github.com/AIcivilization/dsh-her/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/AIcivilization/dsh-her/ci.yml?branch=main&label=CI&logo=githubactions&logoColor=white)](https://github.com/AIcivilization/dsh-her/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/AIcivilization/dsh-her?color=64748b)](https://github.com/AIcivilization/dsh-her/blob/main/LICENSE)
+
+[![DeepSeek Harness 插件](https://img.shields.io/badge/DeepSeek%20Harness-%E6%8F%92%E4%BB%B6-4d6bfe)](https://github.com/deepseek-ai/deepseek-harness)
+[![dsh](https://img.shields.io/badge/dsh-%3E%3D0.2.0-4d6bfe)](https://www.npmjs.com/package/dsh-her)
+[![平台](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-macOS%20%7C%20Windows%20%7C%20%E7%BD%91%E9%A1%B5-0f766e)](#安装)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178c6?logo=typescript&logoColor=white)](https://github.com/AIcivilization/dsh-her/tree/main/src)
+[![Electron](https://img.shields.io/badge/Electron-47848f?logo=electron&logoColor=white)](https://github.com/AIcivilization/dsh-her/tree/main/body)
+[![GitHub stars](https://img.shields.io/github/stars/AIcivilization/dsh-her?style=social)](https://github.com/AIcivilization/dsh-her/stargazers)
+
+[安装](#安装) · [怎么和她说话](#怎么和她说话) · [设置](#设置) · [设计包](#设计包) · [素材指南](https://github.com/AIcivilization/dsh-her/blob/main/docs/素材规格与提示词.md) · [反馈问题](https://github.com/AIcivilization/dsh-her/issues)
+
+觉得好玩的话，点右上角的 ⭐ Star 支持一下
+
+</div>
+
+---
 
 **鲸鱼娘的身体引擎。** 设计交给设计者，身体交给我们：角色（人设、三视图、动画素材、编排）、界面皮肤、开机动画这些设计，按通用的[设计包格式](https://github.com/AIcivilization/dsh-her/blob/main/docs/设计包格式.md)做好就能装进来；会动、会说话、会听、会先开口、记得你，住在壁纸里、浮在桌面上、住在网页和手机里，这些由引擎完成。它首先是鲸鱼娘的身体引擎，也是给所有玩桌宠的人用的身体引擎——你的角色不一定是鲸鱼娘。见 [产品定义](https://github.com/AIcivilization/dsh-her/blob/main/docs/产品定义.md)。
 
