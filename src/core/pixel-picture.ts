@@ -25,7 +25,12 @@ export interface PictureOptions {
 }
 
 export interface Picture {
+  /** The first frame (the only one of a still picture). */
   rows: string[]
+  /** Every frame, the same size, the same palette; one for a still picture. */
+  frames: string[][]
+  /** Seconds each frame shows, when there are more than one. */
+  each?: number
   /** For colour: a letter's colour. */
   palette?: Record<string, string>
   w: number
@@ -277,49 +282,59 @@ export function outline(img: Rgba): Rgba {
 
 /** The whole way: a picture's pixels (changed in place) to a pixel picture. */
 export function makePicture(img: Rgba, options: PictureOptions): Picture {
-  const border = edges(img.w, img.h)
-  const clear = border.filter(p => img.data[p * 4 + 3]! < 128).length >= border.length * 0.5
-  const background: Picture['background'] = clear ? 'clear' : options.cutBackground && cutBackground(img) ? 'cut' : 'kept'
-  const box = cropBox(img)
+  return makeFrames([img], options)
+}
+
+/** Stacked one under another, to be shrunk to one palette (or one range of lightness) together. */
+function stack(frames: Rgba[]): Rgba {
+  const w = frames[0]!.w
+  const data = new Uint8ClampedArray(frames.reduce((n, f) => n + f.data.length, 0))
+  let at = 0
+  for (const f of frames) {
+    data.set(f.data, at)
+    at += f.data.length
+  }
+  return { data, w, h: data.length / 4 / w }
+}
+
+/**
+ * Several pictures of one thing moving (frames of a GIF or a video, or
+ * pictures chosen together), all the same size, to frames of one pixel
+ * picture: each its background taken away, all cut to one box so it does
+ * not jump about, one height, one palette. `each`: seconds a frame shows.
+ */
+export function makeFrames(imgs: Rgba[], options: PictureOptions, each?: number): Picture {
+  const backgrounds = imgs.map(img => {
+    const border = edges(img.w, img.h)
+    const clear = border.filter(p => img.data[p * 4 + 3]! < 128).length >= border.length * 0.5
+    return clear ? 'clear' : options.cutBackground && cutBackground(img) ? 'cut' : 'kept'
+  })
+  const background: Picture['background'] = backgrounds.includes('cut') ? 'cut' : backgrounds.every(b => b === 'clear') ? 'clear' : 'kept'
+  // One box round what is in every frame.
+  const boxes = imgs.map(cropBox)
+  const x0 = Math.min(...boxes.map(b => b.x)), y0 = Math.min(...boxes.map(b => b.y))
+  const box = { x: x0, y: y0, w: Math.max(...boxes.map(b => b.x + b.w)) - x0, h: Math.max(...boxes.map(b => b.y + b.h)) - y0 }
   let th = Math.max(8, Math.min(PICTURE_MAX_H, Math.round(options.height)))
   let tw = Math.max(1, Math.round(box.w / box.h * th))
   if (tw > PICTURE_MAX_W) {
     tw = PICTURE_MAX_W
     th = Math.max(1, Math.round(box.h / box.w * tw))
   }
-  const small = shrink(img, box, tw, th)
-  if (!options.color) return { rows: monoRows(small), w: tw, h: th, background }
-  const edged = options.outline === true ? outline(small) : small
-  const { rows, palette } = colorRows(edged)
-  return { rows, palette, w: edged.w, h: edged.h, background }
+  const smalls = imgs.map(img => shrink(img, box, tw, th))
+  const timing = imgs.length > 1 && each !== undefined ? { each: Math.round(Math.max(0.03, Math.min(2, each)) * 1000) / 1000 } : {}
+  if (!options.color) {
+    const rows = monoRows(stack(smalls))
+    const frames = smalls.map((_, k) => rows.slice(k * th, (k + 1) * th))
+    return { rows: frames[0]!, frames, w: tw, h: th, background, ...timing }
+  }
+  const edged = options.outline === true ? smalls.map(outline) : smalls
+  const { rows, palette } = colorRows(stack(edged))
+  const h = edged[0]!.h
+  const frames = edged.map((_, k) => rows.slice(k * h, (k + 1) * h))
+  return { rows: frames[0]!, frames, palette, w: edged[0]!.w, h, background, ...timing }
 }
 
-/** The grids a picture's file may start on, coarsest first (as the workshop offers them, from 默认 up). */
-const PICTURE_GRIDS: Array<[number, number]> = [[192, 108], [256, 144], [320, 180], [384, 216]]
+/** How big its file will be, roughly, in bytes: a frame's rows, quoted, one a line. */
+export const pictureBytes = (picture: Picture) => picture.frames.length * picture.h * (picture.w + 6) + 2500
 
-/**
- * A 像素动画 file with the picture in it, floating gently, to start from:
- * the AI makes it move after (its prompt says to keep PICTURE as it is).
- */
-export function pictureCode(picture: Picture, name: string): string {
-  const color = picture.palette !== undefined
-  // The coarsest grid it fits in at eight tenths, so a tall picture is not cut off.
-  const grid = PICTURE_GRIDS.find(([gw, gh]) => picture.w <= gw * 0.8 && picture.h <= gh * 0.8) ?? PICTURE_GRIDS[PICTURE_GRIDS.length - 1]!
-  const rows = picture.rows.map(r => `  '${r}',`).join('\n')
-  const palette = color ? `\nconst PALETTE = ${JSON.stringify(picture.palette).replace(/"(\w)":/g, '$1: ').replace(/,/g, ', ')}\n` : ''
-  return `// 🖼 用图片转的像素图（${picture.w} × ${picture.h} 格）。
-// PICTURE 就是那张图：要它动，就移动、翻转、缩放它，或者复制一份改几格（眨眼、张嘴、抬手）轮着换；不要整个重画。
-export const info = { name: ${JSON.stringify(name)}, author: '', grid: [${grid[0]}, ${grid[1]}], fps: 24, seconds: 0, color: '${color ? 'color' : 'mono'}' }
-
-const PICTURE = [
-${rows}
-]
-${palette}
-export function frame(g, t) {
-  g.clear()
-  // 放大到占画面八成，放在中间，轻轻上下浮动
-  const s = Math.max(1, Math.floor(Math.min(g.h * 0.8 / PICTURE.length, g.w * 0.8 / PICTURE[0].length)))
-  g.sprite(g.w / 2, g.h / 2 + Math.sin(t * 2) * 2, PICTURE, { scale: s, center: true${color ? ', palette: PALETTE' : ''} })
-}
-`
-}
+export { pictureCode } from './pixel-motion.ts'

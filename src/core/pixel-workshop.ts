@@ -33,13 +33,16 @@ export function infoOverride(code: string): InfoChange {
   }
 }
 
+/** The file without its override line (its end trimmed). */
+export const withoutInfo = (code: string): string => code.replace(LINE, '').replace(/\s*$/, '')
+
 /** The file with `change` put into its override line. */
 export function withInfo(code: string, change: InfoChange): string {
   const next: InfoChange = { ...infoOverride(code) }
   if (change.grid !== undefined) next.grid = [Math.round(change.grid[0]), Math.round(change.grid[1])]
   if (change.fps !== undefined) next.fps = Math.round(change.fps)
   if (change.seconds !== undefined) next.seconds = Math.max(0, Math.round(change.seconds))
-  const body = code.replace(LINE, '').replace(/\s*$/, '')
+  const body = withoutInfo(code)
   return `${body}\n;Object.assign(info, ${JSON.stringify(next)})${MARK}\n`
 }
 

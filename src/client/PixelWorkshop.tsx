@@ -11,8 +11,9 @@ import { herApi, type ChatView, type DraftView } from './api.ts'
 import { inkOf, PixelFrame, probePixel } from './pixel/host.ts'
 import { FACES, hslHex, rollDice, type DiceRoll } from '../core/pixel-dice.ts'
 import { STYLE_NAME, PIXEL_STYLES, type PixelInfo, type PixelLook } from '../core/pixel.ts'
-import { describeChange, withInfo, WORKSHOP_FPS, WORKSHOP_GRIDS, type InfoChange } from '../core/pixel-workshop.ts'
-import { pictureCode, type Picture } from '../core/pixel-picture.ts'
+import { describeChange, infoOverride, withInfo, withoutInfo, WORKSHOP_FPS, WORKSHOP_GRIDS, type InfoChange } from '../core/pixel-workshop.ts'
+import type { Picture } from '../core/pixel-picture.ts'
+import { MOTIONS, pictureCode, readPictureFile, type Motion } from '../core/pixel-motion.ts'
 import { PicturePixel } from './PicturePixel.tsx'
 import { showIntro } from './intro-show.ts'
 import { showPixelBackground } from './pixel-bg.ts'
@@ -139,7 +140,7 @@ export function PixelWorkshop({ id, onClose }: { id: string; onClose: () => void
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const msgs = useRef<HTMLDivElement>(null)
-  const [pictureFile, setPictureFile] = useState<File>()
+  const [pictureFiles, setPictureFiles] = useState<File[]>()
   const picturePick = useRef<HTMLInputElement>(null)
   const sayBox = useRef<HTMLTextAreaElement>(null)
   const [, tick] = useState(0)
@@ -328,17 +329,18 @@ export function PixelWorkshop({ id, onClose }: { id: string; onClose: () => void
 
   /** A picture made into a pixel picture: a new version with it floating, and a word in the chat. */
   const takePicture = async (picture: Picture) => {
-    const label = (pictureFile?.name ?? '图片').replace(/\.[^.]+$/, '').slice(0, 30) || '图片'
+    const label = (pictureFiles?.[0]?.name ?? '图片').replace(/\.[^.]+$/, '').slice(0, 30) || '图片'
     const pictureLook: PixelLook = picture.palette === undefined ? look : { ...look, style: 'blocks' }
-    const added = take(await herApi.draftAdd(id, pictureCode(picture, label), `🖼 图片转的像素图（${picture.w} × ${picture.h}）`, pictureLook))
+    const many = picture.frames.length > 1 ? `，${picture.frames.length} 帧` : ''
+    const added = take(await herApi.draftAdd(id, pictureCode(picture, label), `🖼 图片转的像素图（${picture.w} × ${picture.h}${many}）`, pictureLook))
     if (added === undefined) return
     setLook(pictureLook)
-    setPictureFile(undefined)
+    setPictureFiles(undefined)
     if (autoName.current) {
       setName(label)
       take(await herApi.draftSet(id, { name: label, auto: true }))
     }
-    const r = await herApi.chatNote(id, `🖼 图片转成了像素图（${picture.w} × ${picture.h} 格），放进了 v${added.current}，现在轻轻浮着。想让它怎么动，在下面说，比如：跳一跳、眨眨眼、左右走。`)
+    const r = await herApi.chatNote(id, `🖼 转成了像素图（${picture.w} × ${picture.h} 格${many}），放进了 v${added.current}，现在轻轻浮着。点画面下面「动起来」换个动作；想要别的，在下面说，比如：眨眨眼、挥挥手。`)
     if (r.ok) setChat(r.chat)
   }
 
@@ -365,6 +367,23 @@ export function PixelWorkshop({ id, onClose }: { id: string; onClose: () => void
   const pickVersion = (n: number) => {
     clearTimeout(lookTimer.current)
     void herApi.draftPick(id, n).then(r => { const d = take(r); if (d !== undefined) setLook(d.look) })
+  }
+  // A file made from pictures: its picture, to move it another way with a click.
+  const read = draft.code === '' ? undefined : readPictureFile(draft.code)
+  const pic = read === undefined ? undefined : {
+    ...read,
+    // Not as made here: the AI (or a person) has changed it since.
+    changed: read.motion === undefined || pictureCode(read.picture, read.name, read.motion).trimEnd() !== withoutInfo(draft.code),
+  }
+  const move = (motion: Motion, each?: number) => {
+    if (read === undefined) return
+    const picture = each === undefined ? read.picture : { ...read.picture, each }
+    const made = pictureCode(picture, read.name || draft.name, motion)
+    // The workshop's own settings (grid, frame rate, length) stay.
+    const over = infoOverride(draft.code)
+    clearTimeout(lookTimer.current)
+    const note = each === undefined ? `🕺 动起来：${MOTIONS.find(m => m.id === motion)!.name}` : `🕺 每帧 ${each} 秒`
+    void herApi.draftAdd(id, Object.keys(over).length > 0 ? withInfo(made, over) : made, note, look).then(take)
   }
   const start = (
     <div className="her-ws-start">
@@ -398,6 +417,24 @@ export function PixelWorkshop({ id, onClose }: { id: string; onClose: () => void
               </div>
               <p className="her-faint">v{draft.current}：{current?.note || '—'}{info === undefined ? '' : ` · ${info.grid[0]} × ${info.grid[1]} · 每秒 ${info.fps} 帧 · ${info.seconds > 0 ? `${info.seconds} 秒一遍` : '一直循环'}`}</p>
             </>
+          )}
+          {pic !== undefined && (
+            <div className="her-ws-move">
+              <b>动起来</b>
+              <span className="her-seg wrap" role="group" aria-label="动起来">
+                {MOTIONS.map(m => <button key={m.id} title={m.about} className={pic.motion === m.id ? 'on' : ''} onClick={() => move(m.id)}>{m.name}</button>)}
+              </span>
+              {pic.picture.frames.length > 1 && (
+                <span className="her-row" style={{ margin: 0 }}>
+                  <span className="her-muted">{pic.picture.frames.length} 帧，每帧 {pic.picture.each ?? 0.1} 秒</span>
+                  <span className="her-seg" role="group" aria-label="换帧快慢">
+                    <button onClick={() => move(pic.motion ?? 'still', Math.min(2, Math.round((pic.picture.each ?? 0.1) * 1.4 * 1000) / 1000))}>慢一点</button>
+                    <button onClick={() => move(pic.motion ?? 'still', Math.max(0.03, Math.round((pic.picture.each ?? 0.1) / 1.4 * 1000) / 1000))}>快一点</button>
+                  </span>
+                </span>
+              )}
+              {pic.changed && <span className="her-faint">这一版 AI 改过：换动作会从原图重新做，AI 改的地方要再跟它说一次（也可以用 ‹ 回到这一版）。</span>}
+            </div>
           )}
           {problems !== undefined && <ul className="her-warnlist">{problems.map(p => <li key={p}>{p}</li>)}</ul>}
         </div>
@@ -447,9 +484,9 @@ export function PixelWorkshop({ id, onClose }: { id: string; onClose: () => void
               <span className="her-muted">{die.said ?? '六个面，六个方向，每次都不一样。'}</span>
             </div>
             <button className="her-btn small" onClick={() => picturePick.current?.click()}>🖼 用图片做</button>
-            <input ref={picturePick} type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden onChange={e => { const f = e.target.files?.[0]; if (f !== undefined) setPictureFile(f); e.target.value = '' }} />
+            <input ref={picturePick} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,video/mp4,video/webm,video/quicktime" hidden onChange={e => { const list = [...(e.target.files ?? [])]; if (list.length > 0) setPictureFiles(list); e.target.value = '' }} />
           </div>
-          {pictureFile !== undefined && <PicturePixel file={pictureFile} onUse={takePicture} onCancel={() => setPictureFile(undefined)} />}
+          {pictureFiles !== undefined && <PicturePixel files={pictureFiles} onUse={takePicture} onCancel={() => setPictureFiles(undefined)} />}
 
           <div className="her-ws-set">
             <b>画法</b>

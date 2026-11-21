@@ -19,6 +19,7 @@ import { Showcase, SheetCard } from './Showcase.tsx'
 import { VoiceServices } from './VoiceServices.tsx'
 import { CharacterStrip, onChanging, switchCharacter, type Changing } from './Characters.tsx'
 import { PlacesRow } from './Places.tsx'
+import { AllSettings, IntroAndBackground, type Tile } from './Overview.tsx'
 import { MaterialGuide } from './MaterialGuide.tsx'
 import { DesignPacks } from './DesignPacks.tsx'
 import { onPageRequest, takePage } from './open-page.ts'
@@ -328,6 +329,7 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
           {section === 'look' && (
             <>
               {state.stagePlaying && <Banner tone="ok" text="她现在按「编排」来。这里选的形象，在关掉编排以后才用。" action="去编排" onClick={() => go('stage')} />}
+              <SheetCard state={state} onGo={target => { if (target !== 'places') go(target) }} />
               <Card title="选一个形象"><PackPicker state={state} apply={apply} /></Card>
               <WebPlaceCard state={state} apply={apply} />
               {body.look !== undefined && <Card title="场景"><ScenePicker state={state} apply={apply} /></Card>}
@@ -482,6 +484,10 @@ function Home({ state, apply, go }: { state: StateView; apply: Apply; go: (secti
   const pack = body.packs.find(p => p.packId === body.activePack)
   const speaking = state.voice.speaking.status
   const float = window.__herFloat
+  const [pixelCount, setPixelCount] = useState<{ own: number; drafts: number }>()
+  useEffect(() => {
+    void herApi.pixelsGet().then(r => { if (r.ok) setPixelCount({ own: r.items.filter(i => !i.builtin).length, drafts: r.drafts.filter(d => d.saved === undefined).length }) })
+  }, [])
   const todo: Array<{ tone: Tone; text: string; action: string; to: Section }> = [
     ...(state.model === null ? [{ tone: 'bad' as const, text: 'dsh 还没有可用的模型，她没法回答。', action: '选模型', to: 'model' as const }] : []),
     ...(state.problem !== undefined ? [{ tone: 'bad' as const, text: `她刚才没能回答：${state.problem.text}`, action: '换模型', to: 'model' as const }] : []),
@@ -492,16 +498,33 @@ function Home({ state, apply, go }: { state: StateView; apply: Apply; go: (secti
     ...(here && !state.off && body.web.avatar === undefined ? [{ tone: 'off' as const, text: '她还没有小头像（dsh 对话框上的那个）。', action: '去素材库', to: 'library' as const }] : []),
   ]
   const focus = state.initiative.focus.on
-  const tiles: Array<{ icon: string; label: string; value: string; to: Section }> = [
-    { icon: 'persona', label: '人设', value: `${c.name}，叫你「${c.callYou || '（没设）'}」`, to: 'persona' },
-    { icon: 'voice', label: '声音', value: `${voiceLabel(state, c.voice.id)} · ${SERVICE_SHORT[serviceOf(c.voice.id)]}`, to: 'voice' },
-    { icon: 'look', label: '形象', value: !here ? '身体没连上' : pack?.name ?? '还没有', to: 'look' },
-    { icon: 'stage', label: '编排', value: state.stagePlaying ? '她按编排来' : '没开', to: 'stage' },
-    { icon: 'skin', label: '皮肤', value: state.skin ?? 'dsh 原样', to: 'skin' },
-    { icon: 'body', label: '桌面程序', value: desktopHere(body) ? '已连上' : body.running ? '正在连' : desktopOffered(body) ? '没在运行' : '这台设备上没有', to: 'about' },
-    { icon: 'initiative', label: '主动说话', value: initiativeText(state), to: 'initiative' },
-    { icon: 'talk', label: '对话', value: `${state.talk.segment?.title ?? '还没有'}${state.talk.size === undefined ? '' : ` · ${state.talk.size}`}`, to: 'talk' },
-    { icon: 'model', label: '模型', value: state.model === null ? '没有可用的' : state.model.model, to: 'model' },
+  const listening = state.voice.status === 'ready' ? '能听' : state.voice.status === 'off' ? '不听' : state.voice.status === 'failed' ? '听出错了' : '准备中'
+  const groups: Array<{ title: string; tiles: Tile[] }> = [
+    { title: '她', tiles: [
+      { icon: 'persona', label: '人设', value: `${c.name}，叫你「${c.callYou || '（没设）'}」${state.characters.length > 1 ? ` · 共 ${state.characters.length} 个人物` : ''}`, to: 'persona' },
+      { icon: 'voice', label: '声音', value: `${voiceLabel(state, c.voice.id)} · ${SERVICE_SHORT[serviceOf(c.voice.id)]}${state.voice.speed !== 1 ? ` · ${state.voice.speed} 倍速` : ''}`, to: 'voice' },
+      { icon: 'memory', label: '记忆', value: `记得 ${state.memory.facts.length} 件事、${state.memory.episodes.length} 个事件`, to: 'memory' },
+    ] },
+    { title: '外观', tiles: [
+      { icon: 'look', label: '形象', value: !here ? '身体没连上' : pack?.name ?? '还没有', to: 'look' },
+      { icon: 'stage', label: '编排', value: state.stagePlaying ? '她按编排来' : '没开', to: 'stage', toggle: { on: state.stagePlaying, disabled: state.off, set: on => void herApi.stagePlay(on).then(() => apply(herApi.state())) } },
+      { icon: 'library', label: '素材库', value: `三视图${state.sheet === null ? '还没有' : '有'} · 小头像${body.web.avatar === undefined ? '还没有' : '有'}`, to: 'library' },
+      { icon: 'guide', label: '素材指南', value: '每样素材的尺寸和提示词', to: 'guide' },
+      { icon: 'skin', label: '皮肤', value: state.skin ?? 'dsh 原样', to: 'skin' },
+      { icon: 'pixel', label: '像素动画', value: pixelCount === undefined ? '用代码画的小动画' : `${pixelCount.own} 个自己做的${pixelCount.drafts > 0 ? ` · ${pixelCount.drafts} 个没做完` : ''}`, to: 'pixels' },
+      { icon: 'copy', label: '设计包', value: '装别人的，导出你的', to: 'designs' },
+      { icon: 'workshop', label: '形象工坊', value: '从头做一个自己的形象', to: 'workshop' },
+    ] },
+    { title: '相处', tiles: [
+      { icon: 'speak', label: '说话和聆听', value: `按住说话${state.places.holdKey ? '' : '（关）'} · ${listening}`, to: 'speak', toggle: { on: state.places.holdKey, disabled: state.off, set: on => void apply(herApi.places({ holdKey: on })) } },
+      { icon: 'initiative', label: '主动说话', value: initiativeText(state), to: 'initiative', toggle: { on: state.initiative.settings.on, disabled: state.off, set: on => void apply(herApi.initiativeSet({ on })) } },
+      { icon: 'talk', label: '对话', value: `${state.talk.segment?.title ?? '还没有'}${state.talk.size === undefined ? '' : ` · ${state.talk.size}`}`, to: 'talk' },
+    ] },
+    { title: '系统', tiles: [
+      { icon: 'model', label: '模型', value: state.model === null ? '没有可用的' : state.model.model, to: 'model' },
+      { icon: 'body', label: '桌面程序', value: desktopHere(body) ? '已连上' : body.running ? '正在连' : desktopOffered(body) ? '没在运行' : '这台设备上没有', to: 'about' },
+      { icon: 'about', label: '关于', value: `dsh-her ${state.version}`, to: 'about' },
+    ] },
   ]
   return (
     <>
@@ -520,7 +543,8 @@ function Home({ state, apply, go }: { state: StateView; apply: Apply; go: (secti
       )}
       <Showcase state={state} onGo={target => (target === 'places' ? document.querySelector('.her-places')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) : go(target))} />
       <PlacesRow state={state} apply={apply} />
-      <SheetCard state={state} onGo={target => { if (target !== 'places') go(target) }} />
+      <IntroAndBackground state={state} go={go} />
+      <AllSettings groups={groups} go={go} foot={`记得 ${state.memory.facts.length} 件关于你的事、${state.memory.episodes.length} 个事件，写了 ${state.memory.diary.length} 天日记。点一格进那一页；带开关的可以直接在这里开关。`} />
       <div>
         <section className="her-card her-quick">
           <h2>顺手的事</h2>
@@ -545,19 +569,6 @@ function Home({ state, apply, go }: { state: StateView; apply: Apply; go: (secti
           {state.heard !== undefined && <p className="her-faint">最近听到：「{state.heard.text}」</p>}
         </section>
       </div>
-      <section className="her-card">
-        <h2>现在的设置</h2>
-        <div className="her-tiles">
-          {tiles.map(tile => (
-            <button key={tile.label} className="her-tile" onClick={() => go(tile.to)}>
-              <Icon name={tile.icon} />
-              <span className="her-tile-label">{tile.label}</span>
-              <span className="her-tile-value">{tile.value}</span>
-            </button>
-          ))}
-        </div>
-        <p className="her-faint">记得 {state.memory.facts.length} 件关于你的事、{state.memory.episodes.length} 个事件，写了 {state.memory.diary.length} 天日记。</p>
-      </section>
     </>
   )
 }
