@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 项目网页
+    url: https://aicivilization.github.io/dsh-her/
+    about: 她能做什么、怎么装、怎么一起来做。
+  - name: 开发说明
+    url: https://github.com/AIcivilization/dsh-her/blob/main/CONTRIBUTING.md
+    about: 想写代码或做设计包，先看这里。

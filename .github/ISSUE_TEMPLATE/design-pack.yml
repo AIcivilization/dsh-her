@@ -1,0 +1,61 @@
+name: 设计包投稿
+description: 你做了一个角色、皮肤、开机动画或像素动画，想让更多人看到
+labels: [设计包]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        谢谢分享！文件放在**你自己的**仓库、Release 或网盘里，这里只填链接和介绍；我们不把图片、视频收进 dsh-her 的仓库。
+        格式见 [设计包格式](https://github.com/AIcivilization/dsh-her/blob/main/docs/设计包格式.md)。
+  - type: input
+    id: name
+    attributes:
+      label: 名字
+      placeholder: 夏日鲸鱼娘
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 是什么
+      multiple: true
+      options:
+        - 角色（人设、形象、动画素材）
+        - 编排
+        - 皮肤
+        - 开机动画（视频）
+        - 像素动画
+        - 提示词
+    validations:
+      required: true
+  - type: input
+    id: link
+    attributes:
+      label: 下载链接
+      placeholder: https://github.com/你的名字/你的仓库/releases/…
+    validations:
+      required: true
+  - type: textarea
+    id: about
+    attributes:
+      label: 介绍和预览
+      description: 一两句话介绍；截图或一段小视频可以直接拖进来。
+    validations:
+      required: true
+  - type: input
+    id: license
+    attributes:
+      label: 许可
+      description: 别人能不能改、能不能再分享。不知道选哪个，可以用 CC BY 4.0。
+      placeholder: CC BY 4.0
+    validations:
+      required: true
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: 确认一下
+      options:
+        - label: 是我原创的，或者我有权分享；没有直接用别人的角色和画。
+          required: true
+        - label: 角色是成年人，穿着得体；如果用了真人的脸或声音，本人同意了。
+          required: true

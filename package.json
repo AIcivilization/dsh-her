@@ -25,7 +25,7 @@
     "type": "git",
     "url": "git+https://github.com/AIcivilization/dsh-her.git"
   },
-  "homepage": "https://github.com/AIcivilization/dsh-her#readme",
+  "homepage": "https://aicivilization.github.io/dsh-her/",
   "author": "AIcivilization",
   "files": [
     "lib",

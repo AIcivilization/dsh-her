@@ -20,7 +20,7 @@
 [![Electron](https://img.shields.io/badge/Electron-47848f?logo=electron&logoColor=white)](https://github.com/AIcivilization/dsh-her/tree/main/body)
 [![GitHub stars](https://img.shields.io/github/stars/AIcivilization/dsh-her?style=social)](https://github.com/AIcivilization/dsh-her/stargazers)
 
-[安装](#安装) · [怎么和她说话](#怎么和她说话) · [设置](#设置) · [设计包](#设计包) · [素材指南](https://github.com/AIcivilization/dsh-her/blob/main/docs/素材规格与提示词.md) · [反馈问题](https://github.com/AIcivilization/dsh-her/issues)
+[项目网页](https://aicivilization.github.io/dsh-her/) · [安装](#安装) · [怎么和她说话](#怎么和她说话) · [设置](#设置) · [设计包](#设计包) · [素材指南](https://github.com/AIcivilization/dsh-her/blob/main/docs/素材规格与提示词.md) · [一起来做](#一起来做) · [反馈问题](https://github.com/AIcivilization/dsh-her/issues)
 
 觉得好玩的话，点右上角的 ⭐ Star 支持一下
 
@@ -96,9 +96,13 @@
 
 不收集任何使用数据。她的记忆、设置都存在你自己的电脑上。桌面程序只连本机 `127.0.0.1`，需要令牌（`<home>/token`，权限 600）。百炼的 API key 不写进文件：Mac 上存在系统钥匙串里，其他系统用环境变量 `DASHSCOPE_API_KEY`。
 
-## 参与开发
+## 一起来做
 
-见 [开发说明](https://github.com/AIcivilization/dsh-her/blob/main/docs/开发.md)。
+不用打招呼，也不用加群：挑一件事，做好了提 PR 或者投稿就行。
+
+- **写代码**：从 [新手可做](https://github.com/AIcivilization/dsh-her/labels/good%20first%20issue) 和 [欢迎帮忙](https://github.com/AIcivilization/dsh-her/labels/help%20wanted) 里挑，比如英文界面、Intel 芯片的 Mac、Linux 桌面程序、新的声音。怎么跑起来、怎么测、有哪些规矩，见 [参与说明](https://github.com/AIcivilization/dsh-her/blob/main/CONTRIBUTING.md)。
+- **做设计**（不用写代码）：角色、皮肤、开机动画、像素动画、提示词。做好放在你自己的仓库或网盘，填一张 [设计包投稿](https://github.com/AIcivilization/dsh-her/issues/new?template=design-pack.yml)，精选的会放上 [项目网页](https://aicivilization.github.io/dsh-her/) 的作品墙。
+- 合并过两三个 PR，或者投稿被精选的人，会被邀请成为仓库的协作者。
 
 ## 许可
 
