@@ -17,5 +17,5 @@ copyFileSync('renderer/index.html', 'dist/index.html')
 copyFileSync('renderer/bar.html', 'dist/bar.html')
 copyFileSync('renderer/intro.html', 'dist/intro.html')
 // A 像素动画 as her opening clip: the same sandboxed player as in dsh's page.
-writeFileSync('dist/pixel.html', await pixelPlayerHtml())
+writeFileSync('dist/pixel.html', await pixelPlayerHtml(build))
 copyFileSync('renderer/mic-worklet.js', 'dist/mic-worklet.js')

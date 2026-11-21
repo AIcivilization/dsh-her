@@ -18,7 +18,7 @@ const PLATFORM_MODULES = [
 ]
 
 // The 像素动画 player page goes into the bundle whole: dsh's page puts it in a sandboxed iframe (docs/像素动画设计.md §4).
-const pixelPlayer = await pixelPlayerHtml()
+const pixelPlayer = await pixelPlayerHtml(build)
 
 const result = await build({
   define: { __PIXEL_PLAYER_HTML__: JSON.stringify(pixelPlayer) },
