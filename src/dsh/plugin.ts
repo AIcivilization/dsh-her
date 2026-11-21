@@ -66,7 +66,7 @@ import { DesignPacks } from './design-packs.ts'
 import { BrainServer } from '../server/brain-server.ts'
 import { type AvatarView, API_BASE, apiHandlers, handle, type ApiRuntime } from './api.ts'
 import { bodyRunning, findDevBody, launchBody, type LaunchPlan } from './body-launcher.ts'
-import { compareVersions, desktopBodyExists, downloadFolder, install, installDownloaded, installedBody, installedPlan, latestRelease, manualInstall, type InstallState, type ManualInstall } from './body-install.ts'
+import { compareVersions, desktopBodyExists, downloadFolder, install, installChoice, installDownloaded, installedBody, installedPlan, latestRelease, manualInstall, setInstallChoice, shouldAutoInstall, type InstallState, type ManualInstall } from './body-install.ts'
 import { IDLE_IMPORT, type ImportStatus, type ReportLine } from './import-status.ts'
 import { DESK_DIR, newProject, sceneDir } from '../core/workshop.ts'
 import { assignClip, avatarIn, avatarOf, exampleFile, examples, exportProject, findProject, importProject, listProjects, prepareImport, projectStatus, removeProject, removeStray, saveProject } from './workshop.ts'
@@ -1373,7 +1373,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
           running: body !== undefined || bodyRunning(paths.root),
           canStart: !('missing' in bodyPlan()),
           desktopExists: desktopBodyExists() || installState.dev,
-          install: { ...installState, ...(installedBody(paths.root) === undefined ? {} : { installed: installedBody(paths.root)!.version }) },
+          install: { ...installState, choice: installChoice(paths.root), ...(installedBody(paths.root) === undefined ? {} : { installed: installedBody(paths.root)!.version }) },
           ...(body === undefined ? {} : { info: { kind: body.hello.body.kind, version: body.hello.body.version, os: body.hello.body.os } }),
           ...(bodyPack === undefined ? {} : { pack: bodyPack }),
           // With no desktop body the brain itself knows her packs (docs/网页身体设计.md).
@@ -1714,6 +1714,12 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     installBody: () => {
       if (installState.state === 'downloading' || installState.state === 'installing' || installState.state === 'checking') return
       void installLatest(true)
+    },
+    bodyChoose: choice => {
+      setInstallChoice(paths.root, choice)
+      log({ event: 'install-choice', choice })
+      if (choice === 'dsh') downloading?.abort()
+      else if (installedBody(paths.root) === undefined && !(installState.state === 'downloading' || installState.state === 'installing' || installState.state === 'checking')) void installLatest(true)
     },
     restartBody: async () => {
       if (discovery === undefined) throw new Error('大脑还没准备好')
@@ -2198,6 +2204,13 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
         if (brain.bodies.length > 0 || bodyRunning(paths.root)) return
         const plan = bodyPlan()
         if ('missing' in plan) {
+          // 两种装法: "dsh + 桌面版" is the default, so the desktop program is fetched now, once, unless "dsh 版" was chosen.
+          const busy = installState.state === 'checking' || installState.state === 'downloading' || installState.state === 'installing'
+          if (shouldAutoInstall({ launch: config.body.launch, desktop: desktopBodyExists(), dev: installState.dev, installed: installedBody(paths.root) !== undefined, choice: installChoice(paths.root), busy })) {
+            ctx.logger.info('dsh-her: no desktop program yet; downloading it (dsh + 桌面版, the default)')
+            void installLatest(true)
+            return
+          }
           ctx.logger.info(desktopBodyExists() ? `dsh-her: no body to start yet (${plan.missing}); the "她" page offers to install it` : 'dsh-her: no desktop body on this computer; she lives in the web page')
           return
         }

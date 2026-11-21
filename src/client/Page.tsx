@@ -143,7 +143,7 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
       {step === 1 && (
         <div className="her-card">
           <h2>她的身体</h2>
-          <p className="her-muted">{offered ? '她可以住在 dsh 网页里（什么都不用装），也可以装一个桌面程序，住到桌面上，选哪个都可以。' : '她在 dsh 的每个页面上都在。'}</p>
+          <p className="her-muted">{offered ? '两种装法：dsh 版（她住在 dsh 网页里），dsh + 桌面版（再加一个桌面程序，她能住到桌面上、壁纸里）。默认是 dsh + 桌面版。' : '她在 dsh 的每个页面上都在。'}</p>
           <BodyStatus state={state} apply={apply} />
           {nav(ready, ready ? undefined : '也可以先跳过，之后在「住在哪儿」里再连')}
           {!ready && <div className="her-row"><button className="her-btn link" onClick={next}>先跳过</button></div>}

@@ -77,6 +77,7 @@ export const herApi = {
   bodyManual: () => post<{ manual: ManualInstall }>('/body/manual'),
   bodyInstallDownloaded: () => post<WithState>('/body/install-downloaded'),
   bodyCancel: () => post<WithState>('/body/cancel'),
+  bodyChoose: (choice: 'dsh' | 'both') => post<WithState>('/body/choose', { choice }),
   bodyOpenFolder: () => post<Record<string, never>>('/body/open-folder'),
   webNewBatch: () => post<{ batch: string }>('/web/new-batch'),
   webImportBatch: (batch: string, name?: string) => post<WithState>('/web/import-batch', { batch, ...(name === undefined ? {} : { name }) }),

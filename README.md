@@ -36,6 +36,13 @@
 
 在 dsh 桌面版的插件页搜 `dsh-her` 安装；也可以把 [这段话](https://github.com/AIcivilization/dsh-her/blob/main/docs/AI帮你装.md) 发给 dsh 里的 AI，让它帮你装。装好后点 dsh 左侧的"她"，跟着向导走几步就好。
 
+有两种装法：
+
+- **dsh 版**：她住在 dsh 网页里（浮动小窗、对话背景、纯聊模式），手机和平板打开 dsh 网页也能找到她。插件本身约 2 MB。
+- **dsh + 桌面版**：再加一个桌面程序，她能浮在桌面上、住进壁纸里。桌面程序 Mac 约 150 MB，Windows 约 210 MB，装在 dsh-her 自己的文件夹里。
+
+在 Mac（Apple 芯片）和 Windows 上默认是 dsh + 桌面版：dsh 启动后，桌面程序会自己下载安装，是 Mac 还是 Windows 不用你选。只想要 dsh 版，在「她」页面点"只要 dsh 版"；以后想装，同一个地方点"改成 dsh + 桌面版"。Linux、VPS 上只有 dsh 版。
+
 ## 怎么和她说话
 
 - **对话小条**：按 **⌃⌥↩**（Windows：**Ctrl+Alt+Enter**）、双击她，或点 dsh 对话框上她的小头像，弹出小条：能打字，也能按住话筒说话；全屏时也能叫出来。所有对话都存在 dsh 左侧的"她"工作区里，可以新开一段，也可以接着之前那段。

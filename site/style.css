@@ -132,6 +132,7 @@ a.card:hover { text-decoration: none; border-color: var(--accent); }
 }
 .steps li span { color: var(--muted); }
 .steps.compact { margin-top: 28px; }
+.two.ways { margin-top: 20px; }
 
 /* 作品墙 */
 .works { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 16px; }

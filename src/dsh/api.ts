@@ -291,6 +291,8 @@ export interface ApiRuntime {
   startBody(): string
   /** Download and install the body app (or a newer one); progress shows in the state. */
   installBody(): void
+  /** 两种装法: "dsh" stops a download and is remembered; "both" installs the desktop program. */
+  bodyChoose(choice: 'dsh' | 'both'): void
   /** Stop the running body and start it again (to use a newly installed version). */
   restartBody(): Promise<void>
   setMode(mode: WindowMode): void
@@ -680,6 +682,11 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
     },
     '/body/install': async () => {
       rt.installBody()
+      return withState()
+    },
+    '/body/choose': async body => {
+      if (body.choice !== 'dsh' && body.choice !== 'both') throw new ApiError('只有两种装法：dsh 版，或 dsh + 桌面版')
+      rt.bodyChoose(body.choice)
       return withState()
     },
     '/body/restart': async () => {
