@@ -25,6 +25,8 @@ let layer: HTMLDivElement | undefined
 let frame: PixelFrame | undefined
 let playing = false
 let opened = false
+/** To play once as soon as a conversation is on screen: just chosen in 像素工坊, or the page opened. */
+let shown = false
 let wasRunning = false
 let watchTimer: ReturnType<typeof setInterval> | undefined
 let everyTimer: ReturnType<typeof setInterval> | undefined
@@ -111,7 +113,14 @@ const onSendClick = (event: MouseEvent) => {
 
 /** Once a second: still in the column dsh shows now, and whether dsh just finished answering. */
 function watch(): void {
-  attach()
+  // Her own page sits in the same column: wait for a conversation, one with a message box.
+  const column = attach()
+  if (shown && column?.querySelector(COMPOSER) != null) {
+    // From the start, even when it was already playing (behind her page, unseen).
+    shown = false
+    playing = false
+    void play()
+  }
   const running = document.querySelector(RUNNING) !== null
   if (wasRunning && !running && worn?.triggers.reply === true) void play()
   wasRunning = running
@@ -158,7 +167,21 @@ export function wearPixelBackground(bg: PixelBackground | undefined): void {
   if (worn.triggers.everyMin > 0) everyTimer = setInterval(() => void play(), worn.triggers.everyMin * 60_000)
   if (worn.triggers.loop) void play()
   else if (worn.triggers.open && !opened) {
+    // Once, when a conversation is first on screen (dsh may open on her page or the home page).
     opened = true
-    setTimeout(() => void play(), 1200)
+    shown = true
   }
+}
+
+/**
+ * Just chosen in 像素工坊: worn now (not at the next status), and played
+ * once the next time a conversation is on screen, whatever its triggers.
+ * Whether this page can show it (not on phones, not with reduced motion).
+ */
+export function showPixelBackground(bg: PixelBackground): boolean {
+  wearPixelBackground(bg)
+  if (worn === undefined || still()) return false
+  shown = true
+  watch()
+  return true
 }

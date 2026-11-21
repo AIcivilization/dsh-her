@@ -26,6 +26,9 @@ import type { SettingsPage } from '../protocol/index.ts'
 import { SERVICE_SHORT, voiceLabel } from './choice.tsx'
 import { BodyStatus, Dot, InitiativeCard, KeyHelp, TalkCard, MemoryView, MicCheck, ModelPicker, MODE_TEXT, ModePicker, PackPicker, PersonaEditor, platformName, ScenePicker, VoicePicker, WebModePicker, WebPlaceCard, type Apply } from './parts.tsx'
 
+/** The project's web page (package.json homepage). */
+const SITE = 'https://aicivilization.github.io/dsh-her/'
+
 const POLL_MS = 2000
 
 export function HerPage() {
@@ -290,6 +293,13 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
               ))}
             </div>
           ))}
+          <div className="her-nav-group">
+            <a className="her-nav-item her-nav-link" href={SITE} target="_blank" rel="noreferrer" title="项目网站：介绍、作品墙、一起来做">
+              <Icon name="globe" />
+              <span>网站</span>
+              <Icon name="out" size={14} />
+            </a>
+          </div>
         </nav>
         <main className="her-main">
           {section !== 'home' && (
@@ -445,6 +455,10 @@ function Hero({ state, apply }: { state: StateView; apply: Apply }) {
         </h1>
         <p><Dot tone={where.tone} />{where.text}{state.initiative.focus.on && !state.off ? ' · 专注中' : ''}</p>
       </div>
+      <a className="her-site" href={SITE} target="_blank" rel="noreferrer" title="项目网站：介绍、作品墙、一起来做">
+        <Icon name="globe" />
+        <span><i>dsh-her </i>网站</span>
+      </a>
       <label className="her-power" title={state.off ? '叫她出来' : '关掉她：桌面上、网页里都收起来，不听、不说话；重启后也还关着'}>
         <span>{state.off ? '关着' : '她在'}</span>
         <input type="checkbox" checked={!state.off} onChange={e => void apply(herApi.setOff(!e.target.checked))} />

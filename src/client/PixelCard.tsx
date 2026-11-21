@@ -1,6 +1,7 @@
 /**
- * 像素动画 (docs/像素动画设计.md §8): where they are used (the chat
- * background, the opening clip), the list, uploading one a model wrote, and
+ * 像素动画 (docs/像素动画设计.md §8): the list (drafts not done first), where
+ * they are used (the opening clip, the chat background: each one line with
+ * its switch, the rest folded), and, last, uploading one a model wrote and
  * the instructions to give that model. A file is tried in a sandbox before it
  * is kept; what is wrong is said in words to paste back to the model.
  */
@@ -11,6 +12,7 @@ import type { Apply } from './parts.tsx'
 import { inkOf, PixelFrame, probePixel, type Rgb } from './pixel/host.ts'
 import { pixelSpec } from '../core/pixel-spec.ts'
 import { PixelWorkshop } from './PixelWorkshop.tsx'
+import { showIntro } from './intro-show.ts'
 import { STYLE_NAME, PIXEL_STYLES, type PixelInfo, type PixelLook, type PixelStyle } from '../core/pixel.ts'
 
 type Note = { kind: 'ok' | 'error'; text: string }
@@ -82,6 +84,7 @@ function ColorPick({ value, onPick }: { value: string; onPick: (color: string) =
 export function PixelCard({ onSkin, pixel, apply }: { onSkin: () => void; pixel: number | undefined; apply: Apply }) {
   const [view, setView] = useState<PixelsView>()
   const [note, setNote] = useState<Note>()
+  const [modelNote, setModelNote] = useState<Note>()
   const [thumbs, setThumbs] = useState<Record<string, { thumb?: string; info?: PixelInfo }>>(() => Object.fromEntries(tried))
   const [preview, setPreview] = useState<{ id: string; code: string; look: PixelLook; loop: boolean; round: number }>()
   const [paste, setPaste] = useState('')
@@ -112,6 +115,17 @@ export function PixelCard({ onSkin, pixel, apply }: { onSkin: () => void; pixel:
         tried.set(item.id, { ...(result.thumb === undefined ? {} : { thumb: result.thumb }), ...(result.info === undefined ? {} : { info: result.info }) })
         if (!cancelled) setThumbs(Object.fromEntries(tried))
       }
+      // Drafts not done: a still of the version they are on.
+      for (const d of view.drafts) {
+        const key = `draft:${d.id}:${d.changed}`
+        if (cancelled) return
+        if (tried.has(key)) continue
+        const got = await herApi.draftGet(d.id)
+        if (!got.ok || got.draft.code === '') continue
+        const result = await probePixel(got.draft.code, brandInk())
+        tried.set(key, { ...(result.thumb === undefined ? {} : { thumb: result.thumb }), ...(result.info === undefined ? {} : { info: result.info }) })
+        if (!cancelled) setThumbs(Object.fromEntries(tried))
+      }
     })()
     return () => { cancelled = true }
   }, [view])
@@ -126,6 +140,9 @@ export function PixelCard({ onSkin, pixel, apply }: { onSkin: () => void; pixel:
   const items = view.items
   /** 像素工坊 on a new draft: empty, or from one of the list. */
   const make = async (from?: string) => {
+    // One's own that already has a draft goes on in it, not in another.
+    const going = from === undefined ? undefined : view.drafts.find(d => d.saved === from)
+    if (going !== undefined) return setWorkshop(going.id)
     const r = await herApi.draftNew(from)
     if (!r.ok) return setNote({ kind: 'error', text: r.message })
     setWorkshop(r.draft.id)
@@ -174,98 +191,9 @@ export function PixelCard({ onSkin, pixel, apply }: { onSkin: () => void; pixel:
     void add(await f.text(), f.name.replace(/\.(m?js|txt)$/i, ''))
   }
 
-  const backgroundCard = (
-    <section className="her-card">
-      <h2>dsh 对话背景</h2>
-      <div className="her-setrow">
-        <div><b>在对话后面播像素动画</b><span>很淡的一层，压在对话内容下面，不挡点击。像 dsh 首页那只鲸鱼，但在每个对话里都有。</span></div>
-        <input type="checkbox" checked={bg.on} onChange={e => setBg({ on: e.target.checked })} />
-      </div>
-      <div className="her-setrow">
-        <div><b>用哪个</b><span>自带的，或者你传上来的。</span></div>
-        <select className="her-select" style={{ width: 'auto' }} value={bg.id} onChange={e => setBg({ id: e.target.value })}>
-          {items.map(item => <option key={item.id} value={item.id}>{item.name}{item.builtin ? '（自带）' : ''}</option>)}
-        </select>
-      </div>
-      <div className="her-setrow">
-        <div><b>什么时候播</b><span>遇到下面勾上的事就播一遍；正在播的时候再遇到不会打断。</span></div>
-        <div className="her-pixel-triggers">
-          {([['click', '点一下空白处'], ['send', '你发出消息'], ['reply', 'dsh 回答完'], ['open', '打开 dsh 页面']] as const).map(([key, label]) => (
-            <label key={key}><input type="checkbox" disabled={bg.triggers.loop} checked={bg.triggers[key]} onChange={e => setTrigger(key, e.target.checked)} />{label}</label>
-          ))}
-          <label>
-            <input type="checkbox" disabled={bg.triggers.loop} checked={bg.triggers.everyMin > 0} onChange={e => setTrigger('everyMin', e.target.checked ? 10 : 0)} />每隔
-            <input className="her-input her-pixel-min" type="number" min={1} max={240} disabled={bg.triggers.loop || bg.triggers.everyMin === 0} value={bg.triggers.everyMin || 10} onChange={e => setTrigger('everyMin', Math.max(1, Number(e.target.value) || 1))} />分钟
-          </label>
-          <label><input type="checkbox" checked={bg.triggers.loop} onChange={e => setTrigger('loop', e.target.checked)} />一直循环（更耗电）</label>
-        </div>
-      </div>
-      <div className="her-setrow">
-        <div><b>画法</b><span>圆点和代码字是 dsh 鲸鱼的样子；彩色动画只能画成方块。</span></div>
-        <StylePick value={bg.look.style} onPick={style => setBg({ look: { style } })} />
-      </div>
-      <div className="her-setrow">
-        <div><b>颜色</b><span>跟着 dsh 的颜色，浅色深色模式和皮肤都会跟着变。</span></div>
-        <ColorPick value={bg.look.color} onPick={color => setBg({ look: { color } })} />
-      </div>
-      <div className="her-setrow">
-        <div><b>浓淡</b><span>越淡越不打扰你看字。</span></div>
-        <span className="her-range"><input type="range" min={3} max={60} value={Math.round(bg.opacity * 100)} onChange={e => setBg({ opacity: Number(e.target.value) / 100 })} /><i>{Math.round(bg.opacity * 100)}%</i></span>
-      </div>
-      <div className="her-setrow">
-        <div><b>大小</b><span>铺满整个对话区，或者放在中间。</span></div>
-        <span className="her-row" style={{ margin: 0, flexWrap: 'nowrap' }}>
-          <span className="her-seg" role="group" aria-label="大小">
-            <button className={bg.look.fit === 'contain' ? 'on' : ''} onClick={() => setBg({ look: { fit: 'contain' } })}>放中间</button>
-            <button className={bg.look.fit === 'cover' ? 'on' : ''} onClick={() => setBg({ look: { fit: 'cover' } })}>铺满</button>
-          </span>
-          {bg.look.fit === 'contain' && <span className="her-range"><input type="range" min={30} max={100} value={Math.round(bg.look.size * 100)} onChange={e => setBg({ look: { size: Number(e.target.value) / 100 } })} /><i>{Math.round(bg.look.size * 100)}%</i></span>}
-        </span>
-      </div>
-      <div className="her-setrow">
-        <div><b>看一眼</b><span>在下面的框里按现在的设置播一遍。</span></div>
-        <button className="her-btn" onClick={() => void show(bg.id, bg.look, bg.triggers.loop)}>试播</button>
-      </div>
-      <p className="her-faint">手机上不播；电脑开了"减少动态效果"时不播；标签页在后台时暂停。dsh 自己首页那只鲸鱼照常出现，和这个不冲突。</p>
-    </section>
-  )
-
-  const introCard = (
-    <section className="her-card">
-      <h2>开机动画</h2>
-      <div className="her-setrow">
-        <div><b>用像素动画当开机动画</b><span>她出场时在屏幕中间播一遍（最长 8 秒），点一下跳过。开关和多久播一次在「皮肤」页。</span></div>
-        <select className="her-select" style={{ width: 'auto' }} value={introId} onChange={e => setIntro({ source: e.target.value === '' ? 'skin' : `pixel:${e.target.value}` })}>
-          <option value="">不用（用视频）</option>
-          {items.map(item => <option key={item.id} value={item.id}>{item.name}{item.builtin ? '（自带）' : ''}</option>)}
-        </select>
-      </div>
-      {introId !== '' && (
-        <>
-          <div className="her-setrow">
-            <div><b>画法</b></div>
-            <StylePick value={intro.look.style} onPick={style => setIntro({ look: { ...intro.look, style } })} />
-          </div>
-          <div className="her-setrow">
-            <div><b>颜色</b><span>跟着 dsh 的颜色时，桌面上用浅海蓝。</span></div>
-            <ColorPick value={intro.look.color} onPick={color => setIntro({ look: { ...intro.look, color } })} />
-          </div>
-          <div className="her-setrow">
-            <div><b>多大</b><span>占屏幕的多少。</span></div>
-            <span className="her-range"><input type="range" min={30} max={100} value={Math.round(intro.look.size * 100)} onChange={e => setIntro({ look: { ...intro.look, size: Number(e.target.value) / 100 } })} /><i>{Math.round(intro.look.size * 100)}%</i></span>
-          </div>
-          <div className="her-setrow">
-            <div><b>现在：{intro.on ? `开着，${intro.when === 'every' ? '每次出场都播' : '每天第一次出场时播'}` : '关着'}</b><span>{intro.on ? '' : '去「皮肤」页把开机动画打开。'}</span></div>
-            <span className="her-row" style={{ margin: 0, flexWrap: 'nowrap' }}>
-              <button className="her-btn" onClick={() => void show(introId, intro.look)}>在这里试播</button>
-              <button className="her-btn" onClick={() => void herApi.introPlay().then(r => setNote(r.ok ? { kind: 'ok', text: '在桌面上播了（桌面程序要是新版才会画像素动画）。' } : { kind: 'error', text: r.message }))}>桌面上播一次</button>
-              <button className="her-btn" onClick={onSkin}>去皮肤页</button>
-            </span>
-          </div>
-        </>
-      )}
-    </section>
-  )
+  const triggerNames = ([['click', '点一下空白处'], ['send', '你发出消息'], ['reply', 'dsh 回答完'], ['open', '打开 dsh 页面']] as const)
+  const bgWhen = bg.triggers.loop ? '一直在播' : [...triggerNames.filter(([key]) => bg.triggers[key]).map(([, label]) => label), ...(bg.triggers.everyMin > 0 ? [`每 ${bg.triggers.everyMin} 分钟`] : [])].join('、') || '什么时候都不播'
+  const nameOf = (id: string) => items.find(item => item.id === id)?.name ?? id
 
   const fixText = (list: string[]) => `我写的 dsh-her 像素动画文件运行不了，引擎报的问题是：\n${list.map(p => `- ${p}`).join('\n')}\n请按「dsh-her 像素动画」的格式改好，给我完整的文件。`
 
@@ -273,36 +201,37 @@ export function PixelCard({ onSkin, pixel, apply }: { onSkin: () => void; pixel:
     <>
       <section className="her-card">
         <div className="her-card-head">
-          <h2>我的像素动画</h2>
-          <span className="her-row" style={{ margin: 0 }}>
-            <button className="her-btn small primary" onClick={() => void make()}>🎲 做一个</button>
-            <button className="her-btn small" disabled={busy} onClick={() => file.current?.click()}>上传 .js…</button>
-          </span>
-          <input ref={file} type="file" accept=".js,.mjs,.txt,text/javascript" hidden onChange={e => { void pickFile(e.target.files); e.target.value = '' }} />
+          <h2>像素动画</h2>
+          <button className="her-btn small primary" onClick={() => void make()}>🎲 做一个</button>
         </div>
-        <p className="her-muted">一个像素动画就是一个 .js 文件：它往一张粗格子里填数，怎么画、什么颜色由这里决定。点「做一个」进像素工坊，掷骰子随机出一个；或者让大模型照着下面的「给大模型的说明」写一个，上传或者粘贴进来。</p>
-        {view.drafts.length > 0 && (
-          <div className="her-row her-ws-drafts">
-            <span className="her-muted">没做完的：</span>
-            {view.drafts.map(d => <button key={d.id} className="her-btn small" title={`${d.versions} 版`} onClick={() => setWorkshop(d.id)}>{d.name}{d.saved === undefined ? '' : ' ✓'}</button>)}
-          </div>
-        )}
+        <p className="her-muted">点「做一个」进像素工坊：掷骰子、跟 AI 说，或者用一张图。做好了当开机动画，或者当 dsh 对话的背景。</p>
         <div className="her-grid her-pixels">
+          {view.drafts.filter(d => d.saved === undefined).map(d => (
+            <div key={d.id} className="her-pixel draft">
+              <button className="her-pixel-thumb" title="接着做" onClick={() => setWorkshop(d.id)}>{thumbs[`draft:${d.id}:${d.changed}`]?.thumb === undefined ? <span>✏️</span> : <img src={thumbs[`draft:${d.id}:${d.changed}`]!.thumb} alt="" />}</button>
+              <b>{d.name}</b>
+              <small>没做完 · {d.versions} 版</small>
+              <button className="her-btn small" onClick={() => setWorkshop(d.id)}>接着做</button>
+            </div>
+          ))}
           {items.map(item => {
             const thumb = thumbOf(item)
+            const uses = [introId === item.id && intro.on ? '开机动画' : '', bg.on && bg.id === item.id ? '对话背景' : ''].filter(Boolean)
             return (
               <div key={item.id} className={`her-pixel${preview?.id === item.id ? ' on' : ''}`}>
                 <button className="her-pixel-thumb" title="试播" onClick={() => void show(item.id, { style: infoOf(item)?.color === 'color' ? 'blocks' : 'dots', color: 'theme', size: 1, fit: 'contain' }, infoOf(item)?.seconds === 0)}>
                   {thumb === undefined ? <span>…</span> : <img src={thumb} alt="" />}
                 </button>
                 <b>{item.name}</b>
-                <small>{item.builtin ? `自带 · ${item.about ?? ''}` : describe(infoOf(item))}</small>
-                <button className="her-btn small" onClick={() => void make(item.id)}>{item.builtin ? '照着做一个' : '接着改'}</button>
-                {!item.builtin && (
-                  <button className="her-btn small" onClick={() => {
-                    if (window.confirm(`移走「${item.name}」？它会放进 pixels/.removed，不会直接删掉；用着它的地方改回自带的。`)) void herApi.pixelsRemove(item.id).then(r => take(r, '移走了。'))
-                  }}>移走</button>
-                )}
+                <small>{uses.length > 0 ? `✓ ${uses.join('、')}` : item.builtin ? '自带' : describe(infoOf(item))}</small>
+                <span className="her-row" style={{ margin: 0 }}>
+                  <button className="her-btn small" onClick={() => void make(item.id)}>{item.builtin ? '照着做' : '改一改'}</button>
+                  {!item.builtin && (
+                    <button className="her-btn small" title="移走" onClick={() => {
+                      if (window.confirm(`移走「${item.name}」？它会放进 pixels/.removed，不会直接删掉；用着它的地方改回自带的。`)) void herApi.pixelsRemove(item.id).then(r => take(r, '移走了。'))
+                    }}>移走</button>
+                  )}
+                </span>
               </div>
             )
           })}
@@ -321,26 +250,105 @@ export function PixelCard({ onSkin, pixel, apply }: { onSkin: () => void; pixel:
             </div>
           )}
         </div>
-        <details className="her-more">
-          <summary>直接粘贴代码</summary>
-          <textarea className="her-textarea" spellCheck={false} placeholder="把大模型给你的整段代码粘贴到这里" value={paste} onChange={e => setPaste(e.target.value)} />
-          <div className="her-row">
-            <button className="her-btn primary" disabled={busy || paste.trim() === ''} onClick={() => void add(paste, '')}>{busy ? '正在试跑…' : '试跑并收下'}</button>
-          </div>
-        </details>
-        {busy && <p className="her-muted">正在隔离环境里试跑……</p>}
-        {problems !== undefined && (
-          <div className="her-pixel-problems">
-            <p className="her-danger">这个文件还不能用：</p>
-            <ul className="her-warnlist">{problems.map(p => <li key={p}>{p}</li>)}</ul>
-            <button className="her-btn small" onClick={() => void copy(fixText(problems)).then(ok => setNote(ok ? { kind: 'ok', text: '复制好了：贴给大模型，让它改好再传上来。' } : { kind: 'error', text: '没能复制，自己选中上面的文字复制吧。' }))}>复制给大模型</button>
-          </div>
-        )}
         {note !== undefined && <p className={note.kind === 'ok' ? 'her-ok' : 'her-danger'}>{note.text}</p>}
       </section>
 
-      {backgroundCard}
-      {introCard}
+      <section className="her-card">
+        <h2>用在哪儿</h2>
+        <div className="her-setrow">
+          <div><b>开机动画</b><span>{introId === '' ? '现在用的是视频（在「皮肤」页里选）。' : intro.on ? `「${nameOf(introId)}」，她在桌面上出场${intro.dsh ? '、打开 dsh 网页' : ''}时播，${intro.when === 'every' ? '每次都播' : '每天第一次'}。` : `选了「${nameOf(introId)}」，但开机动画关着。`}</span></div>
+          <span className="her-row" style={{ margin: 0, flexWrap: 'nowrap' }}>
+            <select className="her-select" style={{ width: 'auto' }} value={introId} onChange={e => setIntro(e.target.value === '' ? { source: 'skin' } : { source: `pixel:${e.target.value}`, on: true })}>
+              <option value="">不用像素动画</option>
+              {items.map(item => <option key={item.id} value={item.id}>{item.name}{item.builtin ? '（自带）' : ''}</option>)}
+            </select>
+            <input type="checkbox" aria-label="开机动画开着" checked={intro.on} onChange={e => setIntro({ on: e.target.checked })} />
+          </span>
+        </div>
+        {introId !== '' && (
+          <details className="her-more">
+            <summary>开机动画的更多设置</summary>
+            <div className="her-setrow">
+              <div><b>多久播一次</b></div>
+              <span className="her-seg" role="group" aria-label="多久播一次">
+                <button className={intro.when === 'daily' ? 'on' : ''} onClick={() => setIntro({ when: 'daily' })}>每天第一次</button>
+                <button className={intro.when === 'every' ? 'on' : ''} onClick={() => setIntro({ when: 'every' })}>每次</button>
+              </span>
+            </div>
+            <div className="her-setrow">
+              <div><b>打开 dsh 网页时也播</b><span>只装了 dsh 版的，要开着这个才看得到。</span></div>
+              <input type="checkbox" checked={intro.dsh} onChange={e => setIntro({ dsh: e.target.checked })} />
+            </div>
+            <div className="her-setrow">
+              <div><b>画法</b></div>
+              <StylePick value={intro.look.style} onPick={style => setIntro({ look: { ...intro.look, style } })} />
+            </div>
+            <div className="her-setrow">
+              <div><b>颜色</b><span>跟着 dsh 的颜色时，桌面上用浅海蓝。</span></div>
+              <ColorPick value={intro.look.color} onPick={color => setIntro({ look: { ...intro.look, color } })} />
+            </div>
+            <div className="her-setrow">
+              <div><b>多大</b><span>占屏幕的多少。</span></div>
+              <span className="her-range"><input type="range" min={30} max={100} value={Math.round(intro.look.size * 100)} onChange={e => setIntro({ look: { ...intro.look, size: Number(e.target.value) / 100 } })} /><i>{Math.round(intro.look.size * 100)}%</i></span>
+            </div>
+            <span className="her-row">
+              <button className="her-btn" onClick={() => showIntro({ pixel: { id: introId, look: intro.look }, when: 'every' })}>现在放一遍</button>
+              <button className="her-btn" onClick={() => void herApi.introPlay().then(r => setNote(r.ok ? { kind: 'ok', text: '在桌面上播了（桌面程序要是新版才会画像素动画）。' } : { kind: 'error', text: r.message }))}>桌面上播一次</button>
+              <button className="her-btn" onClick={onSkin}>去皮肤页</button>
+            </span>
+          </details>
+        )}
+
+        <div className="her-setrow">
+          <div><b>dsh 对话背景</b><span>{bg.on ? `「${nameOf(bg.id)}」，在对话后面淡淡地播：${bgWhen}。` : '关着。打开以后，对话后面会有很淡的一层像素动画，不挡点击。'}</span></div>
+          <span className="her-row" style={{ margin: 0, flexWrap: 'nowrap' }}>
+            <select className="her-select" style={{ width: 'auto' }} value={bg.id} onChange={e => setBg({ id: e.target.value })}>
+              {items.map(item => <option key={item.id} value={item.id}>{item.name}{item.builtin ? '（自带）' : ''}</option>)}
+            </select>
+            <input type="checkbox" aria-label="对话背景开着" checked={bg.on} onChange={e => setBg({ on: e.target.checked })} />
+          </span>
+        </div>
+        <details className="her-more">
+          <summary>对话背景的更多设置</summary>
+          <div className="her-setrow">
+            <div><b>什么时候播</b><span>遇到勾上的事就播一遍；正在播的时候再遇到不会打断。</span></div>
+            <div className="her-pixel-triggers">
+              {triggerNames.map(([key, label]) => (
+                <label key={key}><input type="checkbox" disabled={bg.triggers.loop} checked={bg.triggers[key]} onChange={e => setTrigger(key, e.target.checked)} />{label}</label>
+              ))}
+              <label>
+                <input type="checkbox" disabled={bg.triggers.loop} checked={bg.triggers.everyMin > 0} onChange={e => setTrigger('everyMin', e.target.checked ? 10 : 0)} />每隔
+                <input className="her-input her-pixel-min" type="number" min={1} max={240} disabled={bg.triggers.loop || bg.triggers.everyMin === 0} value={bg.triggers.everyMin || 10} onChange={e => setTrigger('everyMin', Math.max(1, Number(e.target.value) || 1))} />分钟
+              </label>
+              <label><input type="checkbox" checked={bg.triggers.loop} onChange={e => setTrigger('loop', e.target.checked)} />一直循环（更耗电）</label>
+            </div>
+          </div>
+          <div className="her-setrow">
+            <div><b>浓淡</b><span>越淡越不打扰你看字。</span></div>
+            <span className="her-range"><input type="range" min={3} max={60} value={Math.round(bg.opacity * 100)} onChange={e => setBg({ opacity: Number(e.target.value) / 100 })} /><i>{Math.round(bg.opacity * 100)}%</i></span>
+          </div>
+          <div className="her-setrow">
+            <div><b>画法</b><span>彩色动画只能画成方块。</span></div>
+            <StylePick value={bg.look.style} onPick={style => setBg({ look: { style } })} />
+          </div>
+          <div className="her-setrow">
+            <div><b>颜色</b><span>跟着 dsh 的颜色，浅色深色模式和皮肤都会跟着变。</span></div>
+            <ColorPick value={bg.look.color} onPick={color => setBg({ look: { color } })} />
+          </div>
+          <div className="her-setrow">
+            <div><b>大小</b></div>
+            <span className="her-row" style={{ margin: 0, flexWrap: 'nowrap' }}>
+              <span className="her-seg" role="group" aria-label="大小">
+                <button className={bg.look.fit === 'contain' ? 'on' : ''} onClick={() => setBg({ look: { fit: 'contain' } })}>放中间</button>
+                <button className={bg.look.fit === 'cover' ? 'on' : ''} onClick={() => setBg({ look: { fit: 'cover' } })}>铺满</button>
+              </span>
+              {bg.look.fit === 'contain' && <span className="her-range"><input type="range" min={30} max={100} value={Math.round(bg.look.size * 100)} onChange={e => setBg({ look: { size: Number(e.target.value) / 100 } })} /><i>{Math.round(bg.look.size * 100)}%</i></span>}
+            </span>
+          </div>
+          <span className="her-row"><button className="her-btn" onClick={() => void show(bg.id, bg.look, bg.triggers.loop)}>在上面试播</button></span>
+          <p className="her-faint">手机上不播；电脑开了"减少动态效果"时不播；标签页在后台时暂停。</p>
+        </details>
+      </section>
 
       <section className="her-card">
         <h2>像素化显示（她自己）</h2>
@@ -360,20 +368,34 @@ export function PixelCard({ onSkin, pixel, apply }: { onSkin: () => void; pixel:
       </section>
 
       <section className="her-card">
-        <div className="her-card-head">
-          <h2>给大模型的说明</h2>
-          <button className="her-btn small primary" onClick={() => void copy(pixelSpec()).then(ok => setNote(ok ? { kind: 'ok', text: '说明复制好了。' } : { kind: 'error', text: '没能复制，展开下面的说明自己复制吧。' }))}>复制说明</button>
-        </div>
-        <ol className="her-flow her-flow-one">
-          <li><b>复制说明</b><span>点上面的按钮。</span></li>
-          <li><b>贴给大模型，说你想要什么</b><span>DeepSeek、ChatGPT，或者直接在 dsh 的对话里。把说明第一行【】里换成你想要的画面，比如"一群像素小鱼绕着圈游"。</span></li>
-          <li><b>把它写好的代码传上来</b><span>存成 .js 文件上传，或者展开上面的「直接粘贴代码」贴进去。有问题会告诉你哪里不对，点「复制给大模型」让它改。</span></li>
-        </ol>
-        <p className="her-faint">上传的代码在隔离的环境里运行：连不了网，读不到你的文件和 dsh 里的任何东西；太慢或者写成死循环会被自动停掉。</p>
+        <h2>让别的大模型写，或者传一个进来</h2>
+        <p className="her-muted">不用像素工坊也行：把说明贴给 DeepSeek、ChatGPT，让它写一个 .js 传上来。</p>
+        <span className="her-row">
+          <button className="her-btn" onClick={() => void copy(pixelSpec()).then(ok => setModelNote(ok ? { kind: 'ok', text: '说明复制好了：贴给大模型，把第一行【】里换成你想要的画面。' } : { kind: 'error', text: '没能复制，展开下面的说明自己复制吧。' }))}>复制给大模型的说明</button>
+          <button className="her-btn" disabled={busy} onClick={() => file.current?.click()}>上传 .js…</button>
+        </span>
+        <input ref={file} type="file" accept=".js,.mjs,.txt,text/javascript" hidden onChange={e => { void pickFile(e.target.files); e.target.value = '' }} />
+        <details className="her-more">
+          <summary>直接粘贴代码</summary>
+          <textarea className="her-textarea" spellCheck={false} placeholder="把大模型给你的整段代码粘贴到这里" value={paste} onChange={e => setPaste(e.target.value)} />
+          <div className="her-row">
+            <button className="her-btn primary" disabled={busy || paste.trim() === ''} onClick={() => void add(paste, '')}>{busy ? '正在试跑…' : '试跑并收下'}</button>
+          </div>
+        </details>
+        {busy && <p className="her-muted">正在隔离环境里试跑……</p>}
+        {problems !== undefined && (
+          <div className="her-pixel-problems">
+            <p className="her-danger">这个文件还不能用：</p>
+            <ul className="her-warnlist">{problems.map(p => <li key={p}>{p}</li>)}</ul>
+            <button className="her-btn small" onClick={() => void copy(fixText(problems)).then(ok => setModelNote(ok ? { kind: 'ok', text: '复制好了：贴给大模型，让它改好再传上来。' } : { kind: 'error', text: '没能复制，自己选中上面的文字复制吧。' }))}>复制给大模型</button>
+          </div>
+        )}
         <details className="her-more">
           <summary>看看说明全文</summary>
           <pre className="her-pixel-spec">{pixelSpec()}</pre>
         </details>
+        {modelNote !== undefined && <p className={modelNote.kind === 'ok' ? 'her-ok' : 'her-danger'}>{modelNote.text}</p>}
+        <p className="her-faint">传进来的代码在隔离的环境里运行：连不了网，读不到你的文件和 dsh 里的任何东西；太慢或者写成死循环会被自动停掉。</p>
       </section>
     </>
   )

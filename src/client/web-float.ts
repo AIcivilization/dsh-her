@@ -22,7 +22,7 @@ import type { FloatHost } from './web-bridge.ts'
 import { TalkBar } from '../../body/renderer/talk-bar.ts'
 import { wearSaved } from './skin-wear.ts'
 import { wearPixelBackground } from './pixel-bg.ts'
-import { inkOf, PixelFrame } from './pixel/host.ts'
+import { showIntro } from './intro-show.ts'
 import { herApi } from './api.ts'
 import type { WebIntro } from '../dsh/api.ts'
 import type { PixelBackground } from '../core/pixel.ts'
@@ -629,45 +629,7 @@ export function mountWebFloat(): () => void {
     } catch {
       // private window: it plays
     }
-    const veil = document.createElement('div')
-    veil.style.cssText = 'position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.25);cursor:pointer'
-    veil.title = '点一下跳过'
-    if (intro.pixel !== undefined) {
-      // A 像素动画 (docs/像素动画设计.md §6): drawn in its sandbox over the page, a click skips it.
-      if (matchMedia('(prefers-reduced-motion: reduce)').matches) return
-      const pixel = intro.pixel
-      veil.style.background = 'rgba(0,0,0,.12)'
-      const frame = new PixelFrame()
-      const end = () => {
-        frame.destroy()
-        veil.remove()
-      }
-      frame.on(event => { if (event.t === 'ended' || event.t === 'problem') end() })
-      veil.onclick = end
-      veil.append(frame.el)
-      setTimeout(end, 12_000)
-      void herApi.pixelsCode(pixel.id).then(result => {
-        if (!result.ok) return end()
-        document.body.append(veil)
-        frame.play(result.code, pixel.look, inkOf(pixel.look.color, '--dsw-alias-brand-primary'), { mode: 'once', cap: 8, fade: true })
-      })
-      return
-    }
-    if (intro.url === undefined) return
-    const video = document.createElement('video')
-    video.src = new URL(intro.url, document.baseURI).href
-    video.muted = true
-    video.playsInline = true
-    video.autoplay = true
-    video.style.cssText = 'max-width:80vw;max-height:80vh'
-    veil.append(video)
-    const end = () => veil.remove()
-    veil.onclick = end
-    video.onended = end
-    video.onerror = end
-    setTimeout(end, 8000)
-    document.body.append(veil)
-    void video.play().catch(end)
+    showIntro(intro)
   }
 
   window.__herFloat = hostApi

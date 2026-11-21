@@ -2,11 +2,11 @@
  * 像素工坊 (docs/像素工坊设计.md): a draft of a 像素动画, playing all the
  * time; its look (style, colour, size) changed at once without touching the
  * code; grid, frame rate and length written into the file as one line; a
- * version for each change, any of them a click away; and the die. Talking to
- * the AI comes next (§3).
+ * version for each change, any of them a click away; the die, the AI and a
+ * picture to start from. Kept simple: three ways in, two ways to use it.
  */
 
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { herApi, type ChatView, type DraftView } from './api.ts'
 import { inkOf, PixelFrame, probePixel } from './pixel/host.ts'
 import { FACES, hslHex, rollDice, type DiceRoll } from '../core/pixel-dice.ts'
@@ -14,8 +14,10 @@ import { STYLE_NAME, PIXEL_STYLES, type PixelInfo, type PixelLook } from '../cor
 import { describeChange, withInfo, WORKSHOP_FPS, WORKSHOP_GRIDS, type InfoChange } from '../core/pixel-workshop.ts'
 import { pictureCode, type Picture } from '../core/pixel-picture.ts'
 import { PicturePixel } from './PicturePixel.tsx'
+import { showIntro } from './intro-show.ts'
+import { showPixelBackground } from './pixel-bg.ts'
 
-type Note = { kind: 'ok' | 'error'; text: string }
+type Note = { kind: 'ok' | 'error'; text: string; chat?: boolean }
 
 const RECENT = 'dsh-her.dice'
 /** Things to start from, ours. */
@@ -41,7 +43,7 @@ function keepRecent(print: string): string[] {
 }
 
 /** The draft playing, in one sandbox kept for it: a colour change only changes the ink. */
-function Stage({ code, look, round }: { code: string; look: PixelLook; round: number }) {
+function Stage({ code, look, round, empty }: { code: string; look: PixelLook; round: number; empty: ReactNode }) {
   const box = useRef<HTMLDivElement>(null)
   const frame = useRef<PixelFrame>()
   const [problem, setProblem] = useState<string>()
@@ -66,7 +68,7 @@ function Stage({ code, look, round }: { code: string; look: PixelLook; round: nu
   return (
     <div className="her-ws-stage">
       <div ref={box} className="her-ws-frame" />
-      {code === '' && <div className="her-ws-empty">点 🎲 掷一次骰子，就有画面了</div>}
+      {code === '' && <div className="her-ws-empty">{empty}</div>}
       {problem !== undefined && <p className="her-danger her-ws-problem">{problem}</p>}
     </div>
   )
@@ -139,6 +141,7 @@ export function PixelWorkshop({ id, onClose }: { id: string; onClose: () => void
   const msgs = useRef<HTMLDivElement>(null)
   const [pictureFile, setPictureFile] = useState<File>()
   const picturePick = useRef<HTMLInputElement>(null)
+  const sayBox = useRef<HTMLTextAreaElement>(null)
   const [, tick] = useState(0)
   const thinkingSince = useRef<number>()
 
@@ -301,6 +304,28 @@ export function PixelWorkshop({ id, onClose }: { id: string; onClose: () => void
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
+  /** The opening clip: on, also when a dsh page opens, and shown right now. */
+  const useAsIntro = () => saveAnd(async pixel => {
+    const r = await herApi.introSet({ source: `pixel:${pixel}`, look, on: true, dsh: true })
+    if (!r.ok) return { kind: 'error', text: r.message }
+    showIntro({ pixel: { id: pixel, look }, when: 'every' })
+    return { kind: 'ok', text: `开机动画换成「${name.trim() || draft.name}」了，刚才先放了一遍。以后她在桌面上出场、打开 dsh 网页时都会播（${r.intro.when === 'every' ? '每次' : '每天第一次'}）。多久播一次在「像素动画」页里改。` }
+  })
+  /** The chat background: on, and when it was off, played at more times than a click, so it is seen. */
+  const useAsBackground = () => saveAnd(async pixel => {
+    const before = await herApi.pixelsGet()
+    const wasOff = !before.ok || !before.background.on
+    const r = await herApi.pixelsBackground({ on: true, id: pixel, look, ...(wasOff ? { triggers: { click: true, open: true, reply: true } } : {}) })
+    if (!r.ok) return { kind: 'error', text: r.message }
+    const shown = showPixelBackground(r.background)
+    const when = [r.background.triggers.loop ? '一直在播' : '', r.background.triggers.open ? '打开 dsh 时' : '', r.background.triggers.reply ? 'dsh 回答完' : '', r.background.triggers.click ? '点一下对话空白处' : '', r.background.triggers.send ? '你发出消息' : ''].filter(Boolean)
+    return {
+      kind: 'ok',
+      chat: shown,
+      text: `dsh 对话背景换成「${name.trim() || draft.name}」了。它在对话的后面淡淡地播：${when.join('、') || '现在什么时候都不播，去「像素动画」页勾上'}。${shown ? '打开任何一个对话就会先放一遍。' : '手机上、开了"减少动态效果"时不播。'}`,
+    }
+  })
+
   /** A picture made into a pixel picture: a new version with it floating, and a word in the chat. */
   const takePicture = async (picture: Picture) => {
     const label = (pictureFile?.name ?? '图片').replace(/\.[^.]+$/, '').slice(0, 30) || '图片'
@@ -336,6 +361,19 @@ export function PixelWorkshop({ id, onClose }: { id: string; onClose: () => void
   }
 
   const current = draft.versions.find(v => v.n === draft.current)
+  const at = draft.versions.findIndex(v => v.n === draft.current)
+  const pickVersion = (n: number) => {
+    clearTimeout(lookTimer.current)
+    void herApi.draftPick(id, n).then(r => { const d = take(r); if (d !== undefined) setLook(d.look) })
+  }
+  const start = (
+    <div className="her-ws-start">
+      <p>从哪儿开始？</p>
+      <button onClick={roll}><b>🎲</b>掷骰子<small>随机出一个，每次都不一样</small></button>
+      <button onClick={() => sayBox.current?.focus()}><b>💬</b>跟 AI 说<small>说你想要什么画面</small></button>
+      <button onClick={() => picturePick.current?.click()}><b>🖼</b>用图片<small>一张图变成像素画</small></button>
+    </div>
+  )
   const grid = info?.grid
   const mono = info === undefined || info.color === 'mono'
 
@@ -347,16 +385,15 @@ export function PixelWorkshop({ id, onClose }: { id: string; onClose: () => void
       </div>
       <div className="her-ws">
         <div className="her-ws-main">
-          <Stage code={draft.code} look={look} round={round} />
+          <Stage code={draft.code} look={look} round={round} empty={start} />
           {draft.versions.length > 0 && (
             <>
-              <div className="her-vchips" role="group" aria-label="版本">
-                {draft.versions.map(v => (
-                  <button key={v.n} className={v.n === draft.current ? 'on' : ''} title={v.note} onClick={() => {
-                    clearTimeout(lookTimer.current)
-                    void herApi.draftPick(id, v.n).then(r => { const d = take(r); if (d !== undefined) setLook(d.look) })
-                  }}>v{v.n}</button>
-                ))}
+              <div className="her-vnav" role="group" aria-label="版本">
+                <button title="上一版" disabled={at <= 0} onClick={() => pickVersion(draft.versions[at - 1]!.n)}>‹</button>
+                <select className="her-select" aria-label="第几版" value={draft.current} onChange={e => pickVersion(Number(e.target.value))}>
+                  {draft.versions.map(v => <option key={v.n} value={v.n}>v{v.n}　{v.note.slice(0, 40)}</option>)}
+                </select>
+                <button title="下一版" disabled={at >= draft.versions.length - 1} onClick={() => pickVersion(draft.versions[at + 1]!.n)}>›</button>
                 <button title="从头再播一遍" onClick={() => setRound(r => r + 1)}>↻</button>
               </div>
               <p className="her-faint">v{draft.current}：{current?.note || '—'}{info === undefined ? '' : ` · ${info.grid[0]} × ${info.grid[1]} · 每秒 ${info.fps} 帧 · ${info.seconds > 0 ? `${info.seconds} 秒一遍` : '一直循环'}`}</p>
@@ -382,6 +419,7 @@ export function PixelWorkshop({ id, onClose }: { id: string; onClose: () => void
           </div>
           <div className="her-ws-say">
             <textarea
+              ref={sayBox}
               className="her-textarea"
               rows={2}
               value={input}
@@ -423,6 +461,8 @@ export function PixelWorkshop({ id, onClose }: { id: string; onClose: () => void
             <b>颜色</b>
             {mono ? <ColorWheel value={look.color} onPick={color => changeLook({ color })} /> : <span className="her-muted">这是彩色动画，颜色在画面里；想换颜色，跟 AI 说。</span>}
           </div>
+          <details className="her-more her-ws-fold">
+            <summary>更多设置：格子、时长、快慢、大小</summary>
           <div className="her-ws-set">
             <b>格子</b>
             <span className="her-seg wrap" role="group" aria-label="格子">
@@ -459,27 +499,32 @@ export function PixelWorkshop({ id, onClose }: { id: string; onClose: () => void
               {look.fit === 'contain' && <span className="her-range"><input type="range" min={30} max={100} value={Math.round(look.size * 100)} onChange={e => changeLook({ size: Number(e.target.value) / 100 })} /><i>{Math.round(look.size * 100)}%</i></span>}
             </span>
           </div>
+          </details>
         </div>
       </div>
 
       <div className="her-ws-foot">
         <input className="her-input" aria-label="名字" value={name} maxLength={40} onChange={e => setName(e.target.value)} onBlur={e => rename(e.target.value)} />
-        <button className="her-btn primary" disabled={busy || draft.code === ''} onClick={() => void saveAnd()}>{busy ? '正在试跑…' : draft.saved === undefined ? '保存' : '保存（更新）'}</button>
-        <button className="her-btn" disabled={busy || draft.code === ''} onClick={() => void saveAnd(async pixel => {
-          const r = await herApi.introSet({ source: `pixel:${pixel}`, look })
-          return r.ok ? { kind: 'ok', text: `开机动画换成「${name.trim() || draft.name}」了。开机动画的开关和多久播一次在「皮肤」页。` } : { kind: 'error', text: r.message }
-        })}>设为开机动画</button>
-        <button className="her-btn" disabled={busy || draft.code === ''} onClick={() => void saveAnd(async pixel => {
-          const r = await herApi.pixelsBackground({ on: true, id: pixel, look })
-          return r.ok ? { kind: 'ok', text: `dsh 对话背景换成「${name.trim() || draft.name}」了，浓淡和什么时候播在像素动画页里调。` } : { kind: 'error', text: r.message }
-        })}>设为 dsh 背景</button>
-        <button className="her-btn" disabled={draft.code === ''} onClick={exportJs}>导出 .js</button>
-        <button className="her-btn" onClick={() => {
-          if (window.confirm('扔掉这个草稿？它的所有版本会放进 pixel-drafts/.removed，不会直接删掉；已经存进像素动画的不受影响。')) void herApi.draftRemove(id).then(onClose)
-        }}>扔掉草稿</button>
+        <button className="her-btn primary" disabled={busy || draft.code === ''} onClick={() => void useAsIntro()}>{busy ? '正在试跑…' : '当开机动画'}</button>
+        <button className="her-btn primary" disabled={busy || draft.code === ''} onClick={() => void useAsBackground()}>当 dsh 对话背景</button>
+        <details className="her-ws-menu">
+          <summary className="her-btn">更多</summary>
+          <div>
+            <button className="her-btn small" disabled={busy || draft.code === ''} onClick={() => void saveAnd()}>{draft.saved === undefined ? '只存进列表' : '存进列表（更新）'}</button>
+            <button className="her-btn small" disabled={draft.code === ''} onClick={exportJs}>导出 .js</button>
+            <button className="her-btn small" onClick={() => {
+              if (window.confirm('扔掉这个草稿？它的所有版本会放进 pixel-drafts/.removed，不会直接删掉；已经存进像素动画的不受影响。')) void herApi.draftRemove(id).then(onClose)
+            }}>扔掉草稿</button>
+          </div>
+        </details>
       </div>
-      {note !== undefined && <p className={note.kind === 'ok' ? 'her-ok' : 'her-danger'}>{note.text}</p>}
-      <p className="her-faint">每掷一次、AI 每改一次、每改一项设置，都存成新的一版，点上面的 v1、v2…… 就能回去。画法、颜色、大小不改代码，马上就变。</p>
+      {note !== undefined && (
+        <p className={note.kind === 'ok' ? 'her-ok' : 'her-danger'}>
+          {note.text}
+          {note.chat === true && window.__herOpenSession !== undefined && <> <button className="her-btn small" onClick={() => void openInDsh()}>去对话里看看</button></>}
+        </p>
+      )}
+      <p className="her-faint">草稿会自己存着，每一次改动都是新的一版，用 ‹ › 回到任意一版。</p>
     </section>
   )
 }

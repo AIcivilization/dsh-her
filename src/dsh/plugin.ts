@@ -1514,7 +1514,11 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       return skinView()
     },
     introSet: change => {
-      saveIntro(cleanIntro({ ...introSettings(), ...change }))
+      const now = introSettings()
+      const next: IntroSettings = { ...now, ...change }
+      // A clip newly chosen plays the next time she comes out, even when today's has played.
+      if (change.source !== undefined && change.source !== now.source) delete next.lastDay
+      saveIntro(cleanIntro(next))
       return skinView()
     },
     pixelsGet: () => pixelsView(),
