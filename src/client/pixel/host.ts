@@ -5,7 +5,7 @@
  * allows it no network. The page comes inline (srcdoc), so nothing is fetched.
  */
 
-import type { PixelInfo, PixelLook } from '../../core/pixel.ts'
+import { cleanPixelInfo, type PixelInfo, type PixelLook } from '../../core/pixel.ts'
 import { parseHex } from '../../core/pixel-grid.ts'
 import type { Sketch } from '../../core/pixel-sketch.ts'
 
@@ -19,6 +19,7 @@ export type PixelEvent =
   | { t: 'ended' }
   | { t: 'problem'; problems: string[] }
   | { t: 'probe'; ok: boolean; info?: PixelInfo; problems: string[]; warnings: string[]; thumb?: string; frameMs?: number; sketches?: Sketch[] }
+  | { t: 'frames'; ok: boolean; info?: PixelInfo; frames?: ArrayBuffer[]; problems: string[] }
 
 export interface PlayOptions {
   mode: 'once' | 'loop'
@@ -82,6 +83,10 @@ export class PixelFrame {
     void this.send({ t: 'probe', code, ink, ...(sketch ? { sketch } : {}) })
   }
 
+  frames(code: string, times: number[]): void {
+    void this.send({ t: 'frames', code, times })
+  }
+
   setInk(ink: Rgb): void {
     void this.send({ t: 'ink', ink })
   }
@@ -138,5 +143,33 @@ export function probePixel(code: string, ink: Rgb, sketch = false): Promise<Extr
       else if (event.t === 'problem') done({ t: 'probe', ok: false, problems: event.problems, warnings: [] })
     })
     frame.probe(code, ink, sketch)
+  })
+}
+
+/**
+ * The grids of a file at `times` (导出 GIF), worked out in a sandbox of its
+ * own. What comes back is only bytes: each checked to be one grid's size.
+ */
+export function renderFrames(code: string, times: number[]): Promise<{ ok: boolean; info?: PixelInfo; frames?: Uint8ClampedArray[]; problems: string[] }> {
+  const frame = new PixelFrame()
+  frame.el.style.cssText += ';position:fixed;left:-10000px;top:0;width:32px;height:18px'
+  document.body.append(frame.el)
+  return new Promise(resolve => {
+    const done = (result: { ok: boolean; info?: PixelInfo; frames?: Uint8ClampedArray[]; problems: string[] }) => {
+      clearTimeout(timer)
+      frame.destroy()
+      resolve(result)
+    }
+    const timer = setTimeout(() => done({ ok: false, problems: ['做 GIF 时，动画算得太久没有结果'] }), 20_000 + times.length * 300)
+    frame.on(event => {
+      if (event.t === 'problem') done({ ok: false, problems: event.problems })
+      if (event.t !== 'frames') return
+      const info = cleanPixelInfo(event.info).info
+      if (!event.ok || info === undefined || !Array.isArray(event.frames)) return done({ ok: false, problems: Array.isArray(event.problems) ? event.problems.map(String) : ['做 GIF 时出错了'] })
+      const size = info.grid[0] * info.grid[1] * 4
+      if (event.frames.length !== times.length || event.frames.some(b => !(b instanceof ArrayBuffer) || b.byteLength !== size)) return done({ ok: false, problems: ['动画交回来的画面不对'] })
+      done({ ok: true, info, frames: event.frames.map(b => new Uint8ClampedArray(b)), problems: [] })
+    })
+    frame.frames(code, times)
   })
 }

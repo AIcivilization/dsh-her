@@ -12,6 +12,7 @@ import type { Apply } from './parts.tsx'
 import { inkOf, PixelFrame, probePixel, type Rgb } from './pixel/host.ts'
 import { pixelSpec } from '../core/pixel-spec.ts'
 import { PixelWorkshop } from './PixelWorkshop.tsx'
+import { PixelExport } from './PixelExport.tsx'
 import { showIntro } from './intro-show.ts'
 import { STYLE_NAME, PIXEL_STYLES, type PixelInfo, type PixelLook, type PixelStyle } from '../core/pixel.ts'
 
@@ -91,7 +92,11 @@ export function PixelCard({ onSkin, pixel, apply }: { onSkin: () => void; pixel:
   const [busy, setBusy] = useState(false)
   const [problems, setProblems] = useState<string[]>()
   const [workshop, setWorkshop] = useState<string>()
+  /** Pictures or a video chosen here, handed to the workshop it opens. */
+  const [bring, setBring] = useState<File[]>()
+  const [exporting, setExporting] = useState<{ id: string; code: string; name: string; look: PixelLook }>()
   const file = useRef<HTMLInputElement>(null)
+  const photos = useRef<HTMLInputElement>(null)
   const previewBox = useRef<HTMLDivElement>(null)
 
   const take = useCallback((result: Awaited<ReturnType<typeof herApi.pixelsGet>>, text?: string) => {
@@ -131,8 +136,9 @@ export function PixelCard({ onSkin, pixel, apply }: { onSkin: () => void; pixel:
   }, [view])
 
   if (workshop !== undefined) {
-    return <PixelWorkshop id={workshop} onClose={() => {
+    return <PixelWorkshop id={workshop} {...(bring === undefined ? {} : { files: bring })} onClose={() => {
       setWorkshop(undefined)
+      setBring(undefined)
       void herApi.pixelsGet().then(r => take(r))
     }} />
   }
@@ -146,6 +152,21 @@ export function PixelCard({ onSkin, pixel, apply }: { onSkin: () => void; pixel:
     const r = await herApi.draftNew(from)
     if (!r.ok) return setNote({ kind: 'error', text: r.message })
     setWorkshop(r.draft.id)
+  }
+  /** A new draft, opened on the pictures or video chosen. */
+  const makeFrom = async (list: File[]) => {
+    if (list.length === 0) return
+    const r = await herApi.draftNew()
+    if (!r.ok) return setNote({ kind: 'error', text: r.message })
+    setBring(list)
+    setWorkshop(r.draft.id)
+  }
+  const exportOf = async (item: Item) => {
+    if (exporting?.id === item.id) return setExporting(undefined)
+    const code = await herApi.pixelsCode(item.id)
+    if (!code.ok) return setNote({ kind: 'error', text: code.message })
+    const used = bg.id === item.id ? bg.look : introId === item.id ? intro.look : undefined
+    setExporting({ id: item.id, code: code.code, name: item.name, look: used ?? { style: infoOf(item)?.color === 'color' ? 'blocks' : 'dots', color: 'theme', size: 1, fit: 'contain' } })
   }
   const infoOf = (item: Item) => item.info ?? thumbs[item.id]?.info
   const thumbOf = (item: Item) => item.thumb ?? thumbs[item.id]?.thumb
@@ -202,9 +223,13 @@ export function PixelCard({ onSkin, pixel, apply }: { onSkin: () => void; pixel:
       <section className="her-card">
         <div className="her-card-head">
           <h2>像素动画</h2>
-          <button className="her-btn small primary" onClick={() => void make()}>🎲 做一个</button>
+          <span className="her-row" style={{ margin: 0 }}>
+            <button className="her-btn small primary" onClick={() => photos.current?.click()}>🖼 用照片或视频做</button>
+            <button className="her-btn small" onClick={() => void make()}>🎲 做一个</button>
+          </span>
+          <input ref={photos} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,video/mp4,video/webm,video/quicktime" hidden onChange={e => { const list = [...(e.target.files ?? [])]; e.target.value = ''; void makeFrom(list) }} />
         </div>
-        <p className="her-muted">点「做一个」进像素工坊：掷骰子、跟 AI 说，或者用一张图。做好了当开机动画，或者当 dsh 对话的背景。</p>
+        <p className="her-muted">把你、你的猫、一段视频变成会动的像素画，或者进像素工坊掷骰子、跟 AI 说。做好了当开机动画、当 dsh 对话的背景，或者导出 GIF 做微信表情。</p>
         <div className="her-grid her-pixels">
           {view.drafts.filter(d => d.saved === undefined).map(d => (
             <div key={d.id} className="her-pixel draft">
@@ -226,6 +251,7 @@ export function PixelCard({ onSkin, pixel, apply }: { onSkin: () => void; pixel:
                 <small>{uses.length > 0 ? `✓ ${uses.join('、')}` : item.builtin ? '自带' : describe(infoOf(item))}</small>
                 <span className="her-row" style={{ margin: 0 }}>
                   <button className="her-btn small" onClick={() => void make(item.id)}>{item.builtin ? '照着做' : '改一改'}</button>
+                  <button className={`her-btn small${exporting?.id === item.id ? ' on' : ''}`} onClick={() => void exportOf(item)}>导出 GIF</button>
                   {!item.builtin && (
                     <button className="her-btn small" title="移走" onClick={() => {
                       if (window.confirm(`移走「${item.name}」？它会放进 pixels/.removed，不会直接删掉；用着它的地方改回自带的。`)) void herApi.pixelsRemove(item.id).then(r => take(r, '移走了。'))
@@ -236,6 +262,7 @@ export function PixelCard({ onSkin, pixel, apply }: { onSkin: () => void; pixel:
             )
           })}
         </div>
+        {exporting !== undefined && <PixelExport key={exporting.id} code={exporting.code} name={exporting.name} look={exporting.look} onClose={() => setExporting(undefined)} />}
         <div ref={previewBox}>
           {preview !== undefined && (
             <div className="her-pixel-preview">

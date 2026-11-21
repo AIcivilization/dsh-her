@@ -27,6 +27,7 @@ export const info = {
   grid: [192, 108],      // 宽 × 高（格），都是 8 以上的整数，最大 ${PIXEL_LIMITS.w} × ${PIXEL_LIMITS.h}；用「圆点」画法时建议不超过 192 × 108
   fps: 24,               // 每秒几帧，1–${PIXEL_LIMITS.fps}
   seconds: 4,            // 一遍多长（秒）；当开机动画最长 ${PIXEL_LIMITS.seconds} 秒；0 表示一直循环（只能当背景）
+  loop: 2,               // 可选：画面每隔几秒回到一模一样（比如 Math.sin(t * Math.PI) 是 2 秒）；导出 GIF 时按它录一圈，首尾正好接上。不知道就不写
   color: 'mono',         // 'mono'：每格只给亮度（推荐，颜色由用户选）；'color'：每格自己给颜色（只能画成方块）
 }
 
@@ -76,7 +77,7 @@ g.sprite 是新加的：用了它的动画，放到很旧的 dsh-her 里会播�
 1. 只有一个文件，不要 import 任何东西，不要 export default。
 2. 没有网络、没有页面：不要用 fetch、document、window、setTimeout、requestAnimationFrame（这些用不了）。动画的快慢全靠参数 t。
 3. 每一帧要很快（${PIXEL_LIMITS.frameMs} 毫秒以内）：不要在 frame 里做大量计算，能提前算的放进 setup。
-4. 有固定时长的（seconds > 0），要在这段时间里演完；引擎会在开头和结尾自动淡入淡出。seconds 为 0 的会一直播，t 会一直变大，要首尾相接、循环自然。
+4. 有固定时长的（seconds > 0），要在这段时间里演完；引擎会在开头和结尾自动淡入淡出。seconds 为 0 的会一直播，t 会一直变大，要首尾相接、循环自然。要循环的，周期尽量取整数秒（比如 Math.sin(t * Math.PI * 2 / 3) 是 3 秒一圈），把这一圈的秒数写进 info.loop。
 5. 画面要在黑色和白色背景上都好看：mono 模式下，亮度 v 越大越显眼，没画的格子是透明的。
 6. 最后只给我完整的代码文件，不用解释。
 

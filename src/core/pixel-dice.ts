@@ -12,6 +12,7 @@
  * Everything is drawn from `W`, `H`, `U`, so a recipe fits any grid.
  */
 
+import { BRAND_LINE } from './pixel-brand.ts'
 import type { PixelLook, PixelStyle } from './pixel.ts'
 
 export type FaceId = 'water' | 'sky' | 'fire' | 'shape' | 'flow' | 'grow'
@@ -546,7 +547,8 @@ ${indent(recipe.draw, '      ')}
     return { setup, draw }
   })(),`
   }).join('\n')
-  return `// 🎲 掷骰子：${label(top)}${under}
+  return `${BRAND_LINE}
+// 🎲 掷骰子：${label(top)}${under}
 // 这是一个普通的 dsh-her 像素动画，可以接着改，也可以直接用。
 export const info = { name: ${JSON.stringify(spec.name)}, author: 'dsh-her 骰子', grid: [${spec.grid[0]}, ${spec.grid[1]}], fps: ${spec.fps}, seconds: ${spec.seconds}, color: 'mono' }
 

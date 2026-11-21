@@ -655,4 +655,25 @@ a.her-btn.disabled{opacity:.45;pointer-events:none}
 .her-ws-foot .her-input{flex:1 1 160px;width:auto;min-width:0}
 @container (min-width:560px) and (max-width:719px), (min-width:1040px){.her-ws-side{display:grid;grid-template-columns:1fr 1fr;gap:12px 18px}}
 .her-ws-side .her-seg button{white-space:nowrap}
+.her-ws-start button.big{flex-basis:100%;flex-direction:row;justify-content:center;gap:12px;padding:16px 14px;border-color:${INK};font-size:15px}
+.her-ws-start button.big b{font-size:32px}
+.her-ws-start button.big small{max-width:240px;text-align:left}
+.her-dropping{outline:2px dashed ${INK};outline-offset:-6px}
+.her-export{margin-top:14px;padding:12px;border:1px solid ${LINE};border-radius:12px;background:${LAYER1};container-type:inline-size}
+.her-export-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.her-export-head b{font-weight:600}
+.her-export-body{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;align-items:start}
+@container (min-width:620px){.her-export-body{grid-template-columns:minmax(200px,300px) minmax(0,1fr)}}
+.her-export-view{position:relative;display:grid;place-items:center;min-height:200px;padding:10px;border-radius:10px;border:1px solid ${LINE};background-color:#fff;background-image:linear-gradient(45deg,#e6e6e6 25%,transparent 25%,transparent 75%,#e6e6e6 75%),linear-gradient(45deg,#e6e6e6 25%,transparent 25%,transparent 75%,#e6e6e6 75%);background-size:16px 16px;background-position:0 0,8px 8px}
+.her-export-view img{display:block;max-width:100%;max-height:360px;image-rendering:pixelated}
+.her-export-busy{position:absolute;left:8px;bottom:6px;padding:1px 8px;border-radius:999px;font-size:11px;background:rgba(0,0,0,.6);color:#fff}
+.her-export-set{display:flex;flex-direction:column;gap:12px;min-width:0}
+.her-export-presets{display:flex;flex-wrap:wrap;gap:8px}
+.her-export-presets button{flex:1 1 130px;display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:8px 10px;border:1px solid ${LINE};border-radius:10px;background:none;color:${INK};font:inherit;text-align:left;cursor:pointer}
+.her-export-presets button.on{border-color:${INK};background:${HOVER}}
+.her-export-presets b{font-weight:600;font-size:13px}
+.her-export-presets small{font-size:11px;color:${MUTED}}
+.her-export input[type=color]{width:32px;height:28px;padding:0;border:1px solid ${LINE};border-radius:6px;background:none;cursor:pointer}
+.her-ws-trim{display:flex;flex-direction:column;gap:6px}
+.her-ws-trim input[type=range]{width:100%}
 `

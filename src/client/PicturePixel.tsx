@@ -15,6 +15,8 @@ const HEIGHTS = [32, 48, 64, 96, 128]
 const FRAME_COUNTS = [6, 8, 12, 16, 24]
 /** The longest stretch of a video taken, in seconds. */
 const VIDEO_SPAN = 6
+/** How long a stretch of a video one may take. */
+const SPANS = [2, 3, 4, 6]
 const INK: [number, number, number] = [159, 216, 255]
 /** The longer side pictures are brought to before they are turned. */
 const SIDE = 512
@@ -24,6 +26,9 @@ interface Source {
   frames: Rgba[]
   /** Seconds the whole takes, for a GIF or a video; undefined for pictures. */
   seconds?: number
+  /** A video's whole length, and where the stretch taken starts (s). */
+  duration?: number
+  from?: number
   kind: 'picture' | 'pictures' | 'gif' | 'video'
 }
 
@@ -97,7 +102,8 @@ async function readGif(file: File, most: number): Promise<{ frames: Rgba[]; seco
   }
 }
 
-async function readVideo(file: File, count: number): Promise<{ frames: Rgba[]; seconds: number }> {
+/** `count` frames evenly over `span` seconds of a video from `from` (as much as there is). */
+async function readVideo(file: File, count: number, from = 0, span = VIDEO_SPAN): Promise<{ frames: Rgba[]; seconds: number; duration: number; from: number }> {
   const url = URL.createObjectURL(file)
   const video = document.createElement('video')
   video.muted = true
@@ -109,17 +115,19 @@ async function readVideo(file: File, count: number): Promise<{ frames: Rgba[]; s
       video.onloadeddata = () => resolve()
       video.onerror = () => reject(new Error('这段视频打不开：换一段 MP4 或 WebM 试试'))
     })
-    const span = Math.min(VIDEO_SPAN, Number.isFinite(video.duration) ? video.duration : VIDEO_SPAN)
+    const duration = Number.isFinite(video.duration) ? video.duration : span
+    const length = Math.min(span, VIDEO_SPAN, duration)
+    const start = Math.max(0, Math.min(from, duration - length))
     const [w, h] = sized(video.videoWidth, video.videoHeight)
     const frames: Rgba[] = []
     for (let k = 0; k < count; k++) {
       await new Promise<void>(resolve => {
         video.onseeked = () => resolve()
-        video.currentTime = (k + 0.5) * span / count
+        video.currentTime = start + (k + 0.5) * length / count
       })
       frames.push(grab(video, video.videoWidth, video.videoHeight, w, h))
     }
-    return { frames, seconds: span }
+    return { frames, seconds: length, duration, from: start }
   } finally {
     video.removeAttribute('src')
     video.load()
@@ -127,9 +135,9 @@ async function readVideo(file: File, count: number): Promise<{ frames: Rgba[]; s
   }
 }
 
-async function readSource(files: File[], count: number): Promise<Source> {
+async function readSource(files: File[], count: number, from = 0, span = VIDEO_SPAN): Promise<Source> {
   const first = files[0]!
-  if (files.length === 1 && first.type.startsWith('video/')) return { ...await readVideo(first, count), kind: 'video' }
+  if (files.length === 1 && first.type.startsWith('video/')) return { ...await readVideo(first, count, from, span), kind: 'video' }
   if (files.length === 1 && first.type === 'image/gif') {
     const gif = await readGif(first, count)
     return gif.frames.length > 1 ? { ...gif, kind: 'gif' } : { frames: gif.frames, kind: 'picture' }
@@ -138,6 +146,8 @@ async function readSource(files: File[], count: number): Promise<Source> {
   if (pictures.length === 0) throw new Error('选图片（PNG、JPG、WebP、GIF）或者一段视频')
   return { frames: await readImages(pictures), kind: pictures.length > 1 ? 'pictures' : 'picture' }
 }
+
+const round1 = (n: number) => Math.round(n * 10) / 10
 
 function draw(canvas: HTMLCanvasElement, picture: Picture, frame: number): void {
   const k = Math.max(2, Math.floor(Math.min(260 / picture.w, 240 / picture.h)))
@@ -164,28 +174,41 @@ export function PicturePixel({ files, onUse, onCancel }: { files: File[]; onUse:
   const [cut, setCut] = useState(true)
   const [edge, setEdge] = useState(true)
   const [count, setCount] = useState(12)
+  const [from, setFrom] = useState(0)
+  const [span, setSpan] = useState(VIDEO_SPAN)
+  const [bounce, setBounce] = useState(false)
   const [busy, setBusy] = useState(false)
   const canvas = useRef<HTMLCanvasElement>(null)
   const moving = files.length > 1 || files[0]?.type === 'image/gif' || files[0]?.type.startsWith('video/') === true
 
+  // Read again a moment after the stretch stops moving, not at every step of the slider.
   useEffect(() => {
     let gone = false
-    setSource(undefined)
     setProblem(undefined)
-    readSource(files, count).then(
-      s => { if (!gone) setSource(s) },
-      (e: unknown) => { if (!gone) setProblem(e instanceof Error && /[一-龥]/.test(e.message) ? e.message : '打不开：换一张 PNG、JPG、WebP，或者一段 MP4 试试') },
-    )
-    return () => { gone = true }
-  }, [files, count])
+    const timer = setTimeout(() => {
+      readSource(files, count, from, span).then(
+        s => { if (!gone) setSource(s) },
+        (e: unknown) => { if (!gone) setProblem(e instanceof Error && /[一-龥]/.test(e.message) ? e.message : '打不开：换一张 PNG、JPG、WebP，或者一段 MP4 试试') },
+      )
+    }, source === undefined ? 0 : 350)
+    return () => {
+      gone = true
+      clearTimeout(timer)
+    }
+  }, [files, count, from, span])
+  useEffect(() => setSource(undefined), [files])
 
   // A fresh copy each time: taking the background away changes the pixels.
   const picture = useMemo(() => {
     if (source === undefined) return undefined
     const copies = source.frames.map(f => ({ data: new Uint8ClampedArray(f.data), w: f.w, h: f.h }))
     const each = source.seconds === undefined ? 0.15 : source.seconds / source.frames.length
-    return makeFrames(copies, { height, color, cutBackground: cut, outline: edge }, each)
-  }, [source, height, color, cut, edge])
+    const made = makeFrames(copies, { height, color, cutBackground: cut, outline: edge }, each)
+    if (!bounce || made.frames.length < 3) return made
+    // Forward, then back: the last frame runs into the first, whatever the clip.
+    const frames = [...made.frames, ...made.frames.slice(1, -1).reverse()]
+    return { ...made, frames, rows: frames[0]! }
+  }, [source, height, color, cut, edge, bounce])
   useEffect(() => {
     if (picture === undefined || canvas.current === null) return
     const c = canvas.current
@@ -226,8 +249,25 @@ export function PicturePixel({ files, onUse, onCancel }: { files: File[]; onUse:
               <span className="her-seg" role="group" aria-label="几帧">
                 {FRAME_COUNTS.map(n => <button key={n} className={count === n ? 'on' : ''} onClick={() => setCount(n)}>{n}</button>)}
               </span>
-              <span className="her-faint">{source.kind === 'video' ? `从前 ${Math.round(Math.min(VIDEO_SPAN, source.seconds ?? VIDEO_SPAN) * 10) / 10} 秒里平均取` : '从动图里平均取'}；帧越多越顺，文件也越大</span>
+              <span className="her-faint">{source.kind === 'video' ? `从第 ${round1(source.from ?? 0)} 到 ${round1((source.from ?? 0) + (source.seconds ?? 0))} 秒里平均取` : '从动图里平均取'}；帧越多越顺，文件也越大</span>
             </div>
+          )}
+          {source?.kind === 'video' && source.duration !== undefined && source.duration > 2.2 && (
+            <div className="her-ws-trim">
+              <b>用视频的哪一段</b>
+              <span className="her-seg" role="group" aria-label="取几秒">
+                {SPANS.filter(n => n <= Math.ceil(source.duration!)).map(n => <button key={n} className={span === n ? 'on' : ''} onClick={() => setSpan(n)}>{n} 秒</button>)}
+              </span>
+              {source.duration > Math.min(span, VIDEO_SPAN) + 0.2 && (
+                <span className="her-range">
+                  <input type="range" aria-label="从第几秒开始" min={0} max={Math.max(0, source.duration - Math.min(span, VIDEO_SPAN))} step={0.1} value={from} onChange={e => setFrom(Number(e.target.value))} />
+                  <i>从第 {round1(from)} 秒开始</i>
+                </span>
+              )}
+            </div>
+          )}
+          {moving && (
+            <label className="her-muted"><input type="checkbox" checked={bounce} onChange={e => setBounce(e.target.checked)} /> 来回播（正放再倒放，首尾一定接得上；帧数多一倍）</label>
           )}
           <div className="her-ws-set">
             <b>颜色</b>

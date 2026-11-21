@@ -7,6 +7,7 @@
  */
 
 import type { Picture } from './pixel-picture.ts'
+import { BRAND_LINE } from './pixel-brand.ts'
 
 export type Motion = 'still' | 'float' | 'breathe' | 'sway' | 'hop' | 'walk' | 'turn' | 'sparkle'
 
@@ -29,45 +30,73 @@ const MOTION_LINE = /^\/\/ 动作：(\S+)/m
 
 const quoteRows = (rows: string[], indent: string) => rows.map(r => `${indent}'${r}',`).join('\n')
 
-/** How each motion draws `pic` (the frame now), scaled `s`, its options `o`. */
+/**
+ * How long one turn of each motion takes, in seconds: whole beats, so the
+ * file can say when it looks the same again (`info.loop`) and a GIF of one
+ * turn joins up. 0: the motion does not move (only the frames change).
+ */
+const BEATS: Record<Motion, number> = { still: 0, float: 2, breathe: 3, sway: 2, hop: 1.2, walk: 12, turn: 4, sparkle: 4 }
+
+/**
+ * The beat a picture moves to, and the length of one whole turn: with
+ * frames, the beat is stretched or squeezed a little so a whole number of
+ * beats fit the frames' round (or the other way round), and both come back
+ * together. `beat` is written as code: `5.1 / 3` stays exact.
+ */
+export function pictureTiming(picture: Picture, motion: Motion): { beat: string; loop: number } {
+  const base = BEATS[motion]
+  const many = picture.frames.length > 1
+  const cycle = many ? Math.round(picture.frames.length * (picture.each ?? 0.1) * 1000) / 1000 : 0
+  if (!many) return { beat: String(base), loop: base || 1 }
+  if (base === 0) return { beat: '0', loop: cycle }
+  if (base >= cycle) {
+    const k = Math.max(1, Math.round(base / cycle))
+    const loop = Math.round(cycle * k * 1000) / 1000
+    return { beat: k === 1 ? String(cycle) : `${cycle} * ${k}`, loop }
+  }
+  const k = Math.max(1, Math.round(cycle / base))
+  return { beat: k === 1 ? String(cycle) : `${cycle} / ${k}`, loop: cycle }
+}
+
+/** How each motion draws `pic` (the frame now), scaled `s`, its options `o`; BEAT is one turn in seconds. */
 const MOVES: Record<Motion, string> = {
   still: `  g.sprite(g.w / 2, g.h / 2, pic, o)`,
-  float: `  // 轻轻上下浮动
-  g.sprite(g.w / 2, g.h / 2 + Math.sin(t * 2) * 2, pic, o)`,
-  breathe: `  // 上半身每 3 秒起伏一次，脚不动：下半身照画，上半身抬高，中间缺的那一行补上
-  const lift = Math.round((1 - Math.cos(t * Math.PI * 2 / 3)) / 2 * s)
+  float: `  // 轻轻上下浮动，BEAT 秒一个来回
+  g.sprite(g.w / 2, g.h / 2 + Math.sin(t * Math.PI * 2 / BEAT) * 2, pic, o)`,
+  breathe: `  // 上半身每 BEAT 秒起伏一次，脚不动：下半身照画，上半身抬高，中间缺的那一行补上
+  const lift = Math.round((1 - Math.cos(t * Math.PI * 2 / BEAT)) / 2 * s)
   const half = Math.floor(pic.length * 0.55)
   const left = g.w / 2 - pic[0].length * s / 2, top = g.h / 2 - pic.length * s / 2
   const at = { ...o, center: false }
   g.sprite(left, top + half * s, pic.slice(half), at)
   g.sprite(left, top + half * s - lift, [pic[half]], at)
   g.sprite(left, top - lift, pic.slice(0, half), at)`,
-  sway: `  // 一行一行错开画：越往上晃得越多，脚底不动
+  sway: `  // 一行一行错开画：越往上晃得越多，脚底不动；BEAT 秒一个来回
   const left = g.w / 2 - pic[0].length * s / 2, top = g.h / 2 - pic.length * s / 2
-  const swing = Math.sin(t * 2.5) * pic[0].length * s * 0.08
+  const swing = Math.sin(t * Math.PI * 2 / BEAT) * pic[0].length * s * 0.08
   for (let r = 0; r < pic.length; r++) {
     const k = 1 - r / pic.length
     g.sprite(left + Math.round(swing * k), top + r * s, [pic[r]], { ...o, center: false })
   }`,
-  hop: `  // 1.2 秒跳一次：前一半在空中，后一半站在地上
-  const p = (t % 1.2) / 1.2
+  hop: `  // BEAT 秒跳一次：前一半在空中，后一半站在地上
+  const p = (t % BEAT) / BEAT
   const up = p < 0.5 ? Math.sin(p / 0.5 * Math.PI) * g.h * 0.12 : 0
   g.sprite(g.w / 2, g.h / 2 - up, pic, o)`,
-  walk: `  // 6 秒走一趟：从左走到右，翻过来走回去，一路轻轻颠
+  walk: `  // BEAT 秒走一个来回：从左走到右，翻过来走回去，一路轻轻颠
   const span = g.w / 2 - pic[0].length * s / 2 - 2
-  const p = (t / 6) % 2
+  const p = (t / (BEAT / 2)) % 2
   const x = g.w / 2 + (p < 1 ? p * 2 - 1 : 3 - p * 2) * span
-  const bob = Math.abs(Math.sin(t * 6)) * s
+  const bob = Math.abs(Math.sin(t * Math.PI * 24 / BEAT)) * s
   g.sprite(x, g.h / 2 - bob, pic, { ...o, flip: p >= 1 })`,
-  turn: `  // 每两秒转一次身
-  g.sprite(g.w / 2, g.h / 2, pic, { ...o, flip: Math.floor(t / 2) % 2 === 1 })`,
-  sparkle: `  // 轻轻浮着，身边冒出一闪一闪的小星星
-  g.sprite(g.w / 2, g.h / 2 + Math.sin(t * 2) * 2, pic, o)
+  turn: `  // 每 BEAT / 2 秒转一次身
+  g.sprite(g.w / 2, g.h / 2, pic, { ...o, flip: Math.floor(t / (BEAT / 2)) % 2 === 1 })`,
+  sparkle: `  // 轻轻浮着，身边冒出一闪一闪的小星星；BEAT 秒以后一模一样
+  g.sprite(g.w / 2, g.h / 2 + Math.sin(t * Math.PI * 4 / BEAT) * 2, pic, o)
   const w = pic[0].length * s, h = pic.length * s
   for (let i = 0; i < 12; i++) {
-    const round = t * 0.6 + i / 12
+    const round = t * 2 / BEAT + i / 12
     const life = round % 1
-    const seed = Math.floor(round) * 97 + i * 13
+    const seed = (Math.floor(round) % 2) * 97 + i * 13
     const rx = Math.sin(seed * 12.9898) * 43758.5453 % 1, ry = Math.sin(seed * 78.233) * 43758.5453 % 1
     const x = Math.round(g.w / 2 + rx * w * 0.75), y = Math.round(g.h / 2 + ry * h * 0.6)
     const a = Math.sin(life * Math.PI)
@@ -88,12 +117,15 @@ export function pictureCode(picture: Picture, name: string, motion: Motion = 'fl
     : `const PICTURE = [\n${quoteRows(picture.rows, '  ')}\n]\n`
   const palette = color ? `const PALETTE = ${JSON.stringify(picture.palette).replace(/"(\w)":/g, '$1: ').replace(/,/g, ', ')}\n` : ''
   const star = motion === 'sparkle' ? `const STAR = ${color ? "'#fff4b8'" : '1'}\n` : ''
-  return `// 🖼 用图片转的像素图（${picture.w} × ${picture.h} 格${many ? `，${picture.frames.length} 帧` : ''}）。
+  const timing = pictureTiming(picture, motion)
+  const beat = motion === 'still' ? '' : `/** 动作一个来回几秒 */\nconst BEAT = ${timing.beat}\n`
+  return `${BRAND_LINE}
+// 🖼 用图片转的像素图（${picture.w} × ${picture.h} 格${many ? `，${picture.frames.length} 帧` : ''}）。
 // PICTURE${many ? ' 和 FRAMES' : ''} 就是那张图：要它动，就移动、翻转、缩放它，或者复制一份改几格（眨眼、张嘴、抬手）轮着换；不要整个重画。
 // 动作：${about.name}（像素工坊里点「动起来」换；也可以跟 AI 说）
-export const info = { name: ${JSON.stringify(name)}, author: '', grid: [${grid[0]}, ${grid[1]}], fps: 24, seconds: 0, color: '${color ? 'color' : 'mono'}' }
+export const info = { name: ${JSON.stringify(name)}, author: '', grid: [${grid[0]}, ${grid[1]}], fps: 24, seconds: 0, loop: ${timing.loop}, color: '${color ? 'color' : 'mono'}' }
 
-${art}${palette}${star}
+${art}${palette}${star}${beat}
 export function frame(g, t) {
   g.clear()
   const pic = ${many ? 'FRAMES[Math.floor(t / EACH) % FRAMES.length]' : 'PICTURE'}

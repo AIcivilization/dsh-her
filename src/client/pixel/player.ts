@@ -8,8 +8,10 @@
  * From the host (postMessage from the parent, or `__pixelStart` on the desktop):
  *   { t: 'play', code, look, ink, mode: 'once' | 'loop', cap?, fade? } · { t: 'stop' } · { t: 'ink', ink }
  *   { t: 'probe', code, ink }
+ *   { t: 'frames', code, times }: the grid at each time, for a GIF (导出, docs/像素导出设计.md)
  * To the host: { t: 'ready' } · { t: 'playing', info } · { t: 'ended' } · { t: 'problem', problems }
  *   { t: 'probe', ok, info?, problems, warnings, thumb?, frameMs? }
+ *   { t: 'frames', ok, info?, frames?, problems }: the grids are plain bytes, handed over (transferred)
  */
 
 import { PIXEL_LIMITS, errorLine, onceSeconds, wrapPixelCode, type PixelInfo, type PixelLook } from '../../core/pixel.ts'
@@ -23,14 +25,15 @@ type Command =
   | { t: 'stop' }
   | { t: 'ink'; ink: Rgb }
   | { t: 'probe'; code: string; ink: Rgb; sketch?: boolean }
+  | { t: 'frames'; code: string; times: number[] }
 
 const standalone = window.parent === window
-const send = (message: unknown) => {
+const send = (message: unknown, transfer: Transferable[] = []) => {
   if (standalone) {
     if ((message as { t: string }).t === 'ended' || (message as { t: string }).t === 'problem') window.close()
     return
   }
-  window.parent.postMessage({ pixel: true, ...(message as object) }, '*')
+  window.parent.postMessage({ pixel: true, ...(message as object) }, '*', transfer)
 }
 
 const canvas = document.getElementById('c') as HTMLCanvasElement
@@ -244,12 +247,36 @@ async function probe(command: Extract<Command, { t: 'probe' }>): Promise<void> {
   }
 }
 
+/** The most frames one export asks for. */
+const MOST_FRAMES = 400
+
+/** Every frame asked for, in order (a file may draw on what the last frame left), for a GIF. */
+async function frames(command: Extract<Command, { t: 'frames' }>): Promise<void> {
+  let anim: Anim | undefined
+  try {
+    anim = await Anim.start(command.code)
+    const info = anim.info!
+    const out: ArrayBuffer[] = []
+    for (const time of command.times.slice(0, MOST_FRAMES)) {
+      const t = Number.isFinite(time) && time >= 0 ? time : 0
+      const f = await anim.frame(Math.floor(t * info.fps + 1e-6), t)
+      out.push(f.data.buffer as ArrayBuffer)
+    }
+    send({ t: 'frames', ok: true, info, frames: out, problems: [] }, out)
+  } catch (error) {
+    send({ t: 'frames', ok: false, problems: (error as Error).message.split('\n') })
+  } finally {
+    anim?.stop()
+  }
+}
+
 function handle(command: Command): void {
   if (command.t === 'play') void play(command)
   else if (command.t === 'stop') stop()
   else if (command.t === 'ink') {
     painter.setInk(command.ink)
   } else if (command.t === 'probe') void probe(command)
+  else if (command.t === 'frames' && Array.isArray(command.times)) void frames(command)
 }
 
 declare global {

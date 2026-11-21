@@ -29,6 +29,8 @@ export interface PixelInfo {
   fps: number
   /** One run; 0: goes on for ever (a background only). */
   seconds: number
+  /** Optional: seconds after which it looks the same again (a GIF of one turn joins up without a jump). */
+  loop?: number
   /** 'mono': each cell a brightness; 'color': each cell its own colour (blocks only). */
   color: 'mono' | 'color'
 }
@@ -128,12 +130,15 @@ export function cleanPixelInfo(raw: unknown): { info?: PixelInfo; problems: stri
   if (typeof fps !== 'number' || !Number.isInteger(fps) || fps < 1 || fps > PIXEL_LIMITS.fps) problems.push(`info.fps 要是 1 到 ${PIXEL_LIMITS.fps} 的整数（现在是 ${JSON.stringify(fps ?? null)}）`)
   const seconds = raw.seconds
   if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0 || seconds > 600) problems.push(`info.seconds 要是 0 到 600 之间的秒数，0 表示一直循环（现在是 ${JSON.stringify(seconds ?? null)}）`)
+  const loop = raw.loop
+  if (loop !== undefined && (typeof loop !== 'number' || !Number.isFinite(loop) || loop <= 0 || loop > 60)) problems.push(`info.loop 是首尾正好接上的一圈有几秒，要是 0 到 60 之间的数，不知道就不写（现在是 ${JSON.stringify(loop)}）`)
   const color = raw.color === undefined ? 'mono' : raw.color
   if (color !== 'mono' && color !== 'color') problems.push(`info.color 只能是 'mono' 或 'color'（现在是 ${JSON.stringify(color)}）`)
   if (problems.length > 0 || name === undefined || size === undefined) return { problems }
   return {
     info: {
       name, grid: size, fps: fps as number, seconds: seconds as number, color: color as 'mono' | 'color',
+      ...(typeof loop === 'number' ? { loop: Math.round(loop * 1000) / 1000 } : {}),
       ...(typeof raw.author === 'string' && raw.author.trim() !== '' ? { author: raw.author.trim().slice(0, 60) } : {}),
     },
     problems,

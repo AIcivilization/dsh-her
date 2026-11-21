@@ -10,11 +10,14 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 import { herApi, type ChatView, type DraftView } from './api.ts'
 import { inkOf, PixelFrame, probePixel } from './pixel/host.ts'
 import { FACES, hslHex, rollDice, type DiceRoll } from '../core/pixel-dice.ts'
-import { STYLE_NAME, PIXEL_STYLES, type PixelInfo, type PixelLook } from '../core/pixel.ts'
+import { cleanLook, STYLE_NAME, PIXEL_STYLES, type PixelInfo, type PixelLook } from '../core/pixel.ts'
 import { describeChange, infoOverride, withInfo, withoutInfo, WORKSHOP_FPS, WORKSHOP_GRIDS, type InfoChange } from '../core/pixel-workshop.ts'
 import type { Picture } from '../core/pixel-picture.ts'
 import { MOTIONS, pictureCode, readPictureFile, type Motion } from '../core/pixel-motion.ts'
 import { PicturePixel } from './PicturePixel.tsx'
+import { PixelExport } from './PixelExport.tsx'
+import { readGifSource, type GifSource } from '../core/pixel-gif.ts'
+import { withBrand } from '../core/pixel-brand.ts'
 import { showIntro } from './intro-show.ts'
 import { showPixelBackground } from './pixel-bg.ts'
 
@@ -124,7 +127,11 @@ function ColorWheel({ value, onPick }: { value: string; onPick: (color: string) 
   )
 }
 
-export function PixelWorkshop({ id, onClose }: { id: string; onClose: () => void }) {
+/** The files the picture panel takes. */
+const PICTURE_ACCEPT = 'image/png,image/jpeg,image/webp,image/gif,image/bmp,video/mp4,video/webm,video/quicktime'
+const takesFile = (f: File) => /^(image|video)\//.test(f.type)
+
+export function PixelWorkshop({ id, onClose, files }: { id: string; onClose: () => void; files?: File[] }) {
   const [draft, setDraft] = useState<DraftView>()
   const [look, setLook] = useState<PixelLook>()
   const [name, setName] = useState('')
@@ -141,6 +148,9 @@ export function PixelWorkshop({ id, onClose }: { id: string; onClose: () => void
   const [sending, setSending] = useState(false)
   const msgs = useRef<HTMLDivElement>(null)
   const [pictureFiles, setPictureFiles] = useState<File[]>()
+  const [gifOffer, setGifOffer] = useState<{ source: GifSource; files: File[] }>()
+  const [exporting, setExporting] = useState(false)
+  const [dropping, setDropping] = useState(false)
   const picturePick = useRef<HTMLInputElement>(null)
   const sayBox = useRef<HTMLTextAreaElement>(null)
   const [, tick] = useState(0)
@@ -154,6 +164,24 @@ export function PixelWorkshop({ id, onClose }: { id: string; onClose: () => void
     setDraft(result.draft)
     return result.draft
   }, [])
+
+  /** Pictures or a video to turn; a GIF made here (its file inside) is offered as its file first. */
+  const pickFiles = useCallback(async (list: File[]) => {
+    const chosen = list.filter(takesFile)
+    if (chosen.length === 0) return
+    setGifOffer(undefined)
+    if (chosen.length === 1 && chosen[0]!.type === 'image/gif' && chosen[0]!.size < 30 * 1024 * 1024) {
+      const source = readGifSource(new Uint8Array(await chosen[0]!.arrayBuffer()))
+      if (source !== undefined) return setGifOffer({ source, files: chosen })
+    }
+    setPictureFiles(chosen)
+  }, [])
+  const brought = useRef(false)
+  useEffect(() => {
+    if (brought.current || files === undefined || files.length === 0) return
+    brought.current = true
+    void pickFiles(files)
+  }, [files, pickFiles])
 
   useEffect(() => {
     void herApi.draftGet(id).then(r => {
@@ -297,7 +325,7 @@ export function PixelWorkshop({ id, onClose }: { id: string; onClose: () => void
     setNote(then === undefined ? { kind: 'ok', text: `存好了：「${name.trim() || draft.name}」，在像素动画列表里。之后再存，就是更新它。` } : await then(pixel))
   }
   const exportJs = () => {
-    const url = URL.createObjectURL(new Blob([draft.code], { type: 'text/javascript' }))
+    const url = URL.createObjectURL(new Blob([withBrand(draft.code)], { type: 'text/javascript' }))
     const a = document.createElement('a')
     a.href = url
     a.download = `${(name.trim() || draft.name).replace(/[\\/:*?"<>|]/g, '')}.js`
@@ -344,6 +372,19 @@ export function PixelWorkshop({ id, onClose }: { id: string; onClose: () => void
     if (r.ok) setChat(r.chat)
   }
 
+  /** The file a GIF made here carried: a new version, with the look it was made with. */
+  const openGifSource = async (source: GifSource) => {
+    setGifOffer(undefined)
+    const sourceLook = source.look === undefined ? look : cleanLook(source.look, look)
+    const added = take(await herApi.draftAdd(id, source.code, `📥 从 GIF${source.name === '' ? '' : `「${source.name}」`}里取出的动画文件`, sourceLook))
+    if (added === undefined) return
+    setLook(sourceLook)
+    if (autoName.current && source.name !== '') {
+      setName(source.name)
+      take(await herApi.draftSet(id, { name: source.name, auto: true }))
+    }
+  }
+
   const say = async (text: string) => {
     if (text.trim() === '' || sending) return
     setSending(true)
@@ -388,16 +429,29 @@ export function PixelWorkshop({ id, onClose }: { id: string; onClose: () => void
   const start = (
     <div className="her-ws-start">
       <p>从哪儿开始？</p>
+      <button className="big" onClick={() => picturePick.current?.click()}><b>🖼</b>用照片或视频<small>把你、你的猫、一段视频变成会动的像素画；也可以直接拖进来</small></button>
       <button onClick={roll}><b>🎲</b>掷骰子<small>随机出一个，每次都不一样</small></button>
       <button onClick={() => sayBox.current?.focus()}><b>💬</b>跟 AI 说<small>说你想要什么画面</small></button>
-      <button onClick={() => picturePick.current?.click()}><b>🖼</b>用图片<small>一张图变成像素画</small></button>
     </div>
   )
   const grid = info?.grid
   const mono = info === undefined || info.color === 'mono'
 
   return (
-    <section className="her-card">
+    <section
+      className={`her-card${dropping ? ' her-dropping' : ''}`}
+      onDragOver={e => {
+        if (![...e.dataTransfer.items].some(item => item.kind === 'file')) return
+        e.preventDefault()
+        setDropping(true)
+      }}
+      onDragLeave={e => { if (e.currentTarget === e.target) setDropping(false) }}
+      onDrop={e => {
+        e.preventDefault()
+        setDropping(false)
+        void pickFiles([...e.dataTransfer.files])
+      }}
+    >
       <div className="her-card-head">
         <h2>像素工坊</h2>
         <button className="her-btn small" onClick={onClose}>← 返回像素动画</button>
@@ -483,9 +537,20 @@ export function PixelWorkshop({ id, onClose }: { id: string; onClose: () => void
               <b>掷骰子</b>
               <span className="her-muted">{die.said ?? '六个面，六个方向，每次都不一样。'}</span>
             </div>
-            <button className="her-btn small" onClick={() => picturePick.current?.click()}>🖼 用图片做</button>
-            <input ref={picturePick} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,video/mp4,video/webm,video/quicktime" hidden onChange={e => { const list = [...(e.target.files ?? [])]; if (list.length > 0) setPictureFiles(list); e.target.value = '' }} />
+            <button className="her-btn small" onClick={() => picturePick.current?.click()}>🖼 用照片或视频做</button>
+            <input ref={picturePick} type="file" multiple accept={PICTURE_ACCEPT} hidden onChange={e => { const list = [...(e.target.files ?? [])]; e.target.value = ''; void pickFiles(list) }} />
           </div>
+          {gifOffer !== undefined && (
+            <div className="her-ws-picture">
+              <b>这张 GIF 是用 dsh-her 做的{gifOffer.source.name === '' ? '' : `「${gifOffer.source.name}」`}</b>
+              <span className="her-muted">里面带着它的动画文件，可以接着改。文件是别人写的代码，也只在隔离的环境里跑。</span>
+              <span className="her-row" style={{ margin: 0 }}>
+                <button className="her-btn small primary" onClick={() => void openGifSource(gifOffer.source)}>打开它的文件接着改</button>
+                <button className="her-btn small" onClick={() => { setPictureFiles(gifOffer.files); setGifOffer(undefined) }}>当普通动图转像素</button>
+                <button className="her-btn small" onClick={() => setGifOffer(undefined)}>不用了</button>
+              </span>
+            </div>
+          )}
           {pictureFiles !== undefined && <PicturePixel files={pictureFiles} onUse={takePicture} onCancel={() => setPictureFiles(undefined)} />}
 
           <div className="her-ws-set">
@@ -540,10 +605,12 @@ export function PixelWorkshop({ id, onClose }: { id: string; onClose: () => void
         </div>
       </div>
 
+      {exporting && draft.code !== '' && <PixelExport code={draft.code} name={name.trim() || draft.name} look={look} onClose={() => setExporting(false)} />}
       <div className="her-ws-foot">
         <input className="her-input" aria-label="名字" value={name} maxLength={40} onChange={e => setName(e.target.value)} onBlur={e => rename(e.target.value)} />
         <button className="her-btn primary" disabled={busy || draft.code === ''} onClick={() => void useAsIntro()}>{busy ? '正在试跑…' : '当开机动画'}</button>
         <button className="her-btn primary" disabled={busy || draft.code === ''} onClick={() => void useAsBackground()}>当 dsh 对话背景</button>
+        <button className={`her-btn${exporting ? ' on' : ''}`} disabled={draft.code === ''} onClick={() => setExporting(x => !x)}>📤 导出 GIF</button>
         <details className="her-ws-menu">
           <summary className="her-btn">更多</summary>
           <div>
