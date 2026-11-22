@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 import { herApi, type ChatView, type DraftView } from './api.ts'
 import { inkOf, PixelFrame, probePixel } from './pixel/host.ts'
 import { FACES, hslHex, rollDice, type DiceRoll } from '../core/pixel-dice.ts'
-import { cleanLook, STYLE_NAME, PIXEL_STYLES, type PixelInfo, type PixelLook } from '../core/pixel.ts'
+import { cleanLook, codeBytes, PIXEL_SIZES, sizeText, STYLE_NAME, PIXEL_STYLES, type PixelInfo, type PixelLook } from '../core/pixel.ts'
 import { describeChange, infoOverride, withInfo, withoutInfo, WORKSHOP_FPS, WORKSHOP_GRIDS, type InfoChange } from '../core/pixel-workshop.ts'
 import type { Picture } from '../core/pixel-picture.ts'
 import { MOTIONS, pictureCode, readPictureFile, type Motion } from '../core/pixel-motion.ts'
@@ -337,7 +337,8 @@ export function PixelWorkshop({ id, onClose, files }: { id: string; onClose: () 
     const r = await herApi.introSet({ source: `pixel:${pixel}`, look, on: true, dsh: true })
     if (!r.ok) return { kind: 'error', text: r.message }
     showIntro({ pixel: { id: pixel, look }, when: 'every' })
-    return { kind: 'ok', text: `开机动画换成「${name.trim() || draft.name}」了，刚才先放了一遍。以后她在桌面上出场、打开 dsh 网页时都会播（${r.intro.when === 'every' ? '每次' : '每天第一次'}）。多久播一次在「像素动画」页里改。` }
+    const big = size > PIXEL_SIZES.intro ? `这个动画约 ${sizeText(size)}，当开机动画建议 200 KB 以内：她每次出场都要先把它读进来、跑起来，小一点开得快（格子矮一点、帧少一点就小了）。` : ''
+    return { kind: 'ok', text: `开机动画换成「${name.trim() || draft.name}」了，刚才先放了一遍。以后她在桌面上出场、打开 dsh 网页时都会播（${r.intro.when === 'every' ? '每次' : '每天第一次'}）。多久播一次在「像素动画」页里改。${big}` }
   })
   /** The chat background: on, and when it was off, played at more times than a click, so it is seen. */
   const useAsBackground = () => saveAnd(async pixel => {
@@ -455,6 +456,12 @@ export function PixelWorkshop({ id, onClose, files }: { id: string; onClose: () 
     : draft.code === '' ? start : undefined
   const grid = info?.grid
   const mono = info === undefined || info.color === 'mono'
+  const size = codeBytes(draft.code)
+  // Why the buttons at the bottom cannot be used yet: said, not just greyed out.
+  const waiting = pictureFiles !== undefined
+    ? '上面转好的还没放进草稿：先点「放进草稿」，才能保存、当开机动画、当背景、导出。'
+    : gifOffer !== undefined ? '先选上面那张 GIF 怎么用。'
+      : draft.code === '' ? '还没有画面：先用图片、视频、骰子或者跟 AI 说做一个，才能保存、当开机动画、当背景、导出。' : undefined
 
   return (
     <section
@@ -489,7 +496,7 @@ export function PixelWorkshop({ id, onClose, files }: { id: string; onClose: () 
                 <button title="下一版" disabled={at >= draft.versions.length - 1} onClick={() => pickVersion(draft.versions[at + 1]!.n)}>›</button>
                 <button title="从头再播一遍" onClick={() => setRound(r => r + 1)}>↻</button>
               </div>
-              <p className="her-faint">v{draft.current}：{current?.note || '—'}{info === undefined ? '' : ` · ${info.grid[0]} × ${info.grid[1]} · 每秒 ${info.fps} 帧 · ${info.seconds > 0 ? `${info.seconds} 秒一遍` : '一直循环'}`}</p>
+              <p className="her-faint">v{draft.current}：{current?.note || '—'}{info === undefined ? '' : ` · ${info.grid[0]} × ${info.grid[1]} · 每秒 ${info.fps} 帧 · ${info.seconds > 0 ? `${info.seconds} 秒一遍` : '一直循环'} · ${sizeText(size)}`}</p>
             </>
           )}
           {pic !== undefined && (
@@ -547,6 +554,11 @@ export function PixelWorkshop({ id, onClose, files }: { id: string; onClose: () 
               ? <button className="her-btn small" onClick={() => void herApi.chatStop(id).then(r => { if (r.ok) setChat(r.chat) })}>停</button>
               : <button className="her-btn small primary" disabled={sending || input.trim() === ''} onClick={() => void say(input)}>{sending ? '…' : '发送'}</button>}
           </div>
+          {size > PIXEL_SIZES.aiHeavy && (
+            <p className="her-ws-heavy">
+              这一版约 {sizeText(size)}。{size > PIXEL_SIZES.aiTooBig ? 'AI 改不了这么大的文件' : 'AI 改起来会又贵又慢'}：它要先读完整个文件，改完再整个写回来；100 多 KB 的文件光读就要几万个 token，写回来超过了模型一次能写的长度。换动作用左边的「动起来」，不经过 AI；想让 AI 改，把格子调矮、帧数调少再转一次。
+            </p>
+          )}
           <p className="her-faint">用的是你在 dsh 里选的模型。AI 交来的代码先在隔离的环境里试跑，通过了才存成新的一版。</p>
         </div>
 
@@ -620,13 +632,13 @@ export function PixelWorkshop({ id, onClose, files }: { id: string; onClose: () 
       {exporting && draft.code !== '' && <PixelExport code={draft.code} name={name.trim() || draft.name} look={look} onClose={() => setExporting(false)} />}
       <div className="her-ws-foot">
         <input className="her-input" aria-label="名字" value={name} maxLength={40} onChange={e => setName(e.target.value)} onBlur={e => rename(e.target.value)} />
-        <button className="her-btn primary" disabled={busy || draft.code === ''} onClick={() => void useAsIntro()}>{busy ? '正在试跑…' : '当开机动画'}</button>
-        <button className="her-btn primary" disabled={busy || draft.code === ''} onClick={() => void useAsBackground()}>当 dsh 对话背景</button>
-        <button className={`her-btn${exporting ? ' on' : ''}`} disabled={draft.code === ''} onClick={() => setExporting(x => !x)}>📤 导出 GIF</button>
+        <button className="her-btn primary" disabled={busy || waiting !== undefined} title={waiting ?? '存进像素动画列表；以后再存就是更新它'} onClick={() => void saveAnd()}>{busy ? '正在试跑…' : draft.saved === undefined ? '💾 保存' : '💾 保存（更新）'}</button>
+        <button className="her-btn" disabled={busy || waiting !== undefined} title={waiting} onClick={() => void useAsIntro()}>当开机动画</button>
+        <button className="her-btn" disabled={busy || waiting !== undefined} title={waiting} onClick={() => void useAsBackground()}>当 dsh 对话背景</button>
+        <button className={`her-btn${exporting ? ' on' : ''}`} disabled={waiting !== undefined} title={waiting} onClick={() => setExporting(x => !x)}>📤 导出 GIF</button>
         <details className="her-ws-menu">
           <summary className="her-btn">更多</summary>
           <div>
-            <button className="her-btn small" disabled={busy || draft.code === ''} onClick={() => void saveAnd()}>{draft.saved === undefined ? '只存进列表' : '存进列表（更新）'}</button>
             <button className="her-btn small" disabled={draft.code === ''} onClick={exportJs}>导出 .js</button>
             <button className="her-btn small" onClick={() => {
               if (window.confirm('扔掉这个草稿？它的所有版本会放进 pixel-drafts/.removed，不会直接删掉；已经存进像素动画的不受影响。')) void herApi.draftRemove(id).then(onClose)
@@ -634,6 +646,7 @@ export function PixelWorkshop({ id, onClose, files }: { id: string; onClose: () 
           </div>
         </details>
       </div>
+      {waiting !== undefined && <p className="her-muted her-ws-waiting">{waiting}</p>}
       {note !== undefined && (
         <p className={note.kind === 'ok' ? 'her-ok' : 'her-danger'}>
           {note.text}

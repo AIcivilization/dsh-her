@@ -96,6 +96,14 @@ test('the AI hands in code; the page tries it; a version is made only when it ru
   assert.ok(chats.view(draft.id).items.some(i => i.who === 'note' && i.text === '✓ v1：小鲸鱼'))
   assert.match(dsh.prompt(), /正在播 v1/)
   assert.match((await dsh.tools().find(t => t.name === 'pixel_read')!.execute({})).text, /鲸尾出水/)
+  // Too big for the AI to write back whole: it is told so, and what to tell the user, not handed the file.
+  const big = `// big\nexport const info = { name: '大', grid: [64, 36], fps: 12, seconds: 0, color: 'mono' }\nconst PAD = '${'x'.repeat(150 * 1024)}'\nexport function frame(g) { g.clear(); g.set(1, 1, 1) }\n`
+  drafts.add(draft.id, big, '大文件')
+  const read = (await dsh.tools().find(t => t.name === 'pixel_read')!.execute({})).text
+  assert.match(read, /太大了/)
+  assert.match(read, /动起来/)
+  assert.ok(read.length < 2000, 'the file is not in it')
+  drafts.pick(draft.id, 1)
 
   // Not more than MAX_TRIES in one answer.
   for (let i = 2; i < MAX_TRIES; i++) {

@@ -9,7 +9,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
-import { cleanLook, DEFAULT_LOOK, PIXEL_LIMITS, wrapPixelCode, type PixelLook } from '../core/pixel.ts'
+import { cleanLook, DEFAULT_LOOK, wrapPixelCode, type PixelLook } from '../core/pixel.ts'
 
 export interface DraftVersion {
   n: number
@@ -133,7 +133,6 @@ export class PixelDrafts {
 
   /** A new version (shown at once), with `look` (or the draft's look now). The code must at least be a file we can wrap. */
   add(id: string, code: string, note: string, look?: unknown): DraftView {
-    if (new TextEncoder().encode(code).length > PIXEL_LIMITS.bytes) throw new Error(`文件太大：最多 ${PIXEL_LIMITS.bytes / 1024} KB`)
     const wrapped = wrapPixelCode(code)
     if (wrapped.script === undefined) throw new Error(wrapped.problems.join('；'))
     const file = this.read(id)

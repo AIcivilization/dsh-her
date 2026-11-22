@@ -210,7 +210,6 @@ export function PixelCard({ onSkin, pixel, apply }: { onSkin: () => void; pixel:
   const pickFile = async (list: FileList | null) => {
     const f = [...(list ?? [])][0]
     if (f === undefined) return
-    if (f.size > 400_000) return setProblems(['文件太大了：最多 200 KB'])
     void add(await f.text(), f.name.replace(/\.(m?js|txt)$/i, ''))
   }
 

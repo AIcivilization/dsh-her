@@ -419,7 +419,6 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
     '/pixels/code': async body => ({ code: rt.pixelsCode(str(body.id, '像素动画')) }),
     '/pixels/add': async body => {
       const code = str(body.code, '代码')
-      if (code.length > 400_000) throw new ApiError('文件太大了')
       return { ...rt.pixelsAdd({ name: typeof body.name === 'string' ? body.name : '', code, info: body.info, thumb: body.thumb, frameMs: body.frameMs }) }
     },
     '/pixels/remove': async body => ({ ...rt.pixelsRemove(str(body.id, '像素动画')) }),
@@ -428,7 +427,6 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
     '/pixels/draft/get': async body => ({ draft: rt.draftGet(str(body.id, '草稿')) }),
     '/pixels/draft/add': async body => {
       const code = str(body.code, '代码')
-      if (code.length > 400_000) throw new ApiError('文件太大了')
       return { draft: rt.draftAdd(str(body.id, '草稿'), code, typeof body.note === 'string' ? body.note : '', body.look) }
     },
     '/pixels/draft/pick': async body => {

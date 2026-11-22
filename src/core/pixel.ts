@@ -13,10 +13,36 @@ export const PIXEL_LIMITS = {
   fps: 30,
   /** The longest an opening clip may play. */
   seconds: 8,
-  bytes: 200 * 1024,
   /** What a frame should take, and what stops it. */
   frameMs: 8, hardFrameMs: 250, setupMs: 1500,
 } as const
+
+/**
+ * How big a file is: never refused (docs/像素导出设计.md §8). Playing, saving,
+ * sending to the desktop and making a GIF do not mind; dsh itself takes
+ * requests up to 300 MB. Two things do: an opening clip starts quicker small,
+ * and the AI reads the whole file and writes it all back to change it.
+ */
+export const PIXEL_SIZES = {
+  /** An opening clip: advised below this. */
+  intro: 200 * 1024,
+  /** Above this, changing it with the AI is slow and dear. */
+  aiHeavy: 40 * 1024,
+  /** Above this, the AI is not handed the file: it could not write it all back. */
+  aiTooBig: 100 * 1024,
+} as const
+
+/** The why, in the user's words, for the page. */
+export const SIZE_ABOUT = [
+  '文件多大都行：播放、存盘、发给桌面程序、导出 GIF，这些都不怕大，1 MB 也没问题。',
+  '当开机动画，建议 200 KB 以内：她每次出场都要先把它读进来、跑起来，小一点开得快。',
+  '想让 AI 改，文件越小越好：一个 100 多 KB 的文件，AI 光读一遍就要几万个 token，又贵又慢；改完还要把整个文件写回来，更不行，已经超过模型一次能写出的长度。所以就算不到 200 KB，视频转出来的大文件也已经很难让 AI 改了。',
+  '「动起来」里的动作不经过 AI，文件多大都能换。',
+]
+
+/** A file's size as people read it. */
+export const sizeText = (bytes: number): string => (bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`)
+export const codeBytes = (code: string): number => new TextEncoder().encode(code).length
 
 export type PixelStyle = 'blocks' | 'dots' | 'code'
 export const PIXEL_STYLES: PixelStyle[] = ['blocks', 'dots', 'code']
@@ -156,7 +182,6 @@ export const WRAP_LINES = 2
  */
 export function wrapPixelCode(code: string): { script?: string; problems: string[] } {
   const problems: string[] = []
-  if (new TextEncoder().encode(code).length > PIXEL_LIMITS.bytes) problems.push(`文件太大：最多 ${PIXEL_LIMITS.bytes / 1024} KB`)
   if (/^\s*import[\s{*'"]/m.test(code) || /\bimport\s*\(/.test(code)) problems.push('不能 import 别的文件：所有代码写在这一个文件里')
   let body = code
     .replace(/^(\s*)export\s+(?=(const|let|var|function|async\s+function|class)\b)/gm, '$1')

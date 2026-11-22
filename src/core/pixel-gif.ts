@@ -222,7 +222,7 @@ export function readGifSource(bytes: Uint8Array): GifSource | undefined {
         if (read === undefined) return undefined
         try {
           const raw = JSON.parse(new TextDecoder().decode(read.data)) as Record<string, unknown>
-          if (typeof raw.code !== 'string' || raw.code.length > 400_000) return undefined
+          if (typeof raw.code !== 'string') return undefined
           return { name: typeof raw.name === 'string' ? raw.name.slice(0, 40) : '', code: raw.code, ...(raw.look === undefined ? {} : { look: raw.look }) }
         } catch {
           return undefined

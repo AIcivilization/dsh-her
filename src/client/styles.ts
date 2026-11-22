@@ -642,6 +642,7 @@ a.her-btn.disabled{opacity:.45;pointer-events:none}
 .her-wheel-chip{align-self:flex-start;font-size:11px;padding:1px 8px;border-radius:999px;color:#fff;text-shadow:0 0 2px rgba(0,0,0,.6)}
 .her-ws-foot{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid ${LINE}}
 .her-ws-foot .her-input{flex:1 1 160px;width:auto;min-width:0}
+.her-ws-waiting{margin:8px 0 0;font-size:12px}
 @container (min-width:560px) and (max-width:719px), (min-width:1040px){.her-ws-side{display:grid;grid-template-columns:1fr 1fr;gap:12px 18px}}
 .her-ws-side .her-seg button{white-space:nowrap}
 .her-dropping{outline:2px dashed ${INK};outline-offset:-6px}
@@ -690,4 +691,8 @@ a.her-btn.disabled{opacity:.45;pointer-events:none}
 .her-ws-checks{display:flex;flex-wrap:wrap;gap:6px 14px}
 .her-ws-checks label{display:inline-flex;align-items:center;gap:5px;font-size:13px}
 .her-ws-checks i{font-style:normal;font-size:11px;color:${FAINT}}
+.her-ws-size{font-size:12px;color:${MUTED}}
+.her-ws-size>summary{cursor:pointer}
+.her-ws-size p{margin:6px 0 0;line-height:1.55}
+.her-ws-heavy{margin:0;padding:6px 8px;border-radius:8px;font-size:12px;line-height:1.55;color:${MUTED};background:${FIELD}}
 `

@@ -13,7 +13,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { pixelFormat } from '../core/pixel-spec.ts'
-import { cleanPixelInfo, PIXEL_STYLES, STYLE_NAME, wrapPixelCode, type PixelInfo } from '../core/pixel.ts'
+import { cleanPixelInfo, codeBytes, PIXEL_SIZES, PIXEL_STYLES, sizeText, STYLE_NAME, wrapPixelCode, type PixelInfo } from '../core/pixel.ts'
 import { sketchReport, type Sketch } from '../core/pixel-sketch.ts'
 import type { NativeTool } from './design-tools.ts'
 import type { DshServices, ModelRoute, ScopedContext, StreamFrame } from './her-session.ts'
@@ -390,7 +390,11 @@ export class PixelChats {
         const d = drafts.get(id)
         if (d.code === '') return '还没有画面：这是一个空草稿，直接按用户说的写一个新的。'
         const v = d.versions.find(x => x.n === d.current)
-        return `现在是 v${d.current}（${v?.note ?? ''}）。外观（用户在页面上调的，不在代码里）：画法 ${STYLE_NAME[d.look.style]}，颜色 ${colorName(d.look.color)}。\n\n代码：\n\`\`\`js\n${d.code}\n\`\`\``
+        const bytes = codeBytes(d.code)
+        // Too big to write back whole: the AI is told so, and what the user can do, instead of the file.
+        if (bytes > PIXEL_SIZES.aiTooBig) return `现在是 v${d.current}（${v?.note ?? ''}），文件约 ${sizeText(bytes)}，太大了：你读完再整个写回来，超过了一次能写出的长度，改不了。不要试，直接告诉用户：换动作用画面下面的「动起来」（不经过 AI）；想让你改，就在「用图片/用视频」里把格子调矮、帧数调少，重新转一次，文件小了再来。`
+        const heavy = bytes > PIXEL_SIZES.aiHeavy ? `\n\n注意：文件约 ${sizeText(bytes)}，比较大。交回来时 PICTURE、FRAMES 那些字符串要一字不差地照抄，只改动作那几行；写不完整会出错。` : ''
+        return `现在是 v${d.current}（${v?.note ?? ''}）。外观（用户在页面上调的，不在代码里）：画法 ${STYLE_NAME[d.look.style]}，颜色 ${colorName(d.look.color)}。${heavy}\n\n代码：\n\`\`\`js\n${d.code}\n\`\`\``
       }),
       tool('pixel_write', '交一份完整的新代码（整个文件）。会在用户的页面里试跑：出错就告诉你错在哪，通过了就存成新的一版开始播，并给你三帧字符画看看画得对不对。', {
         code: { type: 'string', description: '整个 .js 文件' },

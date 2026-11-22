@@ -9,7 +9,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { makeFrames, pictureBytes, type Picture, type Rgba } from '../core/pixel-picture.ts'
-import { PIXEL_LIMITS } from '../core/pixel.ts'
+import { PIXEL_SIZES, SIZE_ABOUT, sizeText } from '../core/pixel.ts'
 
 const HEIGHTS = [32, 48, 64, 96, 128]
 const FRAME_COUNTS = [6, 8, 12, 16, 24]
@@ -237,7 +237,7 @@ export function PicturePixel({ files, left, onUse, onCancel }: { files: File[]; 
   }, [picture])
 
   const bytes = picture === undefined ? 0 : pictureBytes(picture)
-  const tooBig = bytes > PIXEL_LIMITS.bytes * 0.95
+  const heavy = bytes > PIXEL_SIZES.aiHeavy
   const what = source?.kind === 'video' ? '视频' : source?.kind === 'gif' ? '动图' : source?.kind === 'pictures' ? `${files.length} 张图` : '图片'
 
   const summary = picture === undefined ? '' : `${what}转成 ${picture.w} × ${picture.h} 格${picture.frames.length > 1 ? `，${picture.frames.length} 帧` : ''}${picture.palette === undefined ? '' : `，${Object.keys(picture.palette).length} 色`}${picture.background === 'clear' ? '，透明底' : picture.background === 'cut' ? '，去掉了背景' : cut ? '，背景不是纯色，没去掉' : ''}`
@@ -259,7 +259,6 @@ export function PicturePixel({ files, left, onUse, onCancel }: { files: File[]; 
         </div>
         {picture !== undefined && (
           <div className="her-ws-picture-set">
-            {tooBig && <p className="her-danger" style={{ margin: 0 }}>太大了（约 {Math.round(bytes / 1024)} KB，最多 {PIXEL_LIMITS.bytes / 1024} KB）：少几帧，或者矮一点。</p>}
             {source?.kind === 'video' && source.duration !== undefined && source.duration > 2.2 && (
               <div className="her-ws-row">
                 <b>哪一段</b>
@@ -302,7 +301,11 @@ export function PicturePixel({ files, left, onUse, onCancel }: { files: File[]; 
               {color && <label><input type="checkbox" checked={edge} onChange={e => setEdge(e.target.checked)} /> 深色描边<i>轮廓更清楚</i></label>}
               {picture.background !== 'clear' && <label><input type="checkbox" checked={cut} onChange={e => setCut(e.target.checked)} /> 去掉纯色背景</label>}
             </div>
-            <button className="her-btn primary" disabled={busy || tooBig} onClick={() => { setBusy(true); void onUse(picture, source!.kind).finally(() => setBusy(false)) }}>{busy ? '…' : '放进草稿'}</button>
+            <details className="her-ws-size" open={heavy}>
+              <summary>文件约 {sizeText(bytes)}{bytes > PIXEL_SIZES.intro ? '：当开机动画有点大，AI 也很难改' : heavy ? '：AI 改起来会很吃力' : '：多大都行'}</summary>
+              {SIZE_ABOUT.map(line => <p key={line}>{line}</p>)}
+            </details>
+            <button className="her-btn primary" disabled={busy} onClick={() => { setBusy(true); void onUse(picture, source!.kind).finally(() => setBusy(false)) }}>{busy ? '…' : '放进草稿'}</button>
           </div>
         )}
       </div>

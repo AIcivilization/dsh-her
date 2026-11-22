@@ -45,7 +45,8 @@ test('every built-in animation reads, sets up and draws within its budget', () =
 test('a file is refused with a reason it can paste back: imports, default exports, a bad info', () => {
   assert.match(wrapPixelCode("import x from 'y'\nexport function frame(){}").problems.join(), /import/)
   assert.match(wrapPixelCode('export default { frame() {} }').problems.join(), /export default/)
-  assert.match(wrapPixelCode('x'.repeat(300 * 1024)).problems.join(), /太大/)
+  // No size is refused (docs/像素导出设计.md §8).
+  assert.deepEqual(wrapPixelCode(`export const info = {}\n// ${'x'.repeat(300 * 1024)}`).problems, [])
   const { problems } = cleanPixelInfo({ name: 'a', grid: [800, 600], fps: 60, seconds: -1, color: 'rainbow' })
   for (const word of ['384', 'fps', 'seconds', 'color']) assert.ok(problems.some(p => p.includes(word)), word)
   assert.match(cleanPixelInfo(undefined).problems.join(), /info/)
