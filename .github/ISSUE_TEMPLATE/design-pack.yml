@@ -1,5 +1,5 @@
-name: 设计包投稿
-description: 你做了一个角色、皮肤、开机动画或像素动画，想让更多人看到
+name: 作品投稿
+description: 你做了一个皮肤、角色、像素动画或像素表情，想让更多人看到
 labels: [设计包]
 body:
   - type: markdown
@@ -24,7 +24,7 @@ body:
         - 编排
         - 皮肤
         - 开机动画（视频）
-        - 像素动画
+        - 像素动画、像素表情
         - 提示词
     validations:
       required: true

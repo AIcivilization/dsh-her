@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>dsh-her · 鲸鱼娘的身体引擎</title>
-<meta name="description" content="鲸鱼娘的身体引擎：住在壁纸里、浮在桌面上、住在网页和手机里，会说话、会听、会先开口、记得你。还能把照片、视频变成会动的像素表情，导出 GIF 发微信。DeepSeek Harness (dsh) 插件，开源，欢迎一起来做。">
+<meta name="description" content="鲸鱼娘的身体引擎：住在壁纸里、浮在桌面上、住在网页和手机里，会说话、会听、会先开口、记得你。还能把照片、视频变成会动的像素表情，导出 GIF 发微信。DeepSeek Harness (dsh) 插件，开源，欢迎一起来玩。">
 <meta property="og:title" content="dsh-her · 鲸鱼娘的身体引擎">
 <meta property="og:description" content="住在壁纸里、浮在桌面上、住在网页和手机里，会说话、会听、会先开口、记得你。">
 <meta name="theme-color" content="#06142b">
@@ -22,7 +22,7 @@
     <a href="#what">她能做什么</a>
     <a href="#install">安装</a>
     <a href="#make">做设计</a>
-    <a href="#join">一起来做</a>
+    <a href="#join">一起来玩</a>
     <a class="star" href="https://github.com/AIcivilization/dsh-her">⭐ GitHub</a>
   </nav>
 </header>
@@ -36,7 +36,7 @@
     <div class="actions">
       <a class="btn" href="#install">怎么装</a>
       <a class="btn wechat" href="#stickers">做像素表情</a>
-      <a class="btn ghost" href="#join">一起来做</a>
+      <a class="btn ghost" href="#join">一起来玩</a>
     </div>
   </div>
   <figure class="sea-box">
@@ -128,31 +128,35 @@
 
 
 <section id="join" class="band alt">
-  <h2>一起来做</h2>
-  <p class="sub">不用打招呼，也不用加群。挑一件事，做好了提 PR 或者投稿就行。</p>
-  <div class="two">
+  <h2>一起来玩</h2>
+  <p class="sub">大家交流的是创意：皮肤、形象、好玩的像素动画。不用打招呼，也不用加群，做好了分享出来就行。</p>
+  <div class="grid">
     <div class="card">
-      <b>💻 写代码</b>
-      <p>TypeScript，大脑是 dsh 插件，身体是 Electron 桌面程序和网页。想要的帮助：英文界面、Intel 芯片的 Mac、Linux 桌面程序、新的声音……</p>
+      <b>🎨 皮肤和形象</b>
+      <p>做一个角色、一套皮肤、一段开机动画，在设置页导出设计包，放在你自己的仓库或网盘里，填一张投稿表。好的会放上作品墙。</p>
       <p class="row">
-        <a class="btn small" href="https://github.com/AIcivilization/dsh-her/labels/good%20first%20issue">新手可做</a>
-        <a class="btn small ghost" href="https://github.com/AIcivilization/dsh-her/labels/help%20wanted">欢迎帮忙</a>
+        <a class="btn small" href="https://github.com/AIcivilization/dsh-her/issues/new?template=design-pack.yml">投稿作品</a>
+        <a class="btn small ghost" href="https://github.com/AIcivilization/dsh-her/blob/main/docs/设计包格式.md">设计包格式</a>
       </p>
     </div>
     <div class="card">
-      <b>🖌️ 做设计</b>
-      <p>角色、皮肤、开机动画、像素动画、提示词。做好放在你自己的仓库或网盘，填一张投稿表，好的会放上作品墙。</p>
+      <b>👾 像素动画和表情</b>
+      <p>导出的 GIF 里藏着动画文件：发给朋友，对方拖进像素工坊就能接着改。做了好玩的，也欢迎投稿上作品墙。</p>
       <p class="row">
-        <a class="btn small" href="https://github.com/AIcivilization/dsh-her/issues/new?template=design-pack.yml">投稿设计包</a>
-        <a class="btn small ghost" href="https://github.com/AIcivilization/dsh-her/labels/%E8%AE%BE%E8%AE%A1%E5%8C%85">看看大家的</a>
+        <a class="btn small wechat" href="#stickers">怎么做表情</a>
+        <a class="btn small ghost" href="https://github.com/AIcivilization/dsh-her/issues/new?template=design-pack.yml">投稿</a>
+      </p>
+    </div>
+    <div class="card">
+      <b>💬 遇到问题、有想法</b>
+      <p>哪里不好用、出错了，或者想让她多会一件事，都可以告诉我们。代码由我们来改。</p>
+      <p class="row">
+        <a class="btn small" href="https://github.com/AIcivilization/dsh-her/issues/new?template=bug.yml">报告问题</a>
+        <a class="btn small ghost" href="https://github.com/AIcivilization/dsh-her/issues/new?template=idea.yml">提想法</a>
       </p>
     </div>
   </div>
-  <ol class="steps compact">
-    <li><b>挑一件事</b><span>在 issue 下留一句"我来做"，别人就不会重复。</span></li>
-    <li><b>照着说明做</b><span>怎么跑起来、怎么测、有哪些规矩，都在 <a href="https://github.com/AIcivilization/dsh-her/blob/main/CONTRIBUTING.md">参与说明</a> 里。</span></li>
-    <li><b>提 PR 或投稿</b><span>CI 全过、看过就合并。合并过两三次的人，会被邀请成为仓库的协作者。</span></li>
-  </ol>
+  <p class="more">怎么做、怎么分享，见 <a href="https://github.com/AIcivilization/dsh-her/blob/main/CONTRIBUTING.md">一起来玩</a>。谢谢 <a href="https://github.com/wazgii">wazgii</a> 找到并说清楚了她说话时丢句、叠音的问题。</p>
 </section>
 
 </main>

@@ -14,9 +14,3 @@ body:
     attributes:
       label: 为什么想要
       description: 现在哪里不方便，或者有了它会好在哪。
-  - type: checkboxes
-    id: help
-    attributes:
-      label: 你愿意自己来做吗
-      options:
-        - label: 我想自己做，做好了提 PR

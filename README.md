@@ -41,6 +41,14 @@
 
 不收集任何使用数据。记忆和设置都存在你自己的电脑上，API key 存在系统钥匙串里。
 
+## 一起来玩
+
+做了好玩的皮肤、形象、像素动画或像素表情，分享出来：[怎么做、怎么分享](https://github.com/AIcivilization/dsh-her/blob/main/CONTRIBUTING.md) · [作品投稿](https://github.com/AIcivilization/dsh-her/issues/new?template=design-pack.yml) · [作品墙](https://aicivilization.github.io/dsh-her/#works)。
+
+## 致谢
+
+- [@wazgii](https://github.com/wazgii)：找到了她说话时的两个问题：主动说的短句没有声音、两句话叠在一起播，把原因一步步查清楚，还给出了修法（[#1](https://github.com/AIcivilization/dsh-her/issues/1)）。
+
 ---
 
-[使用说明](https://github.com/AIcivilization/dsh-her/blob/main/docs/使用说明.md) · [一起来做](https://github.com/AIcivilization/dsh-her/blob/main/CONTRIBUTING.md) · MIT 许可
+[使用说明](https://github.com/AIcivilization/dsh-her/blob/main/docs/使用说明.md) · [一起来玩](https://github.com/AIcivilization/dsh-her/blob/main/CONTRIBUTING.md) · MIT 许可
