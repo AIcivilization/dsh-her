@@ -6,6 +6,11 @@
  *
  * `cut()` stops at once and says where: which sentence, and how far into it,
  * so the brain can tell her what you actually heard.
+ *
+ * One sentence at a time, decoding included: while a sentence's audio is
+ * being decoded nothing else starts and the reply does not end (issue #1: a
+ * short line's `end` arriving mid-decode ended the reply and its audio was
+ * thrown away; a second sentence arriving mid-decode played over the first).
  */
 
 import type { Cue } from '../../src/protocol/index.ts'
@@ -41,6 +46,8 @@ export class SpeechPlayer {
   private queue: SpeechSegment[] = []
   private ended = false
   private playing: Playing | undefined
+  /** A sentence taken from the queue and being made ready (decoded); cleared by stop(), so a late decode knows it was cut off. */
+  private starting: { seq: number } | undefined
   private readonly events: SpeechEvents
 
   constructor(events: SpeechEvents, muted: boolean) {
@@ -52,7 +59,7 @@ export class SpeechPlayer {
 
   /** Is she saying something (or about to)? */
   get speaking(): boolean {
-    return this.playing !== undefined || this.queue.length > 0
+    return this.playing !== undefined || this.starting !== undefined || this.queue.length > 0
   }
 
   /** The reply being played, if any. */
@@ -69,13 +76,13 @@ export class SpeechPlayer {
   seg(uid: string, segment: SpeechSegment): void {
     if (uid !== this.uid) return
     this.queue.push(segment)
-    if (this.playing === undefined) void this.next()
+    if (this.playing === undefined && this.starting === undefined) void this.next()
   }
 
   end(uid: string): void {
     if (uid !== this.uid) return
     this.ended = true
-    if (this.playing === undefined && this.queue.length === 0) this.finish()
+    if (this.playing === undefined && this.starting === undefined && this.queue.length === 0) this.finish()
   }
 
   cancel(uid: string): void {
@@ -86,7 +93,7 @@ export class SpeechPlayer {
   cut(): { uid: string; seq: number; playedMs: number } | undefined {
     const uid = this.uid
     const playing = this.playing
-    const nextSeq = this.queue[0]?.seq
+    const nextSeq = this.starting?.seq ?? this.queue[0]?.seq
     this.stop()
     if (uid === undefined) return undefined
     if (playing !== undefined) return { uid, seq: playing.seq, playedMs: Math.round(performance.now() - playing.startedAt) }
@@ -97,6 +104,7 @@ export class SpeechPlayer {
   private stop(): void {
     const playing = this.playing
     this.playing = undefined
+    this.starting = undefined
     this.queue = []
     if (playing?.timer !== undefined) window.clearTimeout(playing.timer)
     if (playing?.source !== undefined) {
@@ -111,6 +119,7 @@ export class SpeechPlayer {
   }
 
   private async next(): Promise<void> {
+    if (this.starting !== undefined) return
     const uid = this.uid
     const segment = this.queue.shift()
     if (uid === undefined) return
@@ -118,6 +127,8 @@ export class SpeechPlayer {
       if (this.ended) this.finish()
       return
     }
+    const token = { seq: segment.seq }
+    this.starting = token
     let buffer: AudioBuffer | undefined
     if (segment.audio !== undefined) {
       const bytes = segment.audio
@@ -128,8 +139,9 @@ export class SpeechPlayer {
         buffer = undefined
       }
     }
-    // Cut off while decoding.
-    if (uid !== this.uid) return
+    // Cut off while decoding (stop() cleared the mark; a new reply may have begun).
+    if (this.starting !== token || uid !== this.uid) return
+    this.starting = undefined
     const playing: Playing = { seq: segment.seq, startedAt: performance.now(), durationMs: buffer === undefined ? segment.durationMs : buffer.duration * 1000 }
     this.playing = playing
     const done = () => {
