@@ -1,7 +1,9 @@
 /**
  * A 像素动画 behind dsh's conversation (docs/像素动画设计.md §7): a layer in
- * the chat column, under its content and over its own background, taking no
- * clicks. It plays once when something happens (a click on blank space, a
+ * the conversation (inside its root, the way dsh's own home whale is: the
+ * root paints an opaque background, so a layer outside it is never seen),
+ * under its content, taking no clicks. While it is worn, dsh's own whale is
+ * hidden: a click on blank space plays ours instead. It plays once when something happens (a click on blank space, a
  * message sent, dsh done answering, the page opening, every few minutes), or
  * over and over. Not on phones, not with reduced motion, paused while the tab
  * is hidden. Plain DOM: it lives in dsh's page, outside our React tree.
@@ -12,6 +14,10 @@ import { herApi } from './api.ts'
 import { inkOf, PixelFrame } from './pixel/host.ts'
 
 const CHAT_COLUMN = '[class*="_centerCol"]'
+/** The conversation's root (its class is a hash; its phase attribute is not): hero, settling or active. */
+const CONVERSATION = '[class*="_root"][data-phase]'
+/** dsh's own home whale. */
+const DSH_WHALE_HIDDEN = '[data-home-whale]{visibility:hidden!important}'
 const COMPOSER = '[class*="_composerSeat"]'
 /** dsh's "still answering" mark. */
 const RUNNING = '[class*="_runningIcon"]'
@@ -31,6 +37,7 @@ let wasRunning = false
 let watchTimer: ReturnType<typeof setInterval> | undefined
 let everyTimer: ReturnType<typeof setInterval> | undefined
 let themeWatch: MutationObserver | undefined
+let whaleHider: HTMLStyleElement | undefined
 const codes = new Map<string, string>()
 
 const phone = () => matchMedia('(hover: none) and (pointer: coarse)').matches
@@ -47,10 +54,19 @@ async function codeOf(id: string): Promise<string | undefined> {
   return result.code
 }
 
-/** The layer in the chat column there is now (dsh may have drawn a new one). */
+/** The layer in the conversation there is now (dsh draws a new one for each); the chat column it is in. */
 function attach(): HTMLElement | undefined {
   const column = document.querySelector<HTMLElement>(CHAT_COLUMN)
   if (column === null || worn === undefined) return undefined
+  // In the conversation's root, over its opaque background; the column itself when there is none (her own page).
+  const host = column.querySelector<HTMLElement>(CONVERSATION) ?? column
+  if (layer !== undefined && layer.parentElement !== host) {
+    // A new conversation (dsh drew a new root): a new layer there. Moving the old one would reload its frame mid-play.
+    frame?.destroy()
+    layer.remove()
+    layer = frame = undefined
+    playing = false
+  }
   if (layer === undefined) {
     layer = document.createElement('div')
     layer.className = 'dsh-her-pixel-bg'
@@ -65,11 +81,11 @@ function attach(): HTMLElement | undefined {
     })
     layer.append(frame.el)
   }
-  if (layer.parentElement !== column) {
-    // Its own stacking: -1 lands over the column's background and under its content.
-    if (getComputedStyle(column).position === 'static') column.style.position = 'relative'
-    column.style.isolation = 'isolate'
-    column.append(layer)
+  if (layer.parentElement !== host) {
+    // Its own stacking: -1 lands over the host's background and under its content (dsh isolates the root only on the home).
+    if (getComputedStyle(host).position === 'static') host.style.position = 'relative'
+    host.style.isolation = 'isolate'
+    host.append(layer)
   }
   layer.style.opacity = String(worn.opacity)
   return column
@@ -132,6 +148,10 @@ function start(): void {
   document.addEventListener('click', onSendClick, true)
   document.addEventListener('keydown', onKey, true)
   watchTimer = setInterval(watch, 1000)
+  whaleHider = document.createElement('style')
+  whaleHider.dataset.dshHer = 'hide-home-whale'
+  whaleHider.textContent = DSH_WHALE_HIDDEN
+  document.head.append(whaleHider)
   // Light and dark: the theme's colour again.
   themeWatch = new MutationObserver(() => { if (worn?.look.color === 'theme') frame?.setInk(inkNow()) })
   themeWatch.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme', 'style'] })
@@ -147,6 +167,8 @@ function stopAll(): void {
   watchTimer = everyTimer = undefined
   themeWatch?.disconnect()
   themeWatch = undefined
+  whaleHider?.remove()
+  whaleHider = undefined
   frame?.destroy()
   frame = undefined
   layer?.remove()
