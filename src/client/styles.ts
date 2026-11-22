@@ -23,6 +23,11 @@ const ON_INK = 'var(--her-on-ink)'
 /** A wash of a colour over whatever is behind. */
 const tint = (color: string, percent: number) => `color-mix(in srgb, ${color} ${percent}%, transparent)`
 const FIELD = tint(TEXT, 5)
+/** What is made to stand out (像素动画 in the menu and the overview): a blue to pink sweep, purple marks; lighter in the dark. */
+const FEATURE = { sweep: 'linear-gradient(90deg,#2f6fe0,#8a4fe8 55%,#e04f9a)', mark: '#8a4fe8', darkSweep: 'linear-gradient(90deg,#86b4ff,#b993ff 55%,#ff8cc6)', darkMark: '#b993ff' }
+/** WeChat's green, for what makes a WeChat sticker; a darker press, a text green that reads on white and on dark. */
+const WECHAT = { fill: '#07c160', press: '#06ad56', text: '#07a554', darkText: '#3ddc84' }
+const DARK = 'body[data-ds-dark-theme]'
 const CHEVRON = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%23888' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3 4.5 3 3 3-3'/%3E%3C/svg%3E")`
 
 export const STYLES = `
@@ -49,6 +54,22 @@ body[data-ds-dark-theme] .her-page{--her-ink:var(--her-bar-accent,#86b4ff);--her
 .her-site i{font-style:normal}
 .her-site:hover{background:${tint(INK, 22)}}
 .her-site:focus-visible{outline:2px solid ${INK};outline-offset:2px}
+.her-nav-item.feature span{flex:none;font-weight:700;background:${FEATURE.sweep};-webkit-background-clip:text;background-clip:text;color:transparent}
+.her-nav-item.feature .her-icon{color:${FEATURE.mark}}
+.her-nav-item.feature .her-dot{margin-left:auto}
+.her-nav-badge{margin-left:auto;flex:none;padding:1px 6px;border-radius:999px;background:${WECHAT.fill};color:#fff;font-size:10px;font-weight:700;line-height:16px;letter-spacing:.02em}
+${DARK} .her-nav-item.feature span{background-image:${FEATURE.darkSweep}}
+${DARK} .her-nav-item.feature .her-icon{color:${FEATURE.darkMark}}
+.her-tile.feature{border-color:${tint(FEATURE.mark, 45)};background:linear-gradient(135deg,${tint('#2f6fe0', 8)},${tint('#e04f9a', 8)})}
+.her-tile.feature .her-icon,.her-tile.feature .her-tile-label{color:${FEATURE.mark}}
+.her-tile.feature .her-tile-label{font-weight:700}
+${DARK} .her-tile.feature .her-icon,${DARK} .her-tile.feature .her-tile-label{color:${FEATURE.darkMark}}
+.her-btn.wechat{background:${WECHAT.fill};border-color:${WECHAT.fill};color:#fff;font-weight:700}
+.her-btn.wechat:hover{background:${WECHAT.press};border-color:${WECHAT.press}}
+.her-btn.wechat.on{box-shadow:0 0 0 2px ${tint(WECHAT.fill, 35)}}
+.her-btn.wechat:disabled{opacity:.45}
+.her-wechat-word{color:${WECHAT.text};font-weight:700}
+${DARK} .her-wechat-word{color:${WECHAT.darkText}}
 .her-nav-link{text-decoration:none}
 .her-nav-link .her-icon:last-child{opacity:.6}
 .her-power{flex:none;display:flex;align-items:center;gap:10px;padding:8px 12px 8px 14px;border-radius:999px;border:1px solid ${LINE};background:${LAYER1};cursor:pointer;font-weight:600}

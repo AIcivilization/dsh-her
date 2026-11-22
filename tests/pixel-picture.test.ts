@@ -133,10 +133,38 @@ test('a green screen goes everywhere, shut-in patches too, and its green is take
   assert.equal(cutBackground(img), true)
   const at = (x: number, y: number) => Array.from(img.data.subarray((y * 60 + x) * 4, (y * 60 + x) * 4 + 4))
   assert.equal(at(30, 30)[3], 0, 'the shut-in green is gone')
-  assert.deepEqual(at(36, 30), [180, 180, 150, 255], 'the tinted edge has no more green than red')
+  assert.deepEqual(at(36, 30), [180, 165, 150, 255], 'the tinted edge has no more green than red and blue on average')
   assert.deepEqual(at(30, 18), [220, 160, 130, 255], 'skin away from the screen is untouched')
   // A white background still keeps a white patch inside.
   const white = art()
   cutBackground(white)
   assert.equal(white.data[(50 * 200 + 50) * 4 + 3], 255)
+})
+
+test('a green screen in uneven light goes, and what is see-through in front of it goes as far as the green shows', () => {
+  // The screen darker towards the bottom (a shadow), a bubble (seven tenths white) and a ribbon (blue, mostly see-through) in front.
+  const img = picture(80, 60, [40, 200, 60, 255], (x, y) => {
+    if (x >= 30 && x < 50 && y >= 15 && y < 45) return [230, 180, 160, 255]
+    if (x >= 5 && x < 15 && y >= 5 && y < 15) return [190, 238, 196, 255]
+    if (x >= 60 && x < 75 && y >= 10 && y < 50) return [60, 170, 140, 255]
+    return undefined
+  })
+  for (let y = 40; y < 60; y++) for (let x = 0; x < 80; x++) {
+    const i = (y * 80 + x) * 4
+    if (img.data[i + 1] === 200) img.data.set([25, 120, 35, 255], i)
+  }
+  assert.equal(cutBackground(img), true)
+  const at = (x: number, y: number) => Array.from(img.data.subarray((y * 80 + x) * 4, (y * 80 + x) * 4 + 4))
+  assert.equal(at(5, 55)[3], 0, 'the screen in shadow is gone')
+  assert.equal(at(70, 2)[3], 0, 'the lit screen is gone')
+  assert.deepEqual(at(40, 30), [230, 180, 160, 255], 'skin is untouched')
+  const bubble = at(10, 10)
+  assert.ok(bubble[3]! > 0 && bubble[3]! < 255, `the bubble is part see-through (${bubble[3]})`)
+  assert.ok(bubble[1]! <= (bubble[0]! + bubble[2]!) / 2, 'and not green')
+  const ribbon = at(67, 30)
+  assert.ok(ribbon[1]! <= (ribbon[0]! + ribbon[2]!) / 2 + 0.5, 'the ribbon keeps no green tint')
+  // A red background is not keyed this way (it would take skin): the flood from the edge as before.
+  const red = picture(40, 40, [220, 30, 30, 255], (x, y) => (x >= 10 && x < 30 && y >= 10 && y < 30 ? [230, 170, 150, 255] : undefined))
+  assert.equal(cutBackground(red), true)
+  assert.equal(red.data[(20 * 40 + 20) * 4 + 3], 255, 'skin on red stays')
 })

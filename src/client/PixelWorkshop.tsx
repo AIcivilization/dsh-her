@@ -635,7 +635,7 @@ export function PixelWorkshop({ id, onClose, files }: { id: string; onClose: () 
         <button className="her-btn primary" disabled={busy || waiting !== undefined} title={waiting ?? '存进像素动画列表；以后再存就是更新它'} onClick={() => void saveAnd()}>{busy ? '正在试跑…' : draft.saved === undefined ? '💾 保存' : '💾 保存（更新）'}</button>
         <button className="her-btn" disabled={busy || waiting !== undefined} title={waiting} onClick={() => void useAsIntro()}>当开机动画</button>
         <button className="her-btn" disabled={busy || waiting !== undefined} title={waiting} onClick={() => void useAsBackground()}>当 dsh 对话背景</button>
-        <button className={`her-btn${exporting ? ' on' : ''}`} disabled={waiting !== undefined} title={waiting} onClick={() => setExporting(x => !x)}>📤 导出 GIF</button>
+        <button className={`her-btn wechat${exporting ? ' on' : ''}`} disabled={waiting !== undefined} title={waiting ?? '导出成 GIF：加到微信表情、发给朋友'} onClick={() => setExporting(x => !x)}>📤 导出 GIF · 微信表情</button>
         <details className="her-ws-menu">
           <summary className="her-btn">更多</summary>
           <div>

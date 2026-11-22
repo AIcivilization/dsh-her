@@ -232,7 +232,7 @@ export function PixelCard({ onSkin, pixel, apply }: { onSkin: () => void; pixel:
           <input ref={photos} type="file" multiple accept={PICTURE_ACCEPT} hidden onChange={e => { const list = [...(e.target.files ?? [])]; e.target.value = ''; void makeFrom(list) }} />
           <input ref={videos} type="file" accept={VIDEO_ACCEPT} hidden onChange={e => { const list = [...(e.target.files ?? [])]; e.target.value = ''; void makeFrom(list) }} />
         </div>
-        <p className="her-muted">把你、你的猫、一段视频变成会动的像素画，或者进像素工坊掷骰子、跟 AI 说。做好了当开机动画、当 dsh 对话的背景，或者导出 GIF 做微信表情。</p>
+        <p className="her-muted">把你、你的猫、一段视频变成会动的像素画，或者进像素工坊掷骰子、跟 AI 说。做好了 <b className="her-wechat-word">导出 GIF 发微信当表情</b>，也可以当开机动画、当 dsh 对话的背景。</p>
         <div className="her-grid her-pixels">
           {view.drafts.filter(d => d.saved === undefined).map(d => (
             <div key={d.id} className="her-pixel draft">
@@ -254,7 +254,7 @@ export function PixelCard({ onSkin, pixel, apply }: { onSkin: () => void; pixel:
                 <small>{uses.length > 0 ? `✓ ${uses.join('、')}` : item.builtin ? '自带' : describe(infoOf(item))}</small>
                 <span className="her-row" style={{ margin: 0 }}>
                   <button className="her-btn small" onClick={() => void make(item.id)}>{item.builtin ? '照着做' : '改一改'}</button>
-                  <button className={`her-btn small${exporting?.id === item.id ? ' on' : ''}`} onClick={() => void exportOf(item)}>导出 GIF</button>
+                  <button className={`her-btn small wechat${exporting?.id === item.id ? ' on' : ''}`} title="导出成 GIF：加到微信表情、发给朋友" onClick={() => void exportOf(item)}>📤 做表情</button>
                   {!item.builtin && (
                     <button className="her-btn small" title="移走" onClick={() => {
                       if (window.confirm(`移走「${item.name}」？它会放进 pixels/.removed，不会直接删掉；用着它的地方改回自带的。`)) void herApi.pixelsRemove(item.id).then(r => take(r, '移走了。'))

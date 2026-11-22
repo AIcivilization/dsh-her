@@ -134,6 +134,8 @@ export interface Tile {
   value: string
   /** A plain on/off this page has, changed right here. */
   toggle?: { on: boolean; set: (on: boolean) => void; disabled?: boolean }
+  /** Made to stand out. */
+  feature?: boolean
 }
 
 /** Every page, grouped as the menu is, with what it is set to now. */
@@ -146,7 +148,7 @@ export function AllSettings({ groups, go, foot }: { groups: Array<{ title: strin
           <div className="her-ov-title">{group.title}</div>
           <div className="her-tiles">
             {group.tiles.map(tile => (
-              <div key={tile.label} className={`her-tile her-ov-tile${tile.toggle === undefined ? '' : ' has-toggle'}`}>
+              <div key={tile.label} className={`her-tile her-ov-tile${tile.toggle === undefined ? '' : ' has-toggle'}${tile.feature === true ? ' feature' : ''}`}>
                 <button className="her-ov-go" onClick={() => go(tile.to)} aria-label={`${tile.label}：${tile.value}`}>
                   <Icon name={tile.icon} />
                   <span className="her-tile-label">{tile.label}</span>

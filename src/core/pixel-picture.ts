@@ -59,8 +59,37 @@ function edges(w: number, h: number): number[] {
 }
 
 /**
+ * A green or blue screen keyed softly (docs/像素导出设计.md §9): how much
+ * the screen's channel beats the other two, as a share of how much it does
+ * on the screen itself, is how see-through a pixel is — so shadows and
+ * uneven light on the screen go too, and what is half see-through in front
+ * of it (bubbles, a water ribbon, hair) goes as far as the screen shows
+ * through. Then the screen's tint is taken out of what is left: its channel
+ * no higher than the other two's average. Whether it was a screen.
+ */
+export function keyScreen(img: Rgba, screen: [number, number, number], lo = 0.18, hi = 0.5): boolean {
+  const { data, w, h } = img
+  const k = screen.indexOf(Math.max(...screen))
+  const [o1, o2] = [0, 1, 2].filter(c => c !== k) as [number, number]
+  const strength = screen[k]! - Math.max(screen[o1]!, screen[o2]!)
+  if ((k !== 1 && k !== 2) || strength < 50) return false
+  const spillAt = (i: number) => (data[i + k]! - Math.max(data[i + o1]!, data[i + o2]!)) / strength
+  // Most of the edge has to be the screen.
+  const border = edges(w, h)
+  if (border.filter(p => spillAt(p * 4) >= hi).length < border.length * 0.5) return false
+  for (let i = 0; i < data.length; i += 4) {
+    const t = Math.min(1, Math.max(0, (spillAt(i) - lo) / (hi - lo)))
+    data[i + 3] = Math.round(data[i + 3]! * (1 - t * t * (3 - 2 * t)))
+    const avg = (data[i + o1]! + data[i + o2]!) / 2
+    if (data[i + k]! > avg) data[i + k] = avg
+  }
+  return true
+}
+
+/**
  * Take away the background: the colour most of the edge has, and everything
- * of that colour joined to the edge. Whether there was one.
+ * of that colour joined to the edge. A green or blue screen is keyed softly
+ * instead (keyScreen). Whether there was one.
  */
 export function cutBackground(img: Rgba, tolerance = 48): boolean {
   const { data, w, h } = img
@@ -82,6 +111,9 @@ export function cutBackground(img: Rgba, tolerance = 48): boolean {
   for (const c of counts.values()) if (top === undefined || c.n > top.n) top = c
   if (top === undefined) return false
   const [br, bg, bb] = [top.r / top.n, top.g / top.n, top.b / top.n]
+  // A bright, strong colour no one wears by chance: a green or blue screen is keyed softly.
+  const vivid = Math.max(br, bg, bb) - Math.min(br, bg, bb) >= 90
+  if (vivid && keyScreen(img, [br, bg, bb])) return true
   const near = (p: number) => {
     const i = p * 4
     if (data[i + 3]! < 128) return true
@@ -103,12 +135,10 @@ export function cutBackground(img: Rgba, tolerance = 48): boolean {
       stack.push(q)
     }
   }
-  // A green or blue screen: a bright, strong colour no one wears by chance.
-  // Then the patches it leaves shut in (between an arm and the body) go too,
-  // and the screen's colour that has spilt onto the edge is taken out.
-  const channels = [br, bg, bb]
-  const key = channels.indexOf(Math.max(br, bg, bb))
-  if (Math.max(br, bg, bb) - Math.min(br, bg, bb) < 90) return true
+  // Another strong colour (red, orange): the patches it leaves shut in go too,
+  // and the colour that has spilt onto the edge is taken out.
+  if (!vivid) return true
+  const key = [br, bg, bb].indexOf(Math.max(br, bg, bb))
   for (let p = 0; p < w * h; p++) if (near(p)) data[p * 4 + 3] = 0
   const gone = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && data[(y * w + x) * 4 + 3]! < 128
   for (let y = 0; y < h; y++) {

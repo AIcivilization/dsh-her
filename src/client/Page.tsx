@@ -204,6 +204,9 @@ function Wizard({ state, apply, onDone }: { state: StateView; apply: Apply; onDo
 type Section = 'home' | 'persona' | 'voice' | 'memory' | 'look' | 'stage' | 'library' | 'guide' | 'skin' | 'pixels' | 'designs' | 'workshop' | 'speak' | 'initiative' | 'talk' | 'model' | 'about'
 type Tone = 'ok' | 'warn' | 'bad' | 'off'
 
+/** Menu items made to stand out, with a word beside them. */
+const FEATURED: Partial<Record<Section, string>> = { pixels: '做表情' }
+
 const GROUPS: Array<{ title?: string; items: Array<{ id: Section; label: string; icon: string }> }> = [
   { items: [{ id: 'home', label: '总览', icon: 'home' }] },
   { title: '她', items: [{ id: 'persona', label: '人设', icon: 'persona' }, { id: 'voice', label: '声音', icon: 'voice' }, { id: 'memory', label: '记忆', icon: 'memory' }] },
@@ -223,7 +226,7 @@ const ABOUT: Record<Section, string> = {
   library: '编排用的图片、视频和 SVG 都放在这里，还有她的三视图。',
   guide: '要做哪些图和视频、多大、有什么要求，每一样都有能直接复制的提示词。',
   skin: '换整个 dsh 的样子，和她出场时播的开机动画。',
-  pixels: '用代码画的像素动画：放在 dsh 对话后面，或者当开机动画。让大模型照着说明写，传上来就能用。',
+  pixels: '把照片、视频变成会动的像素画：导出 GIF 发微信当表情，或者放在 dsh 对话后面、当开机动画。',
   designs: '别人做的角色、皮肤、开机动画，照着设计包格式做好，装进来就能用；你的她也能导出给别人。',
   workshop: '从头做一个自己的形象：照着每一步准备图片和视频，再导入。',
   speak: '怎么叫她、怎么跟她说话，还有麦克风好不好用。',
@@ -286,9 +289,10 @@ function Manage({ state, apply, onWizard }: { state: StateView; apply: Apply; on
             <div key={i} className="her-nav-group">
               {group.title !== undefined && <div className="her-nav-title">{group.title}</div>}
               {group.items.map(item => (
-                <button key={item.id} className={`her-nav-item${section === item.id ? ' on' : ''}`} aria-current={section === item.id ? 'page' : undefined} onClick={() => go(item.id)}>
+                <button key={item.id} className={`her-nav-item${section === item.id ? ' on' : ''}${FEATURED[item.id] === undefined ? '' : ' feature'}`} aria-current={section === item.id ? 'page' : undefined} onClick={() => go(item.id)}>
                   <Icon name={item.icon} />
                   <span>{item.label}</span>
+                  {FEATURED[item.id] !== undefined && <b className="her-nav-badge">{FEATURED[item.id]}</b>}
                   {dots[item.id] !== undefined && <i className={`her-dot ${dots[item.id]}`} />}
                 </button>
               ))}
@@ -511,7 +515,7 @@ function Home({ state, apply, go }: { state: StateView; apply: Apply; go: (secti
       { icon: 'library', label: '素材库', value: `三视图${state.sheet === null ? '还没有' : '有'} · 小头像${body.web.avatar === undefined ? '还没有' : '有'}`, to: 'library' },
       { icon: 'guide', label: '素材指南', value: '每样素材的尺寸和提示词', to: 'guide' },
       { icon: 'skin', label: '皮肤', value: state.skin ?? 'dsh 原样', to: 'skin' },
-      { icon: 'pixel', label: '像素动画', value: pixelCount === undefined ? '用代码画的小动画' : `${pixelCount.own} 个自己做的${pixelCount.drafts > 0 ? ` · ${pixelCount.drafts} 个没做完` : ''}`, to: 'pixels' },
+      { icon: 'pixel', label: '像素动画 · 做微信表情', value: pixelCount === undefined || pixelCount.own + pixelCount.drafts === 0 ? '照片、视频变像素表情' : `${pixelCount.own} 个自己做的${pixelCount.drafts > 0 ? ` · ${pixelCount.drafts} 个没做完` : ''}`, to: 'pixels', feature: true },
       { icon: 'copy', label: '设计包', value: '装别人的，导出你的', to: 'designs' },
       { icon: 'workshop', label: '形象工坊', value: '从头做一个自己的形象', to: 'workshop' },
     ] },

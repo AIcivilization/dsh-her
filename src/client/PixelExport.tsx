@@ -129,7 +129,7 @@ export function PixelExport({ code, name, look, onClose }: { code: string; name:
   return (
     <div ref={box} className="her-export">
       <div className="her-export-head">
-        <b>📤 导出 GIF</b>
+        <b>📤 导出 GIF<span className="her-wechat-word"> · 做微信表情</span></b>
         <button className="her-btn small" onClick={onClose}>收起</button>
       </div>
       {problem !== undefined && <p className="her-danger">{problem}</p>}
