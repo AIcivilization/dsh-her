@@ -85,6 +85,7 @@ code { font: 0.9em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; bac
 .sea-box figcaption { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 12px; }
 .sea-note { margin: 10px 0 0; text-align: center; font-size: 13px; color: #8fb6e0; }
 .sea-note code { background: rgba(255, 255, 255, .1); color: #d4e6fb; }
+.sea-note a { color: #7dd3fc; font-weight: 600; }
 
 .seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 999px; background: rgba(255, 255, 255, .08); }
 .seg button {
@@ -144,13 +145,47 @@ a.card:hover { text-decoration: none; border-color: var(--accent); }
 .work p { margin: 6px 0 0; font-size: 14px; color: var(--muted); }
 .work-links { display: flex; gap: 8px; margin-top: 12px !important; }
 
+/* 做表情 */
+.top nav .hot { color: #fff; font-weight: 700; padding: 0 10px; border-radius: 999px; background: #07c160; }
+.top nav .hot:hover { filter: brightness(1.08); }
+.btn.wechat { background: #07c160; border-color: #07c160; color: #fff; }
+.hero .btn.wechat { background: #07c160; border-color: #07c160; color: #fff; }
+.stickers { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 40px; align-items: center; }
+.stickers .steps { margin-top: 0; }
+.stickers .more { margin-top: 18px; }
+.tag { display: inline-block; margin: 0 0 10px; padding: 2px 12px; border-radius: 999px; background: color-mix(in srgb, #07c160 14%, transparent); color: #06a052; font-size: 13px; font-weight: 700; }
+.stickers h2 { font-size: 32px; background: linear-gradient(90deg, #2563eb, #8a4fe8 55%, #e04f9a); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.chat {
+  margin: 0; display: flex; flex-direction: column; gap: 10px; padding: 18px 16px 14px;
+  border-radius: 22px; background: #ededed; border: 1px solid var(--line);
+  box-shadow: 0 18px 40px -24px rgba(6, 20, 43, .45);
+}
+.msg { max-width: 78%; padding: 8px 12px; border-radius: 6px; font-size: 15px; line-height: 1.5; color: #111; background: #fff; align-self: flex-start; }
+.msg.me { align-self: flex-end; background: #95ec69; }
+.msg.sticker { padding: 0; background: none; }
+#sticker { display: block; width: min(220px, 56vw); aspect-ratio: 16 / 9; image-rendering: pixelated; }
+.chat figcaption { margin-top: 4px; font-size: 12px; color: #6b7280; text-align: center; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .chat { background: #1b1f27; }
+  :root:not([data-theme="light"]) .msg { background: #2c313b; color: #e6edf7; }
+  :root:not([data-theme="light"]) .msg.me { background: #3eb575; color: #06140b; }
+  :root:not([data-theme="light"]) .msg.sticker { background: none; }
+  :root:not([data-theme="light"]) .tag { color: #3ddc84; }
+  :root:not([data-theme="light"]) .stickers h2 { background-image: linear-gradient(90deg, #86b4ff, #b993ff 55%, #ff8cc6); }
+  :root:not([data-theme="light"]) .chat figcaption { color: #9aa8bd; }
+}
+@media (max-width: 820px) {
+  .stickers { grid-template-columns: 1fr; gap: 28px; }
+  .stickers .chat { max-width: 420px; }
+}
+
 footer { padding: 32px 16px 40px; text-align: center; color: var(--muted); font-size: 14px; }
 footer p { margin: 4px 0; }
 .quiet { font-size: 13px; }
 
 @media (max-width: 820px) {
   .hero { grid-template-columns: 1fr; padding-top: 36px; }
-  .top nav a:not(.star) { display: none; }
+  .top nav a:not(.star):not(.hot) { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
