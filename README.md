@@ -9,6 +9,7 @@
 
 [![npm](https://img.shields.io/npm/v/dsh-her?color=2b6cb0&label=npm&logo=npm)](https://www.npmjs.com/package/dsh-her)
 [![下载量](https://img.shields.io/npm/dm/dsh-her?color=2b6cb0&label=%E4%B8%8B%E8%BD%BD%E9%87%8F)](https://www.npmjs.com/package/dsh-her)
+[![dsh-pick](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/AIcivilization/dsh-pick/catalog/badge/dsh-her.json)](https://github.com/AIcivilization/dsh-pick)
 [![平台](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-macOS%20%7C%20Windows%20%7C%20%E7%BD%91%E9%A1%B5-0f766e)](#安装)
 [![License: MIT](https://img.shields.io/github/license/AIcivilization/dsh-her?color=64748b)](https://github.com/AIcivilization/dsh-her/blob/main/LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/AIcivilization/dsh-her?style=social)](https://github.com/AIcivilization/dsh-her/stargazers)
