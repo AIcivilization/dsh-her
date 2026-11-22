@@ -428,14 +428,31 @@ export function PixelWorkshop({ id, onClose, files }: { id: string; onClose: () 
   }
   const start = (
     <div className="her-ws-start">
-      <p>从哪儿开始？</p>
-      <button className="big" onClick={() => picturePick.current?.click()}><b>🖼</b>用图片<small>一张照片、几张图或动图：你、你的猫……</small></button>
-      <button className="big" onClick={() => videoPick.current?.click()}><b>🎬</b>用视频<small>一段视频，选其中几秒，变成会动的像素画</small></button>
-      <p className="her-ws-drop">也可以直接把图片或视频拖进来</p>
-      <button onClick={roll}><b>🎲</b>掷骰子<small>随机出一个，每次都不一样</small></button>
-      <button onClick={() => sayBox.current?.focus()}><b>💬</b>跟 AI 说<small>说你想要什么画面</small></button>
+      <p>从哪儿开始？<span>图片、视频也可以直接拖进来</span></p>
+      <div className="her-ws-tiles">
+        <button className="main" onClick={() => picturePick.current?.click()}><i>🖼</i><b>用图片</b><small>照片、几张图或动图</small></button>
+        <button className="main" onClick={() => videoPick.current?.click()}><i>🎬</i><b>用视频</b><small>选其中几秒</small></button>
+        <button onClick={roll}><i>🎲</i><b>掷骰子</b><small>随机出一个</small></button>
+        <button onClick={() => sayBox.current?.focus()}><i>💬</i><b>跟 AI 说</b><small>说你想要的画面</small></button>
+      </div>
     </div>
   )
+  // What sits on top: a GIF made here to open, a picture or video being turned, the start, or the draft playing.
+  const top = gifOffer !== undefined ? (
+    <div className="her-ws-picture">
+      <div className="her-ws-picture-head">
+        <b>这张 GIF 是用 dsh-her 做的{gifOffer.source.name === '' ? '' : `「${gifOffer.source.name}」`}</b>
+        <button className="her-btn small" onClick={() => setGifOffer(undefined)}>不用了</button>
+      </div>
+      <span className="her-muted">里面带着它的动画文件，可以接着改。文件是别人写的代码，也只在隔离的环境里跑。</span>
+      <span className="her-row" style={{ margin: 0 }}>
+        <button className="her-btn primary" onClick={() => void openGifSource(gifOffer.source)}>打开它的文件接着改</button>
+        <button className="her-btn" onClick={() => { setPictureFiles(gifOffer.files); setGifOffer(undefined) }}>当普通动图转像素</button>
+      </span>
+    </div>
+  ) : pictureFiles !== undefined
+    ? <PicturePixel files={pictureFiles} {...(pictureLeft === undefined ? {} : { left: pictureLeft })} onUse={takePicture} onCancel={() => setPictureFiles(undefined)} />
+    : draft.code === '' ? start : undefined
   const grid = info?.grid
   const mono = info === undefined || info.color === 'mono'
 
@@ -460,7 +477,8 @@ export function PixelWorkshop({ id, onClose, files }: { id: string; onClose: () 
       </div>
       <div className="her-ws">
         <div className="her-ws-main">
-          <Stage code={draft.code} look={look} round={round} empty={start} />
+          {top}
+          {draft.code !== '' && <div hidden={top !== undefined}><Stage code={draft.code} look={look} round={round} empty={null} /></div>}
           {draft.versions.length > 0 && (
             <>
               <div className="her-vnav" role="group" aria-label="版本">
@@ -546,18 +564,6 @@ export function PixelWorkshop({ id, onClose, files }: { id: string; onClose: () 
             <input ref={picturePick} type="file" multiple accept={PICTURE_ACCEPT} hidden onChange={e => { const list = [...(e.target.files ?? [])]; e.target.value = ''; void pickFiles(list) }} />
             <input ref={videoPick} type="file" accept={VIDEO_ACCEPT} hidden onChange={e => { const list = [...(e.target.files ?? [])]; e.target.value = ''; void pickFiles(list) }} />
           </div>
-          {gifOffer !== undefined && (
-            <div className="her-ws-picture">
-              <b>这张 GIF 是用 dsh-her 做的{gifOffer.source.name === '' ? '' : `「${gifOffer.source.name}」`}</b>
-              <span className="her-muted">里面带着它的动画文件，可以接着改。文件是别人写的代码，也只在隔离的环境里跑。</span>
-              <span className="her-row" style={{ margin: 0 }}>
-                <button className="her-btn small primary" onClick={() => void openGifSource(gifOffer.source)}>打开它的文件接着改</button>
-                <button className="her-btn small" onClick={() => { setPictureFiles(gifOffer.files); setGifOffer(undefined) }}>当普通动图转像素</button>
-                <button className="her-btn small" onClick={() => setGifOffer(undefined)}>不用了</button>
-              </span>
-            </div>
-          )}
-          {pictureFiles !== undefined && <PicturePixel files={pictureFiles} {...(pictureLeft === undefined ? {} : { left: pictureLeft })} onUse={takePicture} onCancel={() => setPictureFiles(undefined)} />}
 
           <div className="her-ws-set">
             <b>画法</b>

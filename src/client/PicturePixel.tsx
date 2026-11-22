@@ -166,7 +166,7 @@ async function readSource(files: File[], count: number, from = 0, span = VIDEO_S
 const round1 = (n: number) => Math.round(n * 10) / 10
 
 function draw(canvas: HTMLCanvasElement, picture: Picture, frame: number): void {
-  const k = Math.max(2, Math.floor(Math.min(260 / picture.w, 240 / picture.h)))
+  const k = Math.max(2, Math.floor(Math.min(420 / picture.w, 320 / picture.h)))
   if (canvas.width !== picture.w * k) canvas.width = picture.w * k
   if (canvas.height !== picture.h * k) canvas.height = picture.h * k
   const ctx = canvas.getContext('2d')!
@@ -240,71 +240,73 @@ export function PicturePixel({ files, left, onUse, onCancel }: { files: File[]; 
   const tooBig = bytes > PIXEL_LIMITS.bytes * 0.95
   const what = source?.kind === 'video' ? '视频' : source?.kind === 'gif' ? '动图' : source?.kind === 'pictures' ? `${files.length} 张图` : '图片'
 
+  const summary = picture === undefined ? '' : `${what}转成 ${picture.w} × ${picture.h} 格${picture.frames.length > 1 ? `，${picture.frames.length} 帧` : ''}${picture.palette === undefined ? '' : `，${Object.keys(picture.palette).length} 色`}${picture.background === 'clear' ? '，透明底' : picture.background === 'cut' ? '，去掉了背景' : cut ? '，背景不是纯色，没去掉' : ''}`
+
   return (
     <div className="her-ws-picture">
-      <b>{video ? '🎬 用视频' : '🖼 用图片'}「{files.length === 1 ? files[0]!.name : `${files.length} 张图`}」做</b>
+      <div className="her-ws-picture-head">
+        <b>{video ? '🎬' : '🖼'} {files.length === 1 ? files[0]!.name : `${files.length} 张图`}</b>
+        <button className="her-btn small" onClick={onCancel}>不用了</button>
+      </div>
       {left !== undefined && <span className="her-muted">{left}</span>}
       {problem !== undefined && <p className="her-danger">{problem}</p>}
-      {source === undefined && problem === undefined && <p className="her-muted">正在读{moving ? '每一帧' : '图'}……</p>}
-      {picture !== undefined && (
-        <>
-          <canvas ref={canvas} className="her-ws-picture-view" />
-          <span className="her-faint">
-            {what}转成 {picture.w} × {picture.h} 格{picture.frames.length > 1 ? `，${picture.frames.length} 帧，每帧 ${picture.each} 秒` : ''}{picture.palette === undefined ? '' : `，${Object.keys(picture.palette).length} 种颜色`}
-            {picture.background === 'clear' ? '；本来就是透明底' : picture.background === 'cut' ? '；去掉了纯色背景' : cut ? '；背景不是纯色，没去掉' : ''}
-          </span>
-          {tooBig && <p className="her-danger">太大了（约 {Math.round(bytes / 1024)} KB，最多 {PIXEL_LIMITS.bytes / 1024} KB）：少几帧，或者矮一点。</p>}
-          <div className="her-ws-set">
-            <b>多少格高</b>
-            <span className="her-seg" role="group" aria-label="多少格高">
-              {HEIGHTS.map(h => <button key={h} className={height === h ? 'on' : ''} onClick={() => setHeight(h)}>{h}</button>)}
-            </span>
-            <span className="her-faint">越高越细腻；96、128 适合人物</span>
-          </div>
-          {(source?.kind === 'video' || source?.kind === 'gif') && (
-            <div className="her-ws-set">
-              <b>几帧</b>
-              <span className="her-seg" role="group" aria-label="几帧">
-                {FRAME_COUNTS.map(n => <button key={n} className={count === n ? 'on' : ''} onClick={() => setCount(n)}>{n}</button>)}
+      <div className="her-ws-picture-body">
+        <div className="her-ws-picture-show">
+          {picture === undefined
+            ? <span className="her-faint">{problem === undefined ? `正在读${moving ? '每一帧' : '图'}……` : ''}</span>
+            : <canvas ref={canvas} className="her-ws-picture-view" />}
+          {picture !== undefined && <span className="her-faint">{summary}</span>}
+        </div>
+        {picture !== undefined && (
+          <div className="her-ws-picture-set">
+            {tooBig && <p className="her-danger" style={{ margin: 0 }}>太大了（约 {Math.round(bytes / 1024)} KB，最多 {PIXEL_LIMITS.bytes / 1024} KB）：少几帧，或者矮一点。</p>}
+            {source?.kind === 'video' && source.duration !== undefined && source.duration > 2.2 && (
+              <div className="her-ws-row">
+                <b>哪一段</b>
+                <div>
+                  <span className="her-seg" role="group" aria-label="取几秒">
+                    {SPANS.filter(n => n <= Math.ceil(source.duration!)).map(n => <button key={n} className={span === n ? 'on' : ''} onClick={() => setSpan(n)}>{n} 秒</button>)}
+                  </span>
+                  {source.duration > Math.min(span, VIDEO_SPAN) + 0.2 && (
+                    <span className="her-range">
+                      <input type="range" aria-label="从第几秒开始" min={0} max={Math.max(0, source.duration - Math.min(span, VIDEO_SPAN))} step={0.1} value={from} onChange={e => setFrom(Number(e.target.value))} />
+                      <i>从第 {round1(from)} 秒</i>
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+            <div className="her-ws-row">
+              <b title="越高越细腻；96、128 适合人物">格子高</b>
+              <span className="her-seg" role="group" aria-label="多少格高">
+                {HEIGHTS.map(h => <button key={h} className={height === h ? 'on' : ''} onClick={() => setHeight(h)}>{h}</button>)}
               </span>
-              <span className="her-faint">{source.kind === 'video' ? `从第 ${round1(source.from ?? 0)} 到 ${round1((source.from ?? 0) + (source.seconds ?? 0))} 秒里平均取` : '从动图里平均取'}；帧越多越顺，文件也越大</span>
             </div>
-          )}
-          {source?.kind === 'video' && source.duration !== undefined && source.duration > 2.2 && (
-            <div className="her-ws-trim">
-              <b>用视频的哪一段</b>
-              <span className="her-seg" role="group" aria-label="取几秒">
-                {SPANS.filter(n => n <= Math.ceil(source.duration!)).map(n => <button key={n} className={span === n ? 'on' : ''} onClick={() => setSpan(n)}>{n} 秒</button>)}
-              </span>
-              {source.duration > Math.min(span, VIDEO_SPAN) + 0.2 && (
-                <span className="her-range">
-                  <input type="range" aria-label="从第几秒开始" min={0} max={Math.max(0, source.duration - Math.min(span, VIDEO_SPAN))} step={0.1} value={from} onChange={e => setFrom(Number(e.target.value))} />
-                  <i>从第 {round1(from)} 秒开始</i>
+            {(source?.kind === 'video' || source?.kind === 'gif') && (
+              <div className="her-ws-row">
+                <b title="帧越多越顺，文件也越大">几帧</b>
+                <span className="her-seg" role="group" aria-label="几帧">
+                  {FRAME_COUNTS.map(n => <button key={n} className={count === n ? 'on' : ''} onClick={() => setCount(n)}>{n}</button>)}
                 </span>
-              )}
+              </div>
+            )}
+            <div className="her-ws-row">
+              <b>颜色</b>
+              <span className="her-seg" role="group" aria-label="颜色">
+                <button className={color ? 'on' : ''} title="只能画成方块" onClick={() => setColor(true)}>彩色</button>
+                <button className={!color ? 'on' : ''} title="能换画法、调颜色" onClick={() => setColor(false)}>单色</button>
+              </span>
             </div>
-          )}
-          {moving && (
-            <label className="her-muted"><input type="checkbox" checked={bounce} onChange={e => setBounce(e.target.checked)} /> 来回播（正放再倒放，首尾一定接得上；帧数多一倍）</label>
-          )}
-          <div className="her-ws-set">
-            <b>颜色</b>
-            <span className="her-seg" role="group" aria-label="颜色">
-              <button className={color ? 'on' : ''} onClick={() => setColor(true)}>彩色（只能画成方块）</button>
-              <button className={!color ? 'on' : ''} onClick={() => setColor(false)}>单色（能换画法、调颜色）</button>
-            </span>
+            <div className="her-ws-checks">
+              {moving && <label><input type="checkbox" checked={bounce} onChange={e => setBounce(e.target.checked)} /> 来回播<i>正放再倒放，首尾接得上</i></label>}
+              {color && <label><input type="checkbox" checked={edge} onChange={e => setEdge(e.target.checked)} /> 深色描边<i>轮廓更清楚</i></label>}
+              {picture.background !== 'clear' && <label><input type="checkbox" checked={cut} onChange={e => setCut(e.target.checked)} /> 去掉纯色背景</label>}
+            </div>
+            <button className="her-btn primary" disabled={busy || tooBig} onClick={() => { setBusy(true); void onUse(picture, source!.kind).finally(() => setBusy(false)) }}>{busy ? '…' : '放进草稿'}</button>
           </div>
-          {color && <label className="her-muted"><input type="checkbox" checked={edge} onChange={e => setEdge(e.target.checked)} /> 加一圈深色描边（轮廓更清楚）</label>}
-          {picture.background !== 'clear' && (
-            <label className="her-muted"><input type="checkbox" checked={cut} onChange={e => setCut(e.target.checked)} /> 去掉纯色背景</label>
-          )}
-          <span className="her-row" style={{ margin: 0 }}>
-            <button className="her-btn small primary" disabled={busy || tooBig} onClick={() => { setBusy(true); void onUse(picture, source!.kind).finally(() => setBusy(false)) }}>放进草稿</button>
-            <button className="her-btn small" onClick={onCancel}>不用了</button>
-          </span>
-        </>
-      )}
-      <p className="her-faint">只在这个页面里转，不上传、不保存；放进草稿的只是转好的字符。想要会动的：一次选几张图（按顺序），或者一张动图、一段几秒的视频。用别人的图自己玩没关系，分享出去要用自己有权分享的。</p>
+        )}
+      </div>
+      <p className="her-faint" style={{ margin: 0 }}>只在这个页面里转，不上传、不保存。用别人的图自己玩没关系，分享出去要用自己有权分享的。</p>
     </div>
   )
 }
