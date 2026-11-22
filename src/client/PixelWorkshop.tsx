@@ -14,7 +14,7 @@ import { cleanLook, STYLE_NAME, PIXEL_STYLES, type PixelInfo, type PixelLook } f
 import { describeChange, infoOverride, withInfo, withoutInfo, WORKSHOP_FPS, WORKSHOP_GRIDS, type InfoChange } from '../core/pixel-workshop.ts'
 import type { Picture } from '../core/pixel-picture.ts'
 import { MOTIONS, pictureCode, readPictureFile, type Motion } from '../core/pixel-motion.ts'
-import { PicturePixel } from './PicturePixel.tsx'
+import { PICTURE_ACCEPT, PicturePixel, sortSources, VIDEO_ACCEPT, type SourceKind } from './PicturePixel.tsx'
 import { PixelExport } from './PixelExport.tsx'
 import { readGifSource, type GifSource } from '../core/pixel-gif.ts'
 import { withBrand } from '../core/pixel-brand.ts'
@@ -127,10 +127,6 @@ function ColorWheel({ value, onPick }: { value: string; onPick: (color: string) 
   )
 }
 
-/** The files the picture panel takes. */
-const PICTURE_ACCEPT = 'image/png,image/jpeg,image/webp,image/gif,image/bmp,video/mp4,video/webm,video/quicktime'
-const takesFile = (f: File) => /^(image|video)\//.test(f.type)
-
 export function PixelWorkshop({ id, onClose, files }: { id: string; onClose: () => void; files?: File[] }) {
   const [draft, setDraft] = useState<DraftView>()
   const [look, setLook] = useState<PixelLook>()
@@ -152,6 +148,8 @@ export function PixelWorkshop({ id, onClose, files }: { id: string; onClose: () 
   const [exporting, setExporting] = useState(false)
   const [dropping, setDropping] = useState(false)
   const picturePick = useRef<HTMLInputElement>(null)
+  const videoPick = useRef<HTMLInputElement>(null)
+  const [pictureLeft, setPictureLeft] = useState<string>()
   const sayBox = useRef<HTMLTextAreaElement>(null)
   const [, tick] = useState(0)
   const thinkingSince = useRef<number>()
@@ -167,9 +165,10 @@ export function PixelWorkshop({ id, onClose, files }: { id: string; onClose: () 
 
   /** Pictures or a video to turn; a GIF made here (its file inside) is offered as its file first. */
   const pickFiles = useCallback(async (list: File[]) => {
-    const chosen = list.filter(takesFile)
+    const { files: chosen, left } = sortSources(list)
     if (chosen.length === 0) return
     setGifOffer(undefined)
+    setPictureLeft(left)
     if (chosen.length === 1 && chosen[0]!.type === 'image/gif' && chosen[0]!.size < 30 * 1024 * 1024) {
       const source = readGifSource(new Uint8Array(await chosen[0]!.arrayBuffer()))
       if (source !== undefined) return setGifOffer({ source, files: chosen })
@@ -356,11 +355,12 @@ export function PixelWorkshop({ id, onClose, files }: { id: string; onClose: () 
   })
 
   /** A picture made into a pixel picture: a new version with it floating, and a word in the chat. */
-  const takePicture = async (picture: Picture) => {
+  const takePicture = async (picture: Picture, kind: SourceKind) => {
     const label = (pictureFiles?.[0]?.name ?? '图片').replace(/\.[^.]+$/, '').slice(0, 30) || '图片'
     const pictureLook: PixelLook = picture.palette === undefined ? look : { ...look, style: 'blocks' }
     const many = picture.frames.length > 1 ? `，${picture.frames.length} 帧` : ''
-    const added = take(await herApi.draftAdd(id, pictureCode(picture, label), `🖼 图片转的像素图（${picture.w} × ${picture.h}${many}）`, pictureLook))
+    const from = kind === 'video' ? '🎬 视频转的像素动画' : kind === 'gif' ? '🖼 动图转的像素动画' : kind === 'pictures' ? '🖼 几张图转的像素动画' : '🖼 图片转的像素图'
+    const added = take(await herApi.draftAdd(id, pictureCode(picture, label), `${from}（${picture.w} × ${picture.h}${many}）`, pictureLook))
     if (added === undefined) return
     setLook(pictureLook)
     setPictureFiles(undefined)
@@ -368,7 +368,7 @@ export function PixelWorkshop({ id, onClose, files }: { id: string; onClose: () 
       setName(label)
       take(await herApi.draftSet(id, { name: label, auto: true }))
     }
-    const r = await herApi.chatNote(id, `🖼 转成了像素图（${picture.w} × ${picture.h} 格${many}），放进了 v${added.current}，现在轻轻浮着。点画面下面「动起来」换个动作；想要别的，在下面说，比如：眨眨眼、挥挥手。`)
+    const r = await herApi.chatNote(id, `${kind === 'video' ? '🎬 视频' : '🖼'}转成了像素${many === '' ? '图' : '动画'}（${picture.w} × ${picture.h} 格${many}），放进了 v${added.current}，现在轻轻浮着。点画面下面「动起来」换个动作；想要别的，在下面说，比如：眨眨眼、挥挥手。`)
     if (r.ok) setChat(r.chat)
   }
 
@@ -429,7 +429,9 @@ export function PixelWorkshop({ id, onClose, files }: { id: string; onClose: () 
   const start = (
     <div className="her-ws-start">
       <p>从哪儿开始？</p>
-      <button className="big" onClick={() => picturePick.current?.click()}><b>🖼</b>用照片或视频<small>把你、你的猫、一段视频变成会动的像素画；也可以直接拖进来</small></button>
+      <button className="big" onClick={() => picturePick.current?.click()}><b>🖼</b>用图片<small>一张照片、几张图或动图：你、你的猫……</small></button>
+      <button className="big" onClick={() => videoPick.current?.click()}><b>🎬</b>用视频<small>一段视频，选其中几秒，变成会动的像素画</small></button>
+      <p className="her-ws-drop">也可以直接把图片或视频拖进来</p>
       <button onClick={roll}><b>🎲</b>掷骰子<small>随机出一个，每次都不一样</small></button>
       <button onClick={() => sayBox.current?.focus()}><b>💬</b>跟 AI 说<small>说你想要什么画面</small></button>
     </div>
@@ -537,8 +539,12 @@ export function PixelWorkshop({ id, onClose, files }: { id: string; onClose: () 
               <b>掷骰子</b>
               <span className="her-muted">{die.said ?? '六个面，六个方向，每次都不一样。'}</span>
             </div>
-            <button className="her-btn small" onClick={() => picturePick.current?.click()}>🖼 用照片或视频做</button>
+            <span className="her-row" style={{ margin: 0, marginLeft: 'auto', flex: 'none' }}>
+              <button className="her-btn small" onClick={() => picturePick.current?.click()}>🖼 用图片</button>
+              <button className="her-btn small" onClick={() => videoPick.current?.click()}>🎬 用视频</button>
+            </span>
             <input ref={picturePick} type="file" multiple accept={PICTURE_ACCEPT} hidden onChange={e => { const list = [...(e.target.files ?? [])]; e.target.value = ''; void pickFiles(list) }} />
+            <input ref={videoPick} type="file" accept={VIDEO_ACCEPT} hidden onChange={e => { const list = [...(e.target.files ?? [])]; e.target.value = ''; void pickFiles(list) }} />
           </div>
           {gifOffer !== undefined && (
             <div className="her-ws-picture">
@@ -551,7 +557,7 @@ export function PixelWorkshop({ id, onClose, files }: { id: string; onClose: () 
               </span>
             </div>
           )}
-          {pictureFiles !== undefined && <PicturePixel files={pictureFiles} onUse={takePicture} onCancel={() => setPictureFiles(undefined)} />}
+          {pictureFiles !== undefined && <PicturePixel files={pictureFiles} {...(pictureLeft === undefined ? {} : { left: pictureLeft })} onUse={takePicture} onCancel={() => setPictureFiles(undefined)} />}
 
           <div className="her-ws-set">
             <b>画法</b>

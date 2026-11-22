@@ -655,9 +655,10 @@ a.her-btn.disabled{opacity:.45;pointer-events:none}
 .her-ws-foot .her-input{flex:1 1 160px;width:auto;min-width:0}
 @container (min-width:560px) and (max-width:719px), (min-width:1040px){.her-ws-side{display:grid;grid-template-columns:1fr 1fr;gap:12px 18px}}
 .her-ws-side .her-seg button{white-space:nowrap}
-.her-ws-start button.big{flex-basis:100%;flex-direction:row;justify-content:center;gap:12px;padding:16px 14px;border-color:${INK};font-size:15px}
-.her-ws-start button.big b{font-size:32px}
-.her-ws-start button.big small{max-width:240px;text-align:left}
+.her-ws-start button.big{flex:1 1 200px;flex-direction:row;justify-content:center;gap:10px;padding:16px 12px;border-color:${INK};font-size:15px}
+.her-ws-start button.big b{font-size:30px}
+.her-ws-start button.big small{max-width:170px;text-align:left}
+.her-ws-start>p.her-ws-drop{order:9;margin:2px 0 0;font-size:12px;color:${FAINT}}
 .her-dropping{outline:2px dashed ${INK};outline-offset:-6px}
 .her-export{margin-top:14px;padding:12px;border:1px solid ${LINE};border-radius:12px;background:${LAYER1};container-type:inline-size}
 .her-export-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}

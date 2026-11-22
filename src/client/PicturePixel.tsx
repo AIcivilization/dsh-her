@@ -13,6 +13,22 @@ import { PIXEL_LIMITS } from '../core/pixel.ts'
 
 const HEIGHTS = [32, 48, 64, 96, 128]
 const FRAME_COUNTS = [6, 8, 12, 16, 24]
+/** What the two buttons take: pictures (one, several, or a moving GIF), or one video. Kept apart so a video is never taken for a picture. */
+export const PICTURE_ACCEPT = 'image/png,image/jpeg,image/webp,image/gif,image/bmp'
+export const VIDEO_ACCEPT = 'video/mp4,video/webm,video/quicktime,.mp4,.m4v,.mov,.webm'
+export type SourceKind = 'picture' | 'pictures' | 'gif' | 'video'
+const isVideo = (f: File) => f.type.startsWith('video/') || /\.(mp4|m4v|mov|webm)$/i.test(f.name)
+
+/** What is turned from what was chosen or dropped: one video when there is one (the pictures beside it left out, and said), else the pictures. */
+export function sortSources(list: File[]): { files: File[]; left?: string } {
+  const video = list.find(isVideo)
+  if (video !== undefined) {
+    const others = list.length - 1
+    return { files: [video], ...(others > 0 ? { left: `一起选了 ${list.length} 个文件，用的是视频「${video.name}」，其余 ${others} 个没用` } : {}) }
+  }
+  return { files: list.filter(f => f.type.startsWith('image/')) }
+}
+
 /** The longest stretch of a video taken, in seconds. */
 const VIDEO_SPAN = 6
 /** How long a stretch of a video one may take. */
@@ -29,7 +45,7 @@ interface Source {
   /** A video's whole length, and where the stretch taken starts (s). */
   duration?: number
   from?: number
-  kind: 'picture' | 'pictures' | 'gif' | 'video'
+  kind: SourceKind
 }
 
 /** A canvas `w` × `h`, the picture drawn in it whole; any room left filled with its own corner colour, so a plain background stays plain. */
@@ -137,7 +153,7 @@ async function readVideo(file: File, count: number, from = 0, span = VIDEO_SPAN)
 
 async function readSource(files: File[], count: number, from = 0, span = VIDEO_SPAN): Promise<Source> {
   const first = files[0]!
-  if (files.length === 1 && first.type.startsWith('video/')) return { ...await readVideo(first, count, from, span), kind: 'video' }
+  if (files.length === 1 && isVideo(first)) return { ...await readVideo(first, count, from, span), kind: 'video' }
   if (files.length === 1 && first.type === 'image/gif') {
     const gif = await readGif(first, count)
     return gif.frames.length > 1 ? { ...gif, kind: 'gif' } : { frames: gif.frames, kind: 'picture' }
@@ -166,7 +182,7 @@ function draw(canvas: HTMLCanvasElement, picture: Picture, frame: number): void 
   })
 }
 
-export function PicturePixel({ files, onUse, onCancel }: { files: File[]; onUse: (picture: Picture) => Promise<void>; onCancel: () => void }) {
+export function PicturePixel({ files, left, onUse, onCancel }: { files: File[]; left?: string; onUse: (picture: Picture, kind: SourceKind) => Promise<void>; onCancel: () => void }) {
   const [source, setSource] = useState<Source>()
   const [problem, setProblem] = useState<string>()
   const [height, setHeight] = useState(64)
@@ -179,7 +195,8 @@ export function PicturePixel({ files, onUse, onCancel }: { files: File[]; onUse:
   const [bounce, setBounce] = useState(false)
   const [busy, setBusy] = useState(false)
   const canvas = useRef<HTMLCanvasElement>(null)
-  const moving = files.length > 1 || files[0]?.type === 'image/gif' || files[0]?.type.startsWith('video/') === true
+  const video = files.length === 1 && isVideo(files[0]!)
+  const moving = files.length > 1 || files[0]?.type === 'image/gif' || video
 
   // Read again a moment after the stretch stops moving, not at every step of the slider.
   useEffect(() => {
@@ -225,7 +242,8 @@ export function PicturePixel({ files, onUse, onCancel }: { files: File[]; onUse:
 
   return (
     <div className="her-ws-picture">
-      <b>用{moving ? '动图、视频或几张图' : '图片'}做</b>
+      <b>{video ? '🎬 用视频' : '🖼 用图片'}「{files.length === 1 ? files[0]!.name : `${files.length} 张图`}」做</b>
+      {left !== undefined && <span className="her-muted">{left}</span>}
       {problem !== undefined && <p className="her-danger">{problem}</p>}
       {source === undefined && problem === undefined && <p className="her-muted">正在读{moving ? '每一帧' : '图'}……</p>}
       {picture !== undefined && (
@@ -281,7 +299,7 @@ export function PicturePixel({ files, onUse, onCancel }: { files: File[]; onUse:
             <label className="her-muted"><input type="checkbox" checked={cut} onChange={e => setCut(e.target.checked)} /> 去掉纯色背景</label>
           )}
           <span className="her-row" style={{ margin: 0 }}>
-            <button className="her-btn small primary" disabled={busy || tooBig} onClick={() => { setBusy(true); void onUse(picture).finally(() => setBusy(false)) }}>放进草稿</button>
+            <button className="her-btn small primary" disabled={busy || tooBig} onClick={() => { setBusy(true); void onUse(picture, source!.kind).finally(() => setBusy(false)) }}>放进草稿</button>
             <button className="her-btn small" onClick={onCancel}>不用了</button>
           </span>
         </>
