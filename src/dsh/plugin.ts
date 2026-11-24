@@ -55,7 +55,11 @@ import { designTools, herLookTools, undoSvg, type DesignDeps } from '../engine/d
 import { DesignSession } from './design-session.ts'
 import { Secrets } from '../voice/secrets.ts'
 import { cleanVoices, ExternalVoices, SECRET_FIELDS, type PluginVoice } from '../voice/external.ts'
-import { cleanIntro, type IntroSettings } from '../core/intro.ts'
+import { cleanIntro, introPixel, type IntroSettings } from '../core/intro.ts'
+import { Pixels } from '../engine/pixels.ts'
+import { PixelDrafts } from '../engine/pixel-drafts.ts'
+import { PixelChats } from './pixel-chat.ts'
+import { forOlderPlayers } from '../core/pixel-compat.ts'
 import { checkMaterial, cleanSvg } from '../pack/material-check.ts'
 import { StageStore } from '../engine/stage-store.ts'
 import { Characters } from '../engine/characters.ts'
@@ -63,7 +67,7 @@ import { DesignPacks } from '../engine/design-packs.ts'
 import { BrainServer } from '../server/brain-server.ts'
 import { type AvatarView, API_BASE, apiHandlers, handle, type ApiRuntime } from './api.ts'
 import { bodyRunning, findDevBody, launchBody, type LaunchPlan } from '../engine/body-launcher.ts'
-import { compareVersions, desktopBodyExists, downloadFolder, install, installDownloaded, installedBody, installedPlan, latestRelease, manualInstall, type InstallState, type ManualInstall } from '../engine/body-install.ts'
+import { compareVersions, desktopBodyExists, downloadFolder, install, installChoice, installDownloaded, installedBody, installedPlan, latestRelease, manualInstall, setInstallChoice, shouldAutoInstall, type InstallState, type ManualInstall } from '../engine/body-install.ts'
 import { IDLE_IMPORT, type ImportStatus, type ReportLine } from '../engine/import-status.ts'
 import { DESK_DIR, newProject, sceneDir } from '../core/workshop.ts'
 import { assignClip, avatarIn, avatarOf, exampleFile, examples, exportProject, findProject, importProject, listProjects, prepareImport, projectStatus, removeProject, removeStray, saveProject } from '../engine/workshop.ts'
@@ -125,6 +129,8 @@ export function explainModelError(message: string, model: string): string {
 }
 
 /** This plugin's version, from its package.json (two folders up from src/dsh and lib/dsh alike). */
+/** The first body that draws a 像素动画 as its opening clip. */
+const PIXEL_BODY = '0.8.5'
 const PLUGIN_VERSION = (JSON.parse(readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8')) as { version: string }).version
 
 /** The newest published plugin: npm itself, or its China mirror where that cannot be reached. */
@@ -396,7 +402,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     mkdirSync(paths.root, { recursive: true })
     writeFileSync(offFile, `${JSON.stringify({ off: next })}\n`)
     if (next) cut()
-    else for (const body of server?.bodies ?? []) setTimeout(() => playIntro(message => body.send(message)), 800)
+    else for (const body of server?.bodies ?? []) setTimeout(() => playIntro(message => body.send(message), false, body.hello.body.version), 800)
     // The desktop closes or opens her window; the page hides or shows her at its next look (web/status).
     server?.broadcast({ t: 'config', off: next })
     log({ event: 'off', off: next })
@@ -1124,6 +1130,10 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     return { ...(stage === undefined ? {} : { stage }), problems, library: materials, missing, packs: packs.filter(p => !p.id.startsWith(`${STAGE_LOOK}-`)), versions: stages.versions(), playing: readPlay(dir).on, playNotes }
   }
   const skins = new Skins(paths.root)
+  /** 像素动画 (docs/像素动画设计.md): shared, like skins. */
+  const pixels = new Pixels(paths.root)
+  /** 像素工坊's drafts (docs/像素工坊设计.md). */
+  const drafts = new PixelDrafts(paths.root)
   /** Voices and listening from outside services; their keys in the keychain (or secrets.json). */
   const secrets = new Secrets(paths.root)
   const externalVoices = new ExternalVoices(paths.root, secrets)
@@ -1152,17 +1162,32 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     }
     return library.path('intro', settings.source)
   }
-  /** She comes out on a desktop body: the clip, when it is on and its time has come. */
-  const playIntro = (send: (message: BrainMessage) => void, force = false) => {
+  /** The opening clip is there to play: its file, or its 像素动画. */
+  const introReady = (settings = introSettings()): boolean => {
+    const pixel = introPixel(settings)
+    return pixel === undefined ? introPath(settings) !== undefined : pixels.code(pixel) !== undefined
+  }
+  /**
+   * She comes out on a desktop body: the clip, when it is on and its time has
+   * come. A 像素动画 goes as its code, to a body new enough to draw it.
+   */
+  const playIntro = (send: (message: BrainMessage) => void, force = false, bodyVersion?: string) => {
     const settings = introSettings()
-    const path = introPath(settings)
-    if (path === undefined || (!force && (!settings.on || herOff))) return
+    if (!introReady(settings) || (!force && (!settings.on || herOff))) return
+    const pixel = introPixel(settings)
+    if (pixel !== undefined && bodyVersion !== undefined && compareVersions(bodyVersion, PIXEL_BODY) < 0) {
+      log({ event: 'intro', skipped: `body ${bodyVersion} draws no 像素动画` })
+      return
+    }
     const today = dayOf(new Date())
     if (!force && settings.when === 'daily' && settings.lastDay === today) return
-    send({ t: 'intro', path })
+    // The desktop builds its own player: an older one has no g.sprite, so the file brings it along.
+    if (pixel !== undefined) send({ t: 'intro', path: '', pixel: { code: forOlderPlayers(pixels.code(pixel) ?? ''), look: settings.look } })
+    else send({ t: 'intro', path: introPath(settings) ?? '' })
     saveIntro({ ...settings, lastDay: today })
-    log({ event: 'intro', force })
+    log({ event: 'intro', force, ...(pixel === undefined ? {} : { pixel }) })
   }
+  const pixelsView = () => ({ items: pixels.list(), background: pixels.background(), intro: introSettings(), drafts: drafts.list() })
   const skinView = () => ({
     skins: skins.list().map(e => ({ ...e.skin, problems: e.problems, rev: e.rev })),
     current: skins.current() ?? null,
@@ -1179,6 +1204,11 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
   const design = new DesignSession({
     home: paths.root, room: join(dir, 'room'), title: session?.title ?? `她 · ${character.name}`,
     services: () => services, route: () => route(), tools: () => designTools(designDeps), logger: ctx.logger,
+  })
+  /** 像素工坊's AI: a session per draft, in her workspace, apart from the design session. */
+  const pixelChats = new PixelChats({
+    drafts, room: join(dir, 'room'), title: session?.title ?? `她 · ${character.name}`,
+    services: () => services, route: () => route(), logger: ctx.logger,
   })
   /** Files put into the 素材库 by hand (or before this version) are looked at in the background, one at a time. */
   let examining = false
@@ -1320,6 +1350,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     current: () => ({ cid, dir, character }),
     intro: () => { const settings = introSettings(); return { ...(settings.source === 'skin' ? {} : { source: settings.source }), when: settings.when } },
     setIntro: (source, when) => saveIntro(cleanIntro({ ...introSettings(), on: true, source, when })),
+    pixels,
     examine: () => examineLater(),
   })
 
@@ -1343,7 +1374,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
           running: body !== undefined || bodyRunning(paths.root),
           canStart: !('missing' in bodyPlan()),
           desktopExists: desktopBodyExists() || installState.dev,
-          install: { ...installState, ...(installedBody(paths.root) === undefined ? {} : { installed: installedBody(paths.root)!.version }) },
+          install: { ...installState, choice: installChoice(paths.root), ...(installedBody(paths.root) === undefined ? {} : { installed: installedBody(paths.root)!.version }) },
           ...(body === undefined ? {} : { info: { kind: body.hello.body.kind, version: body.hello.body.version, os: body.hello.body.os } }),
           ...(bodyPack === undefined ? {} : { pack: bodyPack }),
           // With no desktop body the brain itself knows her packs (docs/网页身体设计.md).
@@ -1380,6 +1411,8 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     saveCharacter: patch => {
       const next: Character = { ...character, ...patch, voice: { ...character.voice, ...patch.voice } }
       if ('model' in patch && patch.model === undefined) delete next.model
+      if ('pixel' in patch && patch.pixel === undefined) delete next.pixel
+      const pixelChanged = next.pixel !== character.pixel
       const problem = invalidCharacter(next)
       if (problem !== undefined) throw new Error(problem)
       const modelChanged = JSON.stringify(next.model) !== JSON.stringify(character.model)
@@ -1392,6 +1425,12 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
         log({ event: 'model', ...(route() ?? {}) })
       }
       voice?.setVoice(next.voice.id, next.voice.speed)
+      if (pixelChanged) {
+        // Her windows draw her again, pixelated or not; the page's body loads again.
+        server?.broadcast({ t: 'config', pixel: next.pixel ?? 0 })
+        webBody.reload()
+        log({ event: 'pixel-display', cells: next.pixel ?? 0 })
+      }
       log({ event: 'character', name: next.name, voice: next.voice.id, onboarded: next.onboarded })
       return next
     },
@@ -1476,13 +1515,72 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       return skinView()
     },
     introSet: change => {
-      saveIntro(cleanIntro({ ...introSettings(), ...change }))
+      const now = introSettings()
+      const next: IntroSettings = { ...now, ...change }
+      // A clip newly chosen plays the next time she comes out, even when today's has played.
+      if (change.source !== undefined && change.source !== now.source) delete next.lastDay
+      saveIntro(cleanIntro(next))
       return skinView()
     },
+    pixelsGet: () => pixelsView(),
+    pixelsCode: id => {
+      const code = pixels.code(id)
+      if (code === undefined) throw new Error('没有这个像素动画')
+      return code
+    },
+    pixelsAdd: input => {
+      const id = pixels.add(input)
+      log({ event: 'pixel', action: 'add', id })
+      return { ...pixelsView(), id }
+    },
+    pixelsRemove: id => {
+      pixels.remove(id)
+      // What used it goes back to what comes with her.
+      if (pixels.background().id === id) pixels.setBackground({ id: 'builtin:tail' })
+      if (introPixel(introSettings()) === id) saveIntro(cleanIntro({ ...introSettings(), source: 'skin' }))
+      return pixelsView()
+    },
+    pixelsBackground: change => {
+      pixels.setBackground(change)
+      return pixelsView()
+    },
+    draftNew: from => {
+      if (from === undefined) return drafts.create()
+      const entry = pixels.get(from)
+      const code = pixels.code(from)
+      if (entry === undefined || code === undefined) throw new Error('没有这个像素动画')
+      // One's own goes on being itself when saved again; one that comes with her is copied.
+      return entry.builtin
+        ? drafts.create({ code, note: `照着「${entry.name}」`, name: `我的${entry.name}` })
+        : drafts.create({ code, note: `「${entry.name}」`, name: entry.name, saved: entry.id })
+    },
+    draftGet: id => drafts.get(id),
+    draftAdd: (id, code, note, look) => drafts.add(id, code, note, look),
+    draftPick: (id, n) => drafts.pick(id, n),
+    draftSet: (id, change) => drafts.set(id, change),
+    draftSave: (id, tried) => {
+      const draft = drafts.get(id)
+      if (draft.code === '') throw new Error('还没有画面：先掷一次骰子')
+      const input = { name: draft.name, label: draft.name, code: draft.code, info: tried.info, thumb: tried.thumb, frameMs: tried.frameMs }
+      const pixel = draft.saved !== undefined && pixels.get(draft.saved)?.builtin === false ? pixels.update(draft.saved, input) : pixels.add(input)
+      log({ event: 'pixel', action: 'workshop-save', id: pixel })
+      return { ...pixelsView(), pixel, draft: drafts.markSaved(id, pixel) }
+    },
+    draftRemove: id => {
+      pixelChats.forget(id)
+      drafts.remove(id)
+      return pixelsView()
+    },
+    chatView: id => pixelChats.view(id),
+    chatSend: (id, text) => pixelChats.send(id, text),
+    chatStop: id => pixelChats.stop(id),
+    chatNote: (id, text) => pixelChats.addNote(id, text),
+    chatProbe: (id, req, result) => pixelChats.answerProbe(id, req, result),
+    chatSession: id => pixelChats.sessionOf(id),
     introPlay: () => {
       const bodies = server?.bodies ?? []
       if (bodies.length === 0) throw new Error('桌面程序没连上；网页里打开 dsh 时会播')
-      for (const body of bodies) playIntro(message => body.send(message), true)
+      for (const body of bodies) playIntro(message => body.send(message), true, body.hello.body.version)
     },
     characterNew: ({ name, copy }) => {
       const list = people.list()
@@ -1622,6 +1720,12 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       if (installState.state === 'downloading' || installState.state === 'installing' || installState.state === 'checking') return
       void installLatest(true)
     },
+    bodyChoose: choice => {
+      setInstallChoice(paths.root, choice)
+      log({ event: 'install-choice', choice })
+      if (choice === 'dsh') downloading?.abort()
+      else if (installedBody(paths.root) === undefined && !(installState.state === 'downloading' || installState.state === 'installing' || installState.state === 'checking')) void installLatest(true)
+    },
     restartBody: async () => {
       if (discovery === undefined) throw new Error('大脑还没准备好')
       await stopBody()
@@ -1666,14 +1770,19 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       const skinId = skins.current()
       const skin = skinId === undefined ? undefined : { id: skinId, rev: skins.get(skinId)?.rev ?? 0 }
       const intro = introSettings()
-      const introAt = intro.on && intro.dsh && !herOff ? introPath(intro) : undefined
+      const introOn = intro.on && intro.dsh && !herOff && introReady(intro)
+      const pixelIntro = introOn ? introPixel(intro) : undefined
+      const introAt = introOn && pixelIntro === undefined ? introPath(intro) : undefined
       const introClip = introAt === undefined ? undefined : intro.source === 'skin'
         ? `/api/dsh-her/web/skin-file?id=${encodeURIComponent(skinId ?? '')}&f=${encodeURIComponent(introAt.split(/[/\\]/).pop() ?? '')}`
         : `/api/dsh-her/web/library-file?row=intro&name=${encodeURIComponent(intro.source)}`
+      const pixelBg = herOff ? undefined : pixels.worn()
       return {
         show: webShown(remote), pill: pillShown(), veil: webBody.veil(), mode: webBody.mode, place, scope, focus: initiative.focused,
         ...(open === undefined ? {} : { open }), ...(page === undefined ? {} : { page }), ...(chat ? { chat } : {}), ...(avatar === undefined ? {} : { avatar }),
         ...(skin === undefined ? {} : { skin }), ...(introClip === undefined ? {} : { intro: { url: introClip, when: intro.when } }),
+        ...(pixelIntro === undefined ? {} : { intro: { pixel: { id: pixelIntro, look: intro.look }, when: intro.when } }),
+        ...(pixelBg === undefined ? {} : { pixelBg }),
       }
     },
     importBatch: async (batch, name) => {
@@ -1712,7 +1821,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       return projectStatus(found.project, found.dir)
     },
     // Beside a desktop body she keeps quiet, unless that desktop is on another computer than this page.
-    webConfig: remote => webBody.config(desktopConnected() && !remote, placePrefs.petScale ?? 1),
+    webConfig: remote => ({ ...webBody.config(desktopConnected() && !remote, placePrefs.petScale ?? 1), ...(character.pixel === undefined ? {} : { pixel: character.pixel }) }),
     webSend: message => onBodyMessage(withCid(message), undefined, 'web'),
     webSetMode: (mode: WebMode) => {
       webBody.mode = mode
@@ -2062,7 +2171,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       welcome: client => {
         bodyPack = client.hello.packs[0] ?? bodyPack
         // She comes out: her opening clip, when there is one (a body that shows her, not a text client).
-        if (client.hello.packs.length > 0) setTimeout(() => playIntro(message => client.send(message)), 1500)
+        if (client.hello.packs.length > 0) setTimeout(() => playIntro(message => client.send(message), false, client.hello.body.version), 1500)
         // Another character was chosen since this body last dressed: what she wears.
         if (client.hello.packs.length > 0 && people.needsDress('desktop')) {
           const id = readPlay(dir).on ? STAGE_LOOK_ID : character.look
@@ -2077,7 +2186,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
           v: PROTOCOL_VERSION,
           sessionId: session?.sessionId ?? '',
           characters: [{ cid, name: character.name, mode: 'overlay' }],
-          config: { mic: config.voice.mic, bargeIn: true, focus: initiative.focused, off: herOff, ...bodyPrefs() },
+          config: { mic: config.voice.mic, bargeIn: true, focus: initiative.focused, off: herOff, ...bodyPrefs(), ...(character.pixel === undefined ? {} : { pixel: character.pixel }) },
         }
       },
       message: (_client, message, audio) => onBodyMessage(message, audio),
@@ -2100,6 +2209,13 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
         if (brain.bodies.length > 0 || bodyRunning(paths.root)) return
         const plan = bodyPlan()
         if ('missing' in plan) {
+          // 两种装法: "dsh + 桌面版" is the default, so the desktop program is fetched now, once, unless "dsh 版" was chosen.
+          const busy = installState.state === 'checking' || installState.state === 'downloading' || installState.state === 'installing'
+          if (shouldAutoInstall({ launch: config.body.launch, desktop: desktopBodyExists(), dev: installState.dev, installed: installedBody(paths.root) !== undefined, choice: installChoice(paths.root), busy })) {
+            ctx.logger.info('dsh-her: no desktop program yet; downloading it (dsh + 桌面版, the default)')
+            void installLatest(true)
+            return
+          }
           ctx.logger.info(desktopBodyExists() ? `dsh-her: no body to start yet (${plan.missing}); the "她" page offers to install it` : 'dsh-her: no desktop body on this computer; she lives in the web page')
           return
         }

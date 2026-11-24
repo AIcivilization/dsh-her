@@ -20,7 +20,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { loadCharacter, type Character } from '../core/character.ts'
-import { cleanIntro, type IntroSettings } from '../core/intro.ts'
+import { cleanIntro, introPixel, type IntroSettings } from '../core/intro.ts'
 import { loadLines, type WrittenLines } from '../core/lines.ts'
 import { herPaths, type HerPaths } from '../core/paths.ts'
 import { FALLBACK_LINES, touchClip, TouchTracker } from '../core/touch.ts'
@@ -28,6 +28,7 @@ import { DEFAULT_VOICE } from '../core/voices.ts'
 import { Characters, type CharacterCard } from '../engine/characters.ts'
 import { DesignPacks, type DesignChoice, type DesignPreview, type InstalledDesign } from '../engine/design-packs.ts'
 import { Library } from '../engine/library.ts'
+import { Pixels } from '../engine/pixels.ts'
 import { Skins } from '../engine/skins.ts'
 import { compileStage, readPlay, STAGE_LOOK, STAGE_LOOK_ID, writePlay } from '../engine/stage-play.ts'
 import { StageStore } from '../engine/stage-store.ts'
@@ -103,6 +104,8 @@ export interface PetState {
   lines: { touch: boolean; hello: number; night: number }
   settings: PetSettings
   intro: IntroSettings
+  /** What the opening clip is called (a 像素动画's name rather than its id). */
+  introName?: string
   bodies: number
 }
 
@@ -113,6 +116,7 @@ export class PetBrain {
   private readonly random: () => number
   private readonly people: Characters
   private readonly library: Library
+  private readonly pixels: Pixels
   private readonly designs: DesignPacks
   private server: BrainServer | undefined
   private timer: NodeJS.Timeout | undefined
@@ -137,6 +141,7 @@ export class PetBrain {
     if (options.ffmpeg !== undefined) useFfmpeg(options.ffmpeg)
     this.people = new Characters(this.paths.root, this.paths.characters, { cid: NOBODY, name: '' })
     this.library = new Library(this.paths.root)
+    this.pixels = new Pixels(this.paths.root)
     this.settings = cleanPet(this.readJson('pet.json'))
     this.designs = new DesignPacks({
       home: this.paths.root, charactersDir: this.paths.characters, version: options.version,
@@ -144,6 +149,7 @@ export class PetBrain {
       current: () => this.current(),
       intro: () => { const intro = this.intro(); return { ...(intro.source === 'skin' ? {} : { source: intro.source }), when: intro.when } },
       setIntro: (source, when) => this.saveIntro({ ...this.intro(), on: true, source, when }),
+      pixels: this.pixels,
       // Nothing here looks at materials against the spec: that is the designer's page in dsh-her.
       examine: () => {},
     })
@@ -175,6 +181,15 @@ export class PetBrain {
 
   private intro(): IntroSettings {
     return cleanIntro(this.readJson('intro.json'))
+  }
+
+  private introName(): { introName?: string } {
+    const intro = this.intro()
+    if (intro.source === 'skin') return {}
+    const pixel = introPixel(intro)
+    if (pixel === undefined) return { introName: intro.source }
+    const name = this.pixels.list().find(p => p.id === pixel)?.name
+    return name === undefined ? {} : { introName: `${name}（像素动画）` }
   }
 
   private saveIntro(intro: IntroSettings): void {
@@ -271,14 +286,17 @@ export class PetBrain {
   /** She comes out on a body: her opening clip when its time has come, then a word of hello. */
   private comeOut(client: BodyClient): void {
     const intro = this.intro()
-    const path = intro.source === 'skin' ? undefined : this.library.path('intro', intro.source)
+    // A 像素动画 goes as its code (the body draws it in its sandboxed player); a clip as its file.
+    const pixel = introPixel(intro)
+    const code = pixel === undefined ? undefined : this.pixels.code(pixel)
+    const path = pixel !== undefined || intro.source === 'skin' ? undefined : this.library.path('intro', intro.source)
     const today = dayOf(new Date(this.now()))
     let played = false
-    if (path !== undefined && intro.on && !(intro.when === 'daily' && intro.lastDay === today)) {
-      client.send({ t: 'intro', path })
+    if ((path !== undefined || code !== undefined) && intro.on && !(intro.when === 'daily' && intro.lastDay === today)) {
+      client.send(code === undefined ? { t: 'intro', path: path! } : { t: 'intro', path: '', pixel: { code, look: intro.look } })
       this.saveIntro({ ...intro, lastDay: today })
       played = true
-      this.log({ event: 'intro' })
+      this.log({ event: 'intro', ...(pixel === undefined ? {} : { pixel }) })
     }
     if (this.now() - this.helloAt < HELLO_EVERY_MS) return
     const line = this.pick(this.lines().hello)
@@ -442,6 +460,7 @@ export class PetBrain {
       lines: { touch: lines.touch !== undefined, hello: lines.hello?.length ?? 0, night: lines.night?.length ?? 0 },
       settings: this.settings,
       intro: this.intro(),
+      ...this.introName(),
       bodies: this.server?.bodies.length ?? 0,
     }
   }

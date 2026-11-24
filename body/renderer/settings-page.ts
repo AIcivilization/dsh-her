@@ -149,7 +149,7 @@ function settingsView(view: PetView): Child[] {
         ? row('按编排来', '设计包里排好的：什么时候显示什么', check(view.stage.playing, on => void ask(() => window.pet.set({ stage: on }))))
         : row('编排', '这个设计包里没有编排，所以桌面上没有她的画面', undefined),
       row('安静时段', '开始的时候她会说一句晚安（设计包里写了的话）', h('span', {}, quiet('quietFrom'), ' 到 ', quiet('quietTo'))),
-      view.intro.source === 'skin' ? undefined : row('开机动画', `「${view.intro.source}」`, h('span', {},
+      view.introName === undefined ? undefined : row('开机动画', `「${view.introName}」`, h('span', {},
         h('select', { disabled: !view.intro.on, onchange: (event: Event) => void ask(() => window.pet.set({ introWhen: (event.target as HTMLSelectElement).value as 'every' | 'daily' })) },
           h('option', { value: 'daily', selected: view.intro.when === 'daily' }, '每天第一次'),
           h('option', { value: 'every', selected: view.intro.when === 'every' }, '每次出场')),

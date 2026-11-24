@@ -38,8 +38,10 @@ export class StackedView {
   private readonly gl: WebGLRenderingContext
   private readonly halfTexel: WebGLUniformLocation | null
 
-  constructor(private readonly video: HTMLVideoElement) {
+  /** `cells`: 像素化显示 (docs/像素动画设计.md §11.3): drawn this many pixels high, shown with square edges. */
+  constructor(private readonly video: HTMLVideoElement, private readonly cells = 0) {
     this.canvas = document.createElement('canvas')
+    if (cells > 0) this.canvas.style.imageRendering = 'pixelated'
     const gl = this.canvas.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: false, preserveDrawingBuffer: false })
     if (gl === null) throw new Error('WebGL unavailable')
     this.gl = gl
@@ -75,8 +77,9 @@ export class StackedView {
   private draw(): void {
     const { gl, video } = this
     if (video.videoWidth === 0) return
-    const width = video.videoWidth
-    const height = video.videoHeight / 2
+    const full = video.videoHeight / 2
+    const height = this.cells > 0 ? Math.min(full, this.cells) : full
+    const width = Math.round(video.videoWidth * height / full)
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas.width = width
       this.canvas.height = height

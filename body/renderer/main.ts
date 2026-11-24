@@ -642,7 +642,7 @@ async function main(): Promise<void> {
   if (config.bubble === false) document.body.classList.add('no-bubble')
   // Nobody sees this window (both desktop places are off): no clips to decode, only her voice and the microphone.
   if (config.pack.clips.length === 0 || config.unseen === true) document.body.classList.add('empty')
-  else player = new Player(stage, config.pack, { started: clipStarted })
+  else player = new Player(stage, config.pack, { started: clipStarted }, config.pixel ?? 0)
   speech = new SpeechPlayer({
     sentence: (uid, seq, text, durationMs, cues) => {
       perform(cues)

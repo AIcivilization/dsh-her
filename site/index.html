@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dsh-her · 鲸鱼娘的身体引擎</title>
+<meta name="description" content="鲸鱼娘的身体引擎：住在壁纸里、浮在桌面上、住在网页和手机里，会说话、会听、会先开口、记得你。还能把照片、视频变成会动的像素表情，导出 GIF 发微信。DeepSeek Harness (dsh) 插件，开源，欢迎一起来玩。">
+<meta property="og:title" content="dsh-her · 鲸鱼娘的身体引擎">
+<meta property="og:description" content="住在壁纸里、浮在桌面上、住在网页和手机里，会说话、会听、会先开口、记得你。">
+<meta name="theme-color" content="#06142b">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐳</text></svg>">
+<link rel="stylesheet" href="style.css">
+<script type="module" src="main.js"></script>
+</head>
+<body>
+
+<header class="top">
+  <a class="brand" href="#">🐳 dsh-her</a>
+  <nav>
+    <a class="hot" href="#stickers">做表情</a>
+    <a href="#works">作品墙</a>
+    <a href="#what">她能做什么</a>
+    <a href="#install">安装</a>
+    <a href="#make">做设计</a>
+    <a href="#join">一起来玩</a>
+    <a class="star" href="https://github.com/AIcivilization/dsh-her">⭐ GitHub</a>
+  </nav>
+</header>
+
+<section class="hero">
+  <div class="hero-text">
+    <p class="eyebrow">DeepSeek Harness 插件 · 开源 · MIT</p>
+    <h1>鲸鱼娘的身体引擎</h1>
+    <p class="lead">住在壁纸里、浮在桌面上、住在网页和手机里。<br>会说话、会听、会先开口、记得你。</p>
+    <p class="en">A body engine for AI desktop companions.</p>
+    <div class="actions">
+      <a class="btn" href="#install">怎么装</a>
+      <a class="btn wechat" href="#stickers">做像素表情</a>
+      <a class="btn ghost" href="#join">一起来玩</a>
+    </div>
+  </div>
+  <figure class="sea-box">
+    <canvas id="sea" aria-label="像素动画：鲸鱼尾巴从海面升起，拍下去溅起水花" role="img"></canvas>
+    <figcaption>
+      <span class="seg" role="group" aria-label="动画">
+        <button data-anim="builtin:tail" aria-pressed="true">鲸尾出水</button>
+        <button data-anim="builtin:waves" aria-pressed="false">浪花</button>
+        <button data-anim="builtin:bubbles" aria-pressed="false">气泡</button>
+      </span>
+      <span class="seg" role="group" aria-label="画法">
+        <button data-style="dots" aria-pressed="true">圆点</button>
+        <button data-style="blocks" aria-pressed="false">方块</button>
+        <button data-style="code" aria-pressed="false">代码字</button>
+      </span>
+    </figcaption>
+    <p class="sea-note">这段动画是一个几十行的 <code>.js</code> 文件。照片、视频也能变成这样的像素动画，当她的开机动画、dsh 的背景，或者<a href="#stickers">导出 GIF 发微信</a>。</p>
+  </figure>
+</section>
+
+<main>
+
+<section id="stickers" class="band stickers">
+  <div class="stk-text">
+    <p class="tag">新 · 做微信表情</p>
+    <h2>照片、视频变像素表情</h2>
+    <p class="sub">把你、你的猫、一段视频变成会动的像素画，导出 GIF，加到微信表情就能发。全在你自己的电脑上转，不上传。</p>
+    <ol class="steps">
+      <li><b>选照片或视频</b><span>在 dsh 的「她」→「像素动画」，点「🖼 用图片」或「🎬 用视频」，视频可以只取其中几秒。绿幕也能抠干净，连泡泡、头发后面透出来的绿都去掉。</span></li>
+      <li><b>让它动起来</b><span>浮动、呼吸、跳一跳、走来走去……点一下就换。也可以掷骰子随机出一个，或者跟 AI 说你想要什么画面。</span></li>
+      <li><b>导出 GIF 发微信</b><span>点「📤 导出 GIF · 微信表情」：正方形、透明底、500 KB 以内。手机上长按图片存进相册，在微信里点表情 → ＋ 添加；电脑上拖进微信发给文件传输助手，再右键添加到表情。</span></li>
+    </ol>
+    <p class="more">GIF 里藏着动画文件，别人拖进像素工坊就能接着改。也能当她的开机动画，或者放在 dsh 对话后面。<a href="https://github.com/AIcivilization/dsh-her/blob/main/docs/像素导出设计.md">怎么做的</a></p>
+  </div>
+  <figure class="chat" aria-label="示意：在聊天里发一个像素表情">
+    <div class="msg them">会开完了吗？</div>
+    <div class="msg me sticker"><canvas id="sticker" role="img" aria-label="像素表情：一只蓝色的小鲸鱼一跳一跳"></canvas></div>
+    <div class="msg them">这表情哪来的？！</div>
+    <div class="msg me">dsh-her 做的，照片、视频都能变 😎</div>
+    <figcaption>示意。小鲸鱼是这个网页现场画的像素动画，和插件里用的是同一套引擎。</figcaption>
+  </figure>
+</section>
+
+<section id="works" class="band alt">
+  <h2>作品墙</h2>
+  <p class="sub">大家做的设计包。文件放在作者自己那里，这里只放介绍和链接。</p>
+  <div id="works-wall" class="works">
+    <p class="empty">还没有精选作品。做一个，<a href="https://github.com/AIcivilization/dsh-her/issues/new?template=design-pack.yml">投稿第一个</a>？</p>
+  </div>
+</section>
+
+<section id="what" class="band">
+  <h2>她能做什么</h2>
+  <p class="sub">我们做引擎，角色由你来设计。下面这些，换成谁的角色都一样会。</p>
+  <div class="grid">
+    <div class="card"><b>🏠 住在哪儿都行</b><p>壁纸里、桌面最上层、dsh 网页里的浮动小窗；手机和平板打开网页也能找到她。四个地方各自开关。</p></div>
+    <div class="card"><b>🎙️ 会说会听</b><p>按一下快捷键说话，说完自动发出；她说话时你开口就能打断她。声音能选，也能换成自己的。</p></div>
+    <div class="card"><b>💬 会先开口</b><p>你回到电脑前、有日子的事快到了、很久没说话时，她会自己说一句。不吵：每天最多三次，夜里不打扰。</p></div>
+    <div class="card"><b>🫧 碰她有反应</b><p>点头、点身体，她马上有动作，隔一会儿说一句符合性格的话；按住不动是摸摸头。</p></div>
+    <div class="card"><b>📒 记得你</b><p>你说过的事她记得。记忆只存在你自己的电脑上，不上传、不统计。</p></div>
+    <div class="card"><b>🎭 多个人物</b><p>可以有好几个角色，各有人设、形象、声音和开机动画。粘贴一张人设卡就能开始。</p></div>
+  </div>
+</section>
+
+<section id="install" class="band alt">
+  <h2>安装</h2>
+  <ol class="steps">
+    <li><b>装好 dsh</b><span>DeepSeek Harness 桌面版，0.2 或更新。</span></li>
+    <li><b>装插件</b><span>在 dsh 的插件页搜 <code>dsh-her</code> 安装。也可以把 <a href="https://github.com/AIcivilization/dsh-her/blob/main/docs/AI帮你装.md">这段话</a> 发给 dsh 里的 AI，让它帮你装。</span></li>
+    <li><b>跟着向导走</b><span>点 dsh 左侧的"她"，几步就好。</span></li>
+  </ol>
+  <div class="two ways">
+    <div class="card"><b>dsh 版</b><p>她住在 dsh 网页里：浮动小窗、对话背景、纯聊模式；手机和平板打开 dsh 网页也能找到她。插件约 2 MB。Linux、VPS 上就是这一种。</p></div>
+    <div class="card"><b>dsh + 桌面版（默认）</b><p>再加一个桌面程序，她能浮在桌面上、住进壁纸里。Mac（Apple 芯片）约 150 MB，Windows 约 210 MB，dsh 启动后自己下载安装。只想要 dsh 版，在「她」页面点"只要 dsh 版"。</p></div>
+  </div>
+  <p class="more"><a href="https://github.com/AIcivilization/dsh-her/blob/main/docs/使用说明.md">使用说明</a> · <a href="https://github.com/AIcivilization/dsh-her/blob/main/docs/VPS部署.md">VPS 部署</a> · <a href="https://www.npmjs.com/package/dsh-her">npm</a></p>
+</section>
+
+<section id="make" class="band">
+  <h2>做设计的人</h2>
+  <p class="sub">不用写代码。按格式做好，就能装进任何人的 dsh-her。</p>
+  <div class="grid">
+    <a class="card link" href="https://github.com/AIcivilization/dsh-her/blob/main/docs/设计包格式.md"><b>📦 设计包</b><p>一个文件夹：人设、三视图、动画素材、编排、皮肤、开机动画。导出、分享、导入都是一步。</p></a>
+    <a class="card link" href="https://github.com/AIcivilization/dsh-her/blob/main/docs/素材规格与提示词.md"><b>🎨 素材指南</b><p>每样素材的尺寸、规则和可以直接复制的提示词，六套模版起步：二次元、真人、Q 版、像素鲸鱼娘，真人女友、男友。</p></a>
+    <a class="card link" href="https://github.com/AIcivilization/dsh-her/blob/main/docs/像素动画设计.md"><b>👾 像素动画</b><p>一个 <code>.js</code> 文件，往一张粗格子里填数。照片、视频能直接转；也可以复制给大模型的说明，说你想要什么，让它写。做好了导出 GIF 当表情。</p></a>
+    <a class="card link" href="https://github.com/AIcivilization/dsh-her/blob/main/docs/设置页与编排设计.md"><b>🎬 编排和皮肤</b><p>她什么时候用哪段动画、站在哪儿、对话框长什么样，都能自己定。</p></a>
+  </div>
+</section>
+
+
+<section id="join" class="band alt">
+  <h2>一起来玩</h2>
+  <p class="sub">大家交流的是创意：皮肤、形象、好玩的像素动画。不用打招呼，也不用加群，做好了分享出来就行。</p>
+  <div class="grid">
+    <div class="card">
+      <b>🎨 皮肤和形象</b>
+      <p>做一个角色、一套皮肤、一段开机动画，在设置页导出设计包，放在你自己的仓库或网盘里，填一张投稿表。好的会放上作品墙。</p>
+      <p class="row">
+        <a class="btn small" href="https://github.com/AIcivilization/dsh-her/issues/new?template=design-pack.yml">投稿作品</a>
+        <a class="btn small ghost" href="https://github.com/AIcivilization/dsh-her/blob/main/docs/设计包格式.md">设计包格式</a>
+      </p>
+    </div>
+    <div class="card">
+      <b>👾 像素动画和表情</b>
+      <p>导出的 GIF 里藏着动画文件：发给朋友，对方拖进像素工坊就能接着改。做了好玩的，也欢迎投稿上作品墙。</p>
+      <p class="row">
+        <a class="btn small wechat" href="#stickers">怎么做表情</a>
+        <a class="btn small ghost" href="https://github.com/AIcivilization/dsh-her/issues/new?template=design-pack.yml">投稿</a>
+      </p>
+    </div>
+    <div class="card">
+      <b>💬 遇到问题、有想法</b>
+      <p>哪里不好用、出错了，或者想让她多会一件事，都可以告诉我们。代码由我们来改。</p>
+      <p class="row">
+        <a class="btn small" href="https://github.com/AIcivilization/dsh-her/issues/new?template=bug.yml">报告问题</a>
+        <a class="btn small ghost" href="https://github.com/AIcivilization/dsh-her/issues/new?template=idea.yml">提想法</a>
+      </p>
+    </div>
+  </div>
+  <p class="more">怎么做、怎么分享，见 <a href="https://github.com/AIcivilization/dsh-her/blob/main/CONTRIBUTING.md">一起来玩</a>。谢谢 <a href="https://github.com/wazgii">wazgii</a> 找到并说清楚了她说话时丢句、叠音的问题。</p>
+</section>
+
+</main>
+
+<footer>
+  <p>🐳 dsh-her · <a href="https://github.com/AIcivilization/dsh-her">GitHub</a> · <a href="https://www.npmjs.com/package/dsh-her">npm</a> · <a href="https://github.com/AIcivilization/dsh-her/issues/new/choose">报告问题</a> · MIT</p>
+  <p class="quiet">不收集任何使用数据。这个网页也不用统计。</p>
+</footer>
+
+</body>
+</html>

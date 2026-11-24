@@ -3,6 +3,7 @@
 // React and cordis come from the page through the injected `require`;
 // everything else is bundled. Runs the same on macOS, Windows and Linux.
 import { build } from 'esbuild'
+import { pixelPlayerHtml } from './pixel-player.mjs'
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
@@ -16,7 +17,11 @@ const PLATFORM_MODULES = [
   '@deepseek-ai/dsh-client-ui-dockkit',
 ]
 
+// The 像素动画 player page goes into the bundle whole: dsh's page puts it in a sandboxed iframe (docs/像素动画设计.md §4).
+const pixelPlayer = await pixelPlayerHtml(build)
+
 const result = await build({
+  define: { __PIXEL_PLAYER_HTML__: JSON.stringify(pixelPlayer) },
   entryPoints: ['src/client/index.tsx'],
   bundle: true,
   write: false,

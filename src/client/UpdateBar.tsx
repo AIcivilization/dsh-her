@@ -188,7 +188,50 @@ export function UpdateBar({ state, apply }: { state: StateView; apply: Apply }) 
           <button className="her-btn small primary" onClick={() => void apply(herApi.restartBody())}>重启身体</button>
         </>
       )}
+      <StarLink />
     </div>
+  )
+}
+
+const REPO = 'https://github.com/AIcivilization/dsh-her'
+const STARS_KEY = 'dsh-her.stars'
+
+/**
+ * Asks for a star on GitHub. A page cannot star for anyone: it opens the
+ * project, where they press ☆ Star (signed in to GitHub). The count is
+ * GitHub's public one, asked at most once a day.
+ */
+function StarLink() {
+  const [stars, setStars] = useState<number>()
+  useEffect(() => {
+    let kept: { n: number; at: number } | undefined
+    try {
+      kept = JSON.parse(localStorage.getItem(STARS_KEY) ?? 'null') ?? undefined
+    } catch {
+      kept = undefined
+    }
+    if (kept !== undefined && typeof kept.n === 'number') setStars(kept.n)
+    if (kept !== undefined && Date.now() - kept.at < 86_400_000) return
+    let live = true
+    void fetch('https://api.github.com/repos/AIcivilization/dsh-her', { headers: { accept: 'application/vnd.github+json' } })
+      .then(res => res.ok ? res.json() as Promise<{ stargazers_count?: unknown }> : undefined)
+      .then(repo => {
+        const n = repo?.stargazers_count
+        if (!live || typeof n !== 'number') return
+        setStars(n)
+        try {
+          localStorage.setItem(STARS_KEY, JSON.stringify({ n, at: Date.now() }))
+        } catch {
+          // shown, just not kept
+        }
+      })
+      .catch(() => undefined)
+    return () => { live = false }
+  }, [])
+  return (
+    <a className="her-btn small her-star" href={REPO} target="_blank" rel="noreferrer" title="打开 GitHub 项目页，登录后点右上角的 ☆ Star">
+      <span aria-hidden="true">🌟</span>喜欢就点个星{stars === undefined ? '' : <span className="her-star-n">{stars}</span>}
+    </a>
   )
 }
 

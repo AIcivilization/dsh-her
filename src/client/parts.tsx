@@ -43,7 +43,9 @@ export function BodyStatus({ state, apply }: { state: StateView; apply: Apply })
       <p className="her-muted">{install.state === 'checking' ? '正在看有没有新版本…' : install.state === 'installing' ? '正在安装…' : `正在下载身体程序 ${install.latest ?? ''}（${mb(install.done)} / ${mb(install.total)} MB）`}</p>
       {install.state === 'downloading' && (
         <div className="her-row">
-          <button className="her-btn small" onClick={() => void apply(herApi.bodyCancel())}>取消</button>
+          {install.installed === undefined
+            ? <button className="her-btn small" title="不装桌面程序，她只住在 dsh 网页里；以后想装，在这里还能装" onClick={() => void apply(herApi.bodyChoose('dsh'))}>只要 dsh 版</button>
+            : <button className="her-btn small" onClick={() => void apply(herApi.bodyCancel())}>取消</button>}
           <button className="her-btn link" onClick={() => { setManual(true); void apply(herApi.bodyCancel()) }}>太慢？换成用下载软件下载</button>
         </div>
       )}
@@ -84,14 +86,16 @@ export function BodyStatus({ state, apply }: { state: StateView; apply: Apply })
       {body.web.connected
         ? <p><Dot tone="ok" />她现在住在这个网页里（{webWhere(body.web)}）。也可以装桌面程序，让她住在桌面上：</p>
         : <p><Dot tone={body.running ? 'warn' : 'bad'} />{body.running ? '身体在运行，正在连接…' : '身体还没运行'}</p>}
+      {!body.running && !body.canStart && <InstallWays state={state} />}
       {!body.running && (
         <div className="her-row">
           {body.canStart
             ? <button className="her-btn primary" onClick={() => void start()}>启动身体</button>
-            : <>
-                <button className="her-btn primary" disabled={busy} onClick={() => { setManual(false); void apply(herApi.installBody()) }}>直接下载安装</button>
+            : !busy && <>
+                <button className="her-btn primary" onClick={() => { setManual(false); void apply(install.choice === 'dsh' ? herApi.bodyChoose('both') : herApi.installBody()) }}>{install.choice === 'dsh' ? '改成 dsh + 桌面版' : install.state === 'failed' ? '再下载一次' : '直接下载安装'}</button>
                 <button className={`her-btn ${manual ? 'primary' : ''}`} onClick={() => setManual(!manual)}>用下载软件下载</button>
-                <span className="her-muted">她在桌面上的样子是一个单独的小程序（150–220 MB），装在 dsh-her 自己的文件夹里，装好就自动启动。直接下载慢的话，可以复制链接用下载软件下。</span>
+                {install.choice !== 'dsh' && <button className="her-btn" onClick={() => void apply(herApi.bodyChoose('dsh'))}>只要 dsh 版</button>}
+                <span className="her-muted">桌面程序是一个单独的小程序（Mac 约 150 MB，Windows 约 210 MB），装在 dsh-her 自己的文件夹里，装好就自动启动。直接下载慢的话，可以复制链接用下载软件下。</span>
               </>}
         </div>
       )}
@@ -100,6 +104,18 @@ export function BodyStatus({ state, apply }: { state: StateView; apply: Apply })
       {manual && !body.canStart && <BodyManual apply={apply} onInstalled={() => setManual(false)} />}
       {message !== undefined && <p className="her-muted">{message}</p>}
     </div>
+  )
+}
+
+/** 两种装法, said in a line: which one this is, and what the other would be. */
+function InstallWays({ state }: { state: StateView }) {
+  const install = state.body.install
+  const busy = install.state === 'checking' || install.state === 'downloading' || install.state === 'installing'
+  if (install.choice === 'dsh') return <p className="her-muted">现在是 <b>dsh 版</b>：她住在 dsh 网页里，不装桌面程序。想让她也住到桌面上、壁纸里，就改成 dsh + 桌面版。</p>
+  return (
+    <p className="her-muted">
+      有两种装法：<b>dsh 版</b>（她住在 dsh 网页里）和 <b>dsh + 桌面版</b>（再加一个桌面程序，她能住到桌面上、壁纸里）。默认是 dsh + 桌面版，dsh 启动后桌面程序会自己下载安装{busy ? '，现在正在下' : ''}；只想要 dsh 版，点"只要 dsh 版"。
+    </p>
   )
 }
 

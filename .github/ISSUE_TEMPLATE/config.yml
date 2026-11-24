@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 项目网页
+    url: https://aicivilization.github.io/dsh-her/
+    about: 她能做什么、怎么装、大家做的作品。
+  - name: 怎么做、怎么分享
+    url: https://github.com/AIcivilization/dsh-her/blob/main/CONTRIBUTING.md
+    about: 做皮肤、形象、像素动画，做好了怎么分享。

@@ -96,4 +96,6 @@ export interface BodyConfig {
   bubble?: boolean
   /** Nothing to see: this window only speaks and listens (both desktop places are off). */
   unseen?: boolean
+  /** 像素化显示 (docs/像素动画设计.md §11.3): her clips drawn so many pixels high, with square edges; absent: as they are. */
+  pixel?: number
 }

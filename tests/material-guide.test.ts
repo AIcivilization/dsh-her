@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { DEFAULT_WHO, fillPrompt, GUIDE, GUIDE_GROUPS, guideMarkdown, promptFor, WHO } from '../src/core/material-guide.ts'
+import { adapt, DEFAULT_WHO, fillPrompt, GUIDE, GUIDE_GROUPS, GUIDE_STYLES, guideMarkdown, MUST, promptFor, WHO } from '../src/core/material-guide.ts'
 import { cleanVeil, DEFAULT_VEIL } from '../src/engine/web-body.ts'
 
 test('the document in docs/ is the one the guide writes (run scripts/make-material-doc.mjs after changing the guide)', () => {
@@ -34,7 +34,8 @@ test("your character's description goes into the prompts that describe her", () 
   assert.ok(fillPrompt(portrait.prompt, '银发的狐狸少女').includes('银发的狐狸少女'))
   assert.ok(!fillPrompt(portrait.prompt, '银发的狐狸少女').includes(WHO))
   // Nothing typed: ours.
-  assert.ok(fillPrompt(portrait.prompt, '  ').includes(DEFAULT_WHO))
+  assert.ok(fillPrompt(portrait.prompt, '  ').includes(DEFAULT_WHO.anime))
+  assert.ok(fillPrompt(portrait.prompt, '  ', 'real').includes(DEFAULT_WHO.real))
   assert.ok(guideMarkdown('银发的狐狸少女').includes('银发的狐狸少女'))
 })
 
@@ -48,12 +49,46 @@ test('the veil over a background stays within what a page can show', () => {
 test('every prompt to copy says what it is for and its size, a clip how long; nothing says only "the same as above"', () => {
   for (const item of GUIDE) {
     assert.ok(!item.size.startsWith('同上'), item.id)
-    const prompt = promptFor(item, DEFAULT_WHO)
+    const prompt = promptFor(item, DEFAULT_WHO.anime)
     assert.ok(prompt.startsWith('这是为deepseek-harness设计鲸鱼娘的角色之一，要求：'), item.id)
     assert.ok(prompt.includes(item.size), item.id)
     if (item.length !== undefined) assert.ok(prompt.includes(item.length), item.id)
   }
   const pet = GUIDE.find(i => i.id === 'pet-still')!
-  assert.ok(!promptFor(pet, DEFAULT_WHO, false).startsWith('这是为'))
+  assert.ok(!promptFor(pet, DEFAULT_WHO.anime, false).startsWith('这是为'))
   assert.ok(promptFor(GUIDE.find(i => i.id === 'base-portrait')!, '银发的狐狸少女').startsWith('这是为deepseek-harness设计的角色素材之一'))
+})
+
+test('six templates; the whale girls keep the three things, the girlfriend and boyfriend have no tail; no marker left', () => {
+  assert.deepEqual(GUIDE_STYLES, ['anime', 'real', 'chibi', 'pixel', 'gf', 'bf'])
+  for (const style of GUIDE_STYLES) {
+    const whale = ['anime', 'real', 'chibi', 'pixel'].includes(style)
+    for (const item of GUIDE) {
+      const prompt = promptFor(item, DEFAULT_WHO[style], true, style)
+      assert.ok(!/\{[^}]{1,4}\}|〔|〕/.test(prompt), `${style} ${item.id}`)
+      assert.equal(prompt.includes(MUST), whale && item.noHer !== true, `${style} ${item.id}`)
+      if (!whale) assert.ok(!/尾巴|鲸鱼/.test(prompt), `${style} ${item.id}`)
+      if (style === 'bf') assert.ok(!prompt.includes('她'), item.id)
+    }
+  }
+  // Every template has its own opening.
+  const intro = GUIDE.find(i => i.id === 'intro')!
+  assert.equal(new Set(GUIDE_STYLES.map(st => fillPrompt(intro.prompt, '', st))).size, 6)
+  assert.ok(promptFor(GUIDE.find(i => i.id === 'base-portrait')!, DEFAULT_WHO.gf, true, 'gf').startsWith('这是为deepseek-harness设计真人女友角色的素材之一'))
+  assert.ok(adapt('她〔和尾巴〕', 'bf') === '他' && adapt('她〔和尾巴〕', 'anime') === '她和尾巴')
+  // No maid outfit in ours.
+  for (const style of GUIDE_STYLES) assert.ok(!/女仆|围裙|蕾丝头饰|玛丽珍/.test(DEFAULT_WHO[style]), style)
+  // The three whale-girl descriptions name the three, in their own words.
+  for (const who of [DEFAULT_WHO.anime, DEFAULT_WHO.real, DEFAULT_WHO.chibi, DEFAULT_WHO.pixel]) assert.ok(who.includes('鲸鱼尾巴发饰') && who.includes('DeepSeek') && /(腰后|身后)[^。]*鲸鱼尾巴/.test(who))
+  const real = promptFor(GUIDE.find(i => i.id === 'base-portrait')!, DEFAULT_WHO.real, false, 'real')
+  assert.ok(real.startsWith('写实真人摄影，商业级Cosplay角色设定图，展示一位身材高挑修长的成年亚洲女性coser，扮演蓝色鲸鱼娘'))
+  assert.ok(real.includes('写实真人') && real.includes('九头身') && !real.includes('二次元'))
+  // The small her on the chat box is chibi and stands; she walks, flips and rolls.
+  for (const id of ['avatar-walk', 'avatar-flip', 'avatar-roll']) assert.ok(GUIDE.some(i => i.id === id), id)
+  assert.match(promptFor(GUIDE.find(i => i.id === 'avatar-still')!, DEFAULT_WHO.anime), /Q 版小人[\s\S]*站着/)
+  // Pixel art: every prompt of the pixel whale girl says so, and a clip keeps its grid.
+  for (const item of GUIDE.filter(i => i.prompt.includes('{画风}'))) assert.ok(promptFor(item, DEFAULT_WHO.pixel, true, 'pixel').includes('像素'), item.id)
+  assert.match(promptFor(GUIDE.find(i => i.id === 'pet-idle')!, DEFAULT_WHO.pixel, true, 'pixel'), /像素格子大小全程不变/)
+  // Someone's own character: no lines of ours added.
+  assert.ok(!promptFor(GUIDE.find(i => i.id === 'base-sheet')!, '银发的狐狸少女').includes(MUST))
 })

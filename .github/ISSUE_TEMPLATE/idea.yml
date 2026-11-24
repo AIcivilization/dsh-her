@@ -1,0 +1,16 @@
+name: 提想法
+description: 想让她多会一件事，或者哪里可以更好用
+labels: [enhancement]
+body:
+  - type: textarea
+    id: want
+    attributes:
+      label: 你想要什么
+      description: 用平常的话说就行：在什么时候，想让她怎样。
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: 为什么想要
+      description: 现在哪里不方便，或者有了它会好在哪。

@@ -7,6 +7,7 @@
 
 import type { ZipEntry } from './zip.ts'
 import { parseLines, type WrittenLines } from './lines.ts'
+import { PIXEL_STYLES, wrapPixelCode, type PixelStyle } from './pixel.ts'
 
 export const DESIGN_FORMAT = 'dsh-her-design@1'
 export const DESIGN_ROWS = ['avatar', 'desktop', 'pet', 'intro', 'sheet'] as const
@@ -43,7 +44,10 @@ export interface DesignManifest {
   character?: DesignCharacter
   stage?: string
   skin?: string
-  intro?: { material: string; when: 'every' | 'daily' }
+  /** The opening clip: a material of library/intro, or a 像素动画 of pixels/ (docs/像素动画设计.md §9). */
+  intro?: { material?: string; pixel?: string; when: 'every' | 'daily' }
+  /** A 像素动画 of pixels/ behind dsh's conversation, and how it is drawn. */
+  background?: { pixel: string; style?: PixelStyle; opacity?: number }
 }
 
 const text = (v: unknown, max: number): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v.trim().slice(0, max) : undefined)
@@ -109,10 +113,25 @@ export function parseDesignManifest(raw: unknown): { manifest?: DesignManifest; 
   const skin = text(v.skin, 80)
   if (skin !== undefined) manifest.skin = skin
   if (v.intro !== undefined) {
-    const intro = v.intro as { material?: unknown; when?: unknown }
+    const intro = v.intro as { material?: unknown; pixel?: unknown; when?: unknown }
     const material = text(intro?.material, 80)
-    if (material === undefined) problems.push('intro.material 要写 library/intro 里一个素材的名字')
-    else manifest.intro = { material, when: intro.when === 'every' ? 'every' : 'daily' }
+    const pixel = text(intro?.pixel, 80)
+    const when = intro?.when === 'every' ? 'every' : 'daily'
+    if (pixel !== undefined) manifest.intro = { pixel, when }
+    else if (material === undefined) problems.push('intro.material 要写 library/intro 里一个素材的名字（或者 intro.pixel 写 pixels/ 里一个像素动画）')
+    else manifest.intro = { material, when }
+  }
+  if (v.background !== undefined) {
+    const bg = v.background as { pixel?: unknown; style?: unknown; opacity?: unknown }
+    const pixel = text(bg?.pixel, 80)
+    if (pixel === undefined) problems.push('background.pixel 要写 pixels/ 里一个像素动画的文件名')
+    else {
+      manifest.background = {
+        pixel,
+        ...(PIXEL_STYLES.includes(bg.style as PixelStyle) ? { style: bg.style as PixelStyle } : {}),
+        ...(typeof bg.opacity === 'number' && Number.isFinite(bg.opacity) ? { opacity: Math.min(0.6, Math.max(0.03, bg.opacity)) } : {}),
+      }
+    }
   }
   return { manifest, problems }
 }
@@ -124,6 +143,8 @@ export interface DesignPlan {
   materials: Record<DesignRow, Array<{ name: string; file: string; data: Uint8Array }>>
   stage?: unknown
   skinFiles: Array<{ name: string; data: Uint8Array }>
+  /** 像素动画 (pixels/*.js): code, run only in a sandbox. */
+  pixelFiles: Array<{ file: string; code: string }>
   cover?: { file: string; data: Uint8Array }
   /** Files left out, and why. */
   skipped: string[]
@@ -148,7 +169,7 @@ export function planDesign(entries: readonly ZipEntry[]): { plan?: DesignPlan; p
   }
   const { manifest, problems } = parseDesignManifest(raw)
   if (manifest === undefined) return { problems }
-  const plan: DesignPlan = { manifest, materials: { avatar: [], desktop: [], pet: [], intro: [], sheet: [] }, skinFiles: [], skipped: [], problems, bytes: 0 }
+  const plan: DesignPlan = { manifest, materials: { avatar: [], desktop: [], pet: [], intro: [], sheet: [] }, skinFiles: [], pixelFiles: [], skipped: [], problems, bytes: 0 }
   const skinDir = manifest.skin === undefined ? undefined : `${manifest.skin.replace(/\/+$/, '')}/`
   for (const entry of files) {
     if (!entry.name.startsWith(base) || entry === manifestEntry) continue
@@ -158,6 +179,11 @@ export function planDesign(entries: readonly ZipEntry[]): { plan?: DesignPlan; p
     const parts = path.split('/')
     if (parts[0] === 'library' && parts.length === 3 && (DESIGN_ROWS as readonly string[]).includes(parts[1]!) && MATERIAL.test(parts[2]!)) {
       plan.materials[parts[1] as DesignRow].push({ name: nameOf(parts[2]!), file: parts[2]!, data: entry.data })
+    } else if (parts[0] === 'pixels' && parts.length === 2 && /\.js$/i.test(parts[1]!)) {
+      const code = new TextDecoder().decode(entry.data)
+      const wrapped = wrapPixelCode(code)
+      if (wrapped.script === undefined) plan.skipped.push(`${path}（${wrapped.problems.join('；')}）`)
+      else plan.pixelFiles.push({ file: parts[1]!, code })
     } else if (skinDir !== undefined && path.startsWith(skinDir) && parts.length === 2 && SKIN_FILE.test(parts[1]!)) {
       plan.skinFiles.push({ name: parts[1]!, data: entry.data })
     } else if (manifest.stage !== undefined && path === manifest.stage) {
@@ -174,13 +200,15 @@ export function planDesign(entries: readonly ZipEntry[]): { plan?: DesignPlan; p
   if (manifest.stage !== undefined && plan.stage === undefined && !problems.some(p => p.includes(manifest.stage!))) problems.push(`design.json 说有编排 ${manifest.stage}，但 zip 里没有`)
   if (manifest.skin !== undefined && !plan.skinFiles.some(f => f.name === 'skin.json')) problems.push(`design.json 说有皮肤 ${manifest.skin}/，但里面没有 skin.json`)
   if (manifest.character?.sheet !== undefined && !plan.materials.sheet.some(m => m.name === manifest.character!.sheet)) problems.push(`三视图「${manifest.character.sheet}」不在 library/sheet 里`)
-  if (manifest.intro !== undefined && !plan.materials.intro.some(m => m.name === manifest.intro!.material)) problems.push(`开机动画「${manifest.intro.material}」不在 library/intro 里`)
+  if (manifest.intro?.material !== undefined && !plan.materials.intro.some(m => m.name === manifest.intro!.material)) problems.push(`开机动画「${manifest.intro.material}」不在 library/intro 里`)
+  if (manifest.intro?.pixel !== undefined && !plan.pixelFiles.some(f => f.file === manifest.intro!.pixel)) problems.push(`开机动画「${manifest.intro.pixel}」不在 pixels/ 里`)
+  if (manifest.background !== undefined && !plan.pixelFiles.some(f => f.file === manifest.background!.pixel)) problems.push(`背景动画「${manifest.background.pixel}」不在 pixels/ 里`)
   // Two files of one name in a row (发呆.mp4 and 发呆.webm): the second cannot be told apart.
   for (const row of DESIGN_ROWS) {
     const seen = new Set<string>()
     plan.materials[row] = plan.materials[row].filter(m => (seen.has(m.name) ? (plan.skipped.push(`library/${row}/${m.file}（和另一个文件同名）`), false) : (seen.add(m.name), true)))
   }
-  const has = manifest.character !== undefined || plan.stage !== undefined || plan.skinFiles.length > 0 || manifest.intro !== undefined || DESIGN_ROWS.some(r => plan.materials[r].length > 0)
+  const has = manifest.character !== undefined || plan.stage !== undefined || plan.skinFiles.length > 0 || manifest.intro !== undefined || plan.pixelFiles.length > 0 || DESIGN_ROWS.some(r => plan.materials[r].length > 0)
   if (!has) return { problems: [...problems, '这个设计包里什么都没有'] }
   return { plan, problems }
 }

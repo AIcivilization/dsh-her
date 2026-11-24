@@ -43,3 +43,6 @@ dev-assets/
 *.flac
 *.onnx
 *.zip
+
+# The project page, built by scripts/build-site.mjs.
+_site/

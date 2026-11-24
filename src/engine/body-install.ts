@@ -67,6 +67,8 @@ export interface InstallState {
   error?: string
   /** This install runs the development body from the repository instead. */
   dev: boolean
+  /** 两种装法, as chosen (both, unless "dsh 版" was). */
+  choice?: InstallChoice
 }
 
 /** This computer's asset key in the manifest. */
@@ -104,6 +106,34 @@ export function validateManifest(value: unknown): BodyManifest {
 }
 
 const bodyRoot = (home: string) => join(home, 'body')
+
+/**
+ * 两种装法: "dsh" (she lives in dsh's page only) or "both" (dsh and the
+ * desktop program, the default). Kept in <home>/install.json once chosen.
+ */
+export type InstallChoice = 'dsh' | 'both'
+
+export function installChoice(home: string): InstallChoice {
+  try {
+    return (JSON.parse(readFileSync(join(home, 'install.json'), 'utf8')) as { desktop?: unknown }).desktop === false ? 'dsh' : 'both'
+  } catch {
+    return 'both'
+  }
+}
+
+export function setInstallChoice(home: string, choice: InstallChoice): void {
+  mkdirSync(home, { recursive: true })
+  writeFileSync(join(home, 'install.json'), `${JSON.stringify({ desktop: choice === 'both' })}\n`)
+}
+
+/**
+ * Whether dsh, just started, downloads and installs the desktop program by
+ * itself: on a computer it exists for, when it starts bodies at all, none is
+ * installed, nothing is under way, and the choice is not "dsh" only.
+ */
+export function shouldAutoInstall(at: { launch: 'auto' | 'off'; desktop: boolean; dev: boolean; installed: boolean; choice: InstallChoice; busy: boolean }): boolean {
+  return at.launch === 'auto' && at.desktop && !at.dev && !at.installed && at.choice === 'both' && !at.busy
+}
 
 export function installedBody(home: string): Installed | undefined {
   try {

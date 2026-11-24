@@ -155,3 +155,21 @@ test('a download can be cancelled, and leaves nothing behind', { skip: process.p
     rmSync(home, { recursive: true, force: true })
   }
 })
+
+test('两种装法: dsh + 桌面版 unless dsh 版 was chosen; dsh installs the desktop program by itself only when it should', async () => {
+  const { installChoice, setInstallChoice, shouldAutoInstall } = await import('../src/engine/body-install.ts')
+  const { mkdtempSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const home = mkdtempSync(join(tmpdir(), 'her-choice-'))
+  assert.equal(installChoice(home), 'both')
+  setInstallChoice(home, 'dsh')
+  assert.equal(installChoice(home), 'dsh')
+  setInstallChoice(home, 'both')
+  assert.equal(installChoice(home), 'both')
+  const at = { launch: 'auto' as const, desktop: true, dev: false, installed: false, choice: 'both' as const, busy: false }
+  assert.equal(shouldAutoInstall(at), true)
+  for (const change of [{ launch: 'off' as const }, { desktop: false }, { dev: true }, { installed: true }, { choice: 'dsh' as const }, { busy: true }]) {
+    assert.equal(shouldAutoInstall({ ...at, ...change }), false, JSON.stringify(change))
+  }
+})

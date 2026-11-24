@@ -1,0 +1,49 @@
+name: 报告问题
+description: 她不说话、不出来、装不上、显示不对……
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        谢谢你告诉我们。写得越具体，越快修好。**不要贴 API key、令牌或者别的密码。**
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+      description: 你做了什么，她怎么了，你本来以为会怎样。
+      placeholder: 点了"叫她出来"，桌面上没有出现……
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 怎么能再出现一次
+      placeholder: |
+        1. 打开 dsh，点左侧的"她"
+        2. ……
+  - type: dropdown
+    id: where
+    attributes:
+      label: 她住在哪儿
+      multiple: true
+      options:
+        - 桌面上（macOS）
+        - 桌面上（Windows）
+        - dsh 网页里（电脑）
+        - dsh 网页里（手机、平板）
+        - VPS / Linux
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 「她」→ 系统 → 关于 里能看到插件和桌面程序的版本；dsh 的版本在 dsh 的设置里。
+      placeholder: dsh-her 0.9.5，桌面程序 0.8.4，dsh 0.2.x
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 截图或日志（可选）
+      description: 截图可以直接拖进来。日志里如果有 key 或令牌，先删掉。

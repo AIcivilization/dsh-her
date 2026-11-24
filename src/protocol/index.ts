@@ -140,7 +140,7 @@ export interface Welcome {
   sessionId: string
   characters: CharacterView[]
   /** `focus`: she is not speaking first, for the body's menu. `off`: she is switched off (no window, no listening). */
-  config: { mic: 'push-to-talk' | 'always'; bargeIn: boolean; focus?: boolean; off?: boolean; places?: DeskPlaces; tray?: boolean; holdKey?: boolean; petScale?: number }
+  config: { mic: 'push-to-talk' | 'always'; bargeIn: boolean; focus?: boolean; off?: boolean; places?: DeskPlaces; tray?: boolean; holdKey?: boolean; petScale?: number; pixel?: number }
 }
 
 /** The two places of the desktop: in the wallpaper, floating on top. Both on: both at once. */
@@ -188,7 +188,7 @@ export type BrainMessage =
   | { t: 'heard'; cid: string; uttId: string; text: string; ignored?: 'echo' | 'filler' }
   | { t: 'ask'; cid: string; id: string; question: string; options: string[] }
   | { t: 'mode'; cid: string; mode: WindowMode; screen?: number; pos?: { x: number; y: number }; scale?: number }
-  | { t: 'config'; mic?: 'push-to-talk' | 'always'; bargeIn?: boolean; focus?: boolean; off?: boolean; places?: DeskPlaces; tray?: boolean; holdKey?: boolean; petScale?: number }
+  | { t: 'config'; mic?: 'push-to-talk' | 'always'; bargeIn?: boolean; focus?: boolean; off?: boolean; places?: DeskPlaces; tray?: boolean; holdKey?: boolean; petScale?: number; pixel?: number }
   /** Let the user choose a folder on the body's computer and import it (progress and report follow). */
   | { t: 'pack.pick'; id: string; ffmpeg?: string }
   | { t: 'pack.import'; id: string; dir: string }
@@ -212,8 +212,12 @@ export type BrainMessage =
    * extension) on the body's computer; answered with `folder.picked`.
    */
   | { t: 'folder.pick'; id: string; title: string; button: string; file?: string }
-  /** Play her opening clip once (a file on this computer): she comes out (§4.5). */
-  | { t: 'intro'; path: string }
+  /**
+   * Play her opening clip once (a file on this computer): she comes out (§4.5).
+   * `pixel`: a 像素动画 instead (docs/像素动画设计.md §6), its code and how it is
+   * drawn; `path` is then empty, so a body from before plays nothing.
+   */
+  | { t: 'intro'; path: string; pixel?: { code: string; look: { style: 'blocks' | 'dots' | 'code'; color: string; size: number; fit: 'contain' | 'cover' } } }
 
 export type AnyMessage = BodyMessage | BrainMessage
 
