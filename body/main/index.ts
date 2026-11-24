@@ -953,7 +953,9 @@ ipcMain.on('menu', (event) => {
 })
 
 // One body per home: a test home (~/.dsh-her-dev) gets its own Electron profile, so it can run beside the real one.
-if (expand(home) !== expand('~/.dsh-her')) app.setPath('userData', `${app.getPath('userData')}-${basename(expand(home)).replace(/^\./, '')}`)
+// 真人桌宠 in its own folder: the browser's own files (caches, storage) go in a folder inside it, not in a second folder beside it.
+if (STANDALONE && arg('home') === undefined) app.setPath('userData', join(expand(home), 'electron'))
+else if (expand(home) !== expand('~/.dsh-her')) app.setPath('userData', `${app.getPath('userData')}-${basename(expand(home)).replace(/^\./, '')}`)
 
 /** Her icon at 32 px, drawn for a 16 px tray slot (sharper on high-density screens). */
 function trayIcon(): Electron.NativeImage {

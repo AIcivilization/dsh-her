@@ -110,11 +110,28 @@ jobs:
         run: |
           $dir = Join-Path $env:RUNNER_TEMP 'body'
           New-Item -ItemType Directory -Force $dir | Out-Null
-          $zip = Get-ChildItem ../release/*.zip | Select-Object -First 1
+          $zip = Get-ChildItem ../release/dsh-her-body-*.zip | Select-Object -First 1
           & "$env:SystemRoot\System32\tar.exe" -xf $zip.FullName -C $dir
           $env:DSH_HER_HOME = Join-Path $env:RUNNER_TEMP 'home'
           $p = Start-Process -FilePath (Join-Path $dir 'dsh-her\dsh-her.exe') -ArgumentList '--smoke' -Wait -PassThru
           Write-Host "exit code $($p.ExitCode)"
+          exit $p.ExitCode
+      # 真人桌宠 (docs/独立安装包设计.md): the same body packaged as an app of its own, with its small brain.
+      - name: package 真人桌宠
+        shell: bash
+        run: node scripts/package.mjs --player --ffmpeg "$(cygpath -w "$PWD/ffmpeg/ffmpeg.exe")" --out ../release
+      - name: start the packaged 真人桌宠 once
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'player'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $zip = Get-ChildItem ../release/dsh-her-player-*.zip | Select-Object -First 1
+          & "$env:SystemRoot\System32\tar.exe" -xf $zip.FullName -C $dir
+          $exe = Join-Path $dir '真人桌宠\真人桌宠.exe'
+          $home_ = Join-Path $env:RUNNER_TEMP 'player-home'
+          $p = Start-Process -FilePath $exe -ArgumentList '--smoke', '--home', $home_ -Wait -PassThru
+          Write-Host "exit code $($p.ExitCode)"
+          if (-not (Test-Path (Join-Path $home_ 'token'))) { Write-Host 'its small brain did not start'; exit 1 }
           exit $p.ExitCode
       - uses: actions/upload-artifact@v4
         with:
@@ -122,3 +139,4 @@ jobs:
           path: |
             release/*.zip
             release/body-latest.json
+            release/player-latest.json

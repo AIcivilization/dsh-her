@@ -1,6 +1,12 @@
 // Package the body as an app for this platform, the way the plugin downloads it:
 //
-//   node scripts/package.mjs [--ffmpeg /path/to/ffmpeg] [--out ../release]
+//   node scripts/package.mjs [--ffmpeg /path/to/ffmpeg] [--out ../release] [--player]
+//
+// --player packages 真人桌宠 instead (docs/独立安装包设计.md, docs/实施计划.md
+// step 5): the same body under another name, identifier and data folder,
+// that runs its own small brain and opens 设计包 (`.her`). Its zip is
+// `dsh-her-player-<version>-<platform>-<arch>.zip`, listed in
+// `player-latest.json`; it never touches the body's files in the release.
 //
 // - macOS: Electron.app copied as "dsh-her.app" with the body in
 //   Contents/Resources/app and ffmpeg in Contents/Resources/ffmpeg; Info.plist
@@ -38,6 +44,18 @@ const platform = process.platform
 const arch = process.arch
 const run = (cmd, argv, opts = {}) => execFileSync(cmd, argv, { stdio: 'inherit', ...opts })
 
+/** 真人桌宠 or the body: everything that differs between the two packages. */
+const PLAYER = args.includes('--player')
+const kind = PLAYER
+  ? {
+    name: '真人桌宠', exe: '真人桌宠', bundleId: 'ai.aicivilization.zhenren-zhuochong', display: '真人桌宠',
+    asset: 'dsh-her-player', manifest: 'player-latest.json', format: 'dsh-her-player@1', description: '真人桌宠',
+  }
+  : {
+    name: 'dsh-her', exe: 'dsh-her', bundleId: 'ai.aicivilization.dsh-her.body', display: '她',
+    asset: 'dsh-her-body', manifest: 'body-latest.json', format: 'dsh-her-body@1', description: '她',
+  }
+
 if (platform !== 'darwin' && platform !== 'win32') {
   console.error('现在只会打 macOS 和 Windows 的包')
   process.exit(1)
@@ -52,7 +70,7 @@ if (platform === 'darwin') {
   if (foreign.length > 0) throw new Error(`这个 ffmpeg 依赖本机的库，放进 app 别人用不了：\n${foreign.join('\n')}\n换一个静态编译的（--ffmpeg）`)
 }
 
-console.log(`dsh-her body ${version} → ${platform}-${arch}`)
+console.log(`${kind.name} ${version} → ${platform}-${arch}`)
 // Electron 44 no longer downloads its program on install: fetch it (checked against its checksums) when missing.
 if (!existsSync(join(bodyDir, 'node_modules', 'electron', 'dist'))) run(process.execPath, [join(bodyDir, 'node_modules', 'electron', 'install.js')], { cwd: bodyDir })
 run('npm', ['run', 'build'], { cwd: bodyDir, shell: platform === 'win32' })
@@ -78,16 +96,26 @@ const putApp = (resources) => {
     if (!existsSync(from)) throw new Error(`缺少 ${dep}（运行 npm ci）`)
     cpSync(from, join(appDir, 'node_modules', dep), { recursive: true })
   }
-  writeFileSync(join(appDir, 'package.json'), `${JSON.stringify({ name: pkg.name, productName: 'dsh-her', version, main: pkg.main, license: pkg.license }, null, 2)}\n`)
+  // `standalone`: the body knows it is 真人桌宠 (main/standalone.ts).
+  writeFileSync(join(appDir, 'package.json'), `${JSON.stringify({ name: pkg.name, productName: kind.name, version, main: pkg.main, license: pkg.license, ...(PLAYER ? { standalone: true } : {}) }, null, 2)}\n`)
+  if (PLAYER) writeFileSync(join(resources, 'NOTICE.txt'), playerNotice)
   return appDir
 }
 
-const zipName = `dsh-her-body-${version}-${platform}-${arch}.zip`
+/** What 真人桌宠 ships with: whose engine it is, and that it needs no account. */
+const playerNotice = [
+  '真人桌宠 — 身体引擎 dsh-her（https://github.com/AIcivilization/dsh-her），MIT 许可。',
+  '设计包（.her）是各自作者的作品，许可写在设计包里，装之前会给你看。',
+  '这一版不要账号、不要 API key，不联网。',
+  '',
+].join('\n')
+
+const zipName = `${kind.asset}-${version}-${platform}-${arch}.zip`
 const zip = join(out, zipName)
 rmSync(zip, { force: true })
 
 if (platform === 'darwin') {
-  const app = join(stage, 'dsh-her.app')
+  const app = join(stage, `${kind.exe}.app`)
   // ditto keeps the framework symlinks and permissions intact.
   run('ditto', [join(bodyDir, 'node_modules', 'electron', 'dist', 'Electron.app'), app])
   const resources = join(app, 'Contents', 'Resources')
@@ -100,20 +128,50 @@ if (platform === 'darwin') {
     try { run('/usr/libexec/PlistBuddy', ['-c', `Delete :${key}`, plist], { stdio: 'ignore' }) } catch { /* not there */ }
     run('/usr/libexec/PlistBuddy', ['-c', `Add :${key} ${type} ${value}`, plist])
   }
-  set('CFBundleName', 'string', 'dsh-her')
-  set('CFBundleDisplayName', 'string', '她')
-  set('CFBundleIdentifier', 'string', 'ai.aicivilization.dsh-her.body')
+  set('CFBundleName', 'string', kind.name)
+  set('CFBundleDisplayName', 'string', kind.display)
+  set('CFBundleIdentifier', 'string', kind.bundleId)
   set('CFBundleShortVersionString', 'string', version)
   set('CFBundleVersion', 'string', version)
   set('LSUIElement', 'bool', 'true')
   set('NSMicrophoneUsageDescription', 'string', '她要听你说话（按快捷键说话、或一直在听时）')
+  if (PLAYER) {
+    // A 设计包 (.her) opens in 真人桌宠 with a double click.
+    for (const key of ['CFBundleDocumentTypes', 'UTExportedTypeDeclarations']) {
+      try { run('/usr/libexec/PlistBuddy', ['-c', `Delete :${key}`, plist], { stdio: 'ignore' }) } catch { /* not there */ }
+    }
+    for (const command of [
+      'Add :CFBundleDocumentTypes array',
+      'Add :CFBundleDocumentTypes:0 dict',
+      'Add :CFBundleDocumentTypes:0:CFBundleTypeName string 真人桌宠设计包',
+      'Add :CFBundleDocumentTypes:0:CFBundleTypeRole string Viewer',
+      'Add :CFBundleDocumentTypes:0:LSHandlerRank string Owner',
+      'Add :CFBundleDocumentTypes:0:LSItemContentTypes array',
+      `Add :CFBundleDocumentTypes:0:LSItemContentTypes:0 string ${kind.bundleId}.design`,
+      'Add :UTExportedTypeDeclarations array',
+      'Add :UTExportedTypeDeclarations:0 dict',
+      `Add :UTExportedTypeDeclarations:0:UTTypeIdentifier string ${kind.bundleId}.design`,
+      'Add :UTExportedTypeDeclarations:0:UTTypeDescription string 真人桌宠设计包',
+      'Add :UTExportedTypeDeclarations:0:UTTypeConformsTo array',
+      'Add :UTExportedTypeDeclarations:0:UTTypeConformsTo:0 string public.zip-archive',
+      'Add :UTExportedTypeDeclarations:0:UTTypeTagSpecification dict',
+      'Add :UTExportedTypeDeclarations:0:UTTypeTagSpecification:public.filename-extension array',
+      'Add :UTExportedTypeDeclarations:0:UTTypeTagSpecification:public.filename-extension:0 string her',
+    ]) {
+      run('/usr/libexec/PlistBuddy', ['-c', command, plist])
+    }
+  }
 
+  // An ad-hoc signature: Apple Silicon runs nothing unsigned. A Developer ID
+  // signature and notarization go here once there is an Apple developer account
+  // (docs/独立安装包设计.md, decision 4): codesign --options runtime with the
+  // certificate, then xcrun notarytool submit --wait and xcrun stapler staple.
   run('codesign', ['--force', '--deep', '--sign', '-', app])
   run('ditto', ['-c', '-k', '--keepParent', app, zip])
 } else {
-  const app = join(stage, 'dsh-her')
+  const app = join(stage, kind.exe)
   cpSync(join(bodyDir, 'node_modules', 'electron', 'dist'), app, { recursive: true })
-  renameSync(join(app, 'electron.exe'), join(app, 'dsh-her.exe'))
+  renameSync(join(app, 'electron.exe'), join(app, `${kind.exe}.exe`))
   const resources = join(app, 'resources')
   const appDir = putApp(resources)
   // koffi (and its Windows build) for the wallpaper layer: main.cjs keeps it external.
@@ -129,23 +187,23 @@ if (platform === 'darwin') {
   writeFileSync(icon, ico([16, 24, 32, 48, 64, 128, 256]))
   const { rcedit } = await import('rcedit')
   const numeric = version.replace(/-.*$/, '')
-  await rcedit(join(app, 'dsh-her.exe'), {
+  await rcedit(join(app, `${kind.exe}.exe`), {
     icon,
     'file-version': numeric,
     'product-version': numeric,
-    'version-string': { ProductName: 'dsh-her', FileDescription: '她', CompanyName: 'AIcivilization', OriginalFilename: 'dsh-her.exe', InternalName: 'dsh-her' },
+    'version-string': { ProductName: kind.name, FileDescription: kind.description, CompanyName: 'AIcivilization', OriginalFilename: `${kind.exe}.exe`, InternalName: kind.exe },
   })
   // The system's bsdtar writes zip with -a; named by path, not a Git tar from PATH.
   const tar = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
-  run(tar, ['-a', '-c', '-f', zip, '-C', stage, 'dsh-her'])
+  run(tar, ['-a', '-c', '-f', zip, '-C', stage, kind.exe])
 }
 rmSync(stage, { recursive: true, force: true })
 
 const sha256 = createHash('sha256').update(readFileSync(zip)).digest('hex')
-const manifestFile = join(out, 'body-latest.json')
+const manifestFile = join(out, kind.manifest)
 const manifest = existsSync(manifestFile) ? JSON.parse(readFileSync(manifestFile, 'utf8')) : {}
 const next = {
-  format: 'dsh-her-body@1',
+  format: kind.format,
   version,
   assets: { ...(manifest.version === version ? manifest.assets : {}), [`${platform}-${arch}`]: { file: zipName, size: statSync(zip).size, sha256 } },
 }
