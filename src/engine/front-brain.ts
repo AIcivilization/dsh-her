@@ -22,5 +22,7 @@ export interface FrontBrain {
   interrupt(): void
   /** The conversation going on now, if there is one yet. */
   readonly sessionId: string | undefined
+  /** Why the last reply had no words, in plain words, when the brain knows (a login that expired, no model…). */
+  readonly lastError?: string | undefined
   dispose(): Promise<void>
 }
