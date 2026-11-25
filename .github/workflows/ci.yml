@@ -126,7 +126,8 @@ jobs:
           $dir = Join-Path $env:RUNNER_TEMP 'player'
           New-Item -ItemType Directory -Force $dir | Out-Null
           $zip = Get-ChildItem ../release/dsh-her-player-*.zip | Select-Object -First 1
-          & "$env:SystemRoot\System32\tar.exe" -xf $zip.FullName -C $dir
+          # As Explorer's "全部解压缩" does: UTF-8 names (the system tar.exe cannot read 真人桌宠).
+          Expand-Archive -LiteralPath $zip.FullName -DestinationPath $dir -Force
           $exe = Join-Path $dir '真人桌宠\真人桌宠.exe'
           $home_ = Join-Path $env:RUNNER_TEMP 'player-home'
           $p = Start-Process -FilePath $exe -ArgumentList '--smoke', '--home', $home_ -Wait -PassThru

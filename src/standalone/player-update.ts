@@ -19,7 +19,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { compareVersions, downloadChecked } from '../engine/body-install.ts'
 import { httpFetch, NetError } from '../net.ts'
-import { systemTar } from '../platform.ts'
+import { extractZip } from '../core/zip.ts'
 
 const run = promisify(execFile)
 
@@ -206,9 +206,10 @@ export class PlayerUpdates {
       const unpacking = `${target}.unpacking`
       rmSync(unpacking, { recursive: true, force: true })
       mkdirSync(unpacking, { recursive: true })
-      // macOS: ditto keeps the app's symlinks, permissions and signature. Windows: the system tar reads zip.
+      // macOS: ditto keeps the app's symlinks, permissions and signature.
       if ((this.options.platform ?? process.platform) === 'darwin') await run('ditto', ['-x', '-k', zip, unpacking], { timeout: 300_000 })
-      else await run(systemTar(this.options.platform as NodeJS.Platform | undefined), ['-xf', zip, '-C', unpacking], { timeout: 300_000 })
+      // Windows: its tar.exe cannot read a UTF-8 name like 真人桌宠, so ours unpacks it.
+      else extractZip(zip, unpacking)
       rmSync(zip, { force: true })
       if (!existsSync(join(unpacking, playerApp(this.options.platform)))) throw new Error('下载的包里没有真人桌宠')
       rmSync(target, { recursive: true, force: true })

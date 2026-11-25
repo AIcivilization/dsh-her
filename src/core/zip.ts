@@ -5,6 +5,8 @@
  * tool writes. Names are kept to plain relative paths.
  */
 
+import { closeSync, fstatSync, mkdirSync, openSync, readSync, writeFileSync } from 'node:fs'
+import { dirname, resolve, sep } from 'node:path'
 import { inflateRawSync } from 'node:zlib'
 
 export interface ZipEntry {
@@ -127,4 +129,69 @@ export function readZip(zip: Uint8Array, limit = 80 * 1024 * 1024): ZipEntry[] {
     out.push({ name, data })
   }
   return out
+}
+
+/**
+ * Unpack a zip file into `dir`, one file in memory at a time: for Windows,
+ * whose tar.exe cannot read a UTF-8 name like 真人桌宠 (an update of the
+ * program unpacks through here). Names are read as UTF-8; one that would land
+ * outside `dir` is refused. Folders are made as needed; symlinks are not
+ * supported (a Windows program has none).
+ */
+export function extractZip(zipPath: string, dir: string): number {
+  const fd = openSync(zipPath, 'r')
+  try {
+    const size = fstatSync(fd).size
+    const read = (position: number, length: number): Buffer => {
+      const out = Buffer.alloc(length)
+      let done = 0
+      while (done < length) {
+        const n = readSync(fd, out, done, length - done, position + done)
+        if (n === 0) throw new Error('zip 文件不完整')
+        done += n
+      }
+      return out
+    }
+    const tail = read(Math.max(0, size - 65_557), Math.min(size, 65_557))
+    let end = -1
+    for (let i = tail.length - 22; i >= 0; i--) {
+      if (tail.readUInt32LE(i) === 0x06054b50) {
+        end = i
+        break
+      }
+    }
+    if (end < 0) throw new Error('这不是一个 zip 文件')
+    const count = tail.readUInt16LE(end + 10)
+    const directory = read(tail.readUInt32LE(end + 16), tail.readUInt32LE(end + 12))
+    const root = resolve(dir)
+    let at = 0
+    let files = 0
+    for (let n = 0; n < count; n++) {
+      if (directory.readUInt32LE(at) !== 0x02014b50) throw new Error('zip 文件坏了')
+      const method = directory.readUInt16LE(at + 10)
+      const packed = directory.readUInt32LE(at + 20)
+      const nameLength = directory.readUInt16LE(at + 28)
+      const extra = directory.readUInt16LE(at + 30)
+      const comment = directory.readUInt16LE(at + 32)
+      const local = directory.readUInt32LE(at + 42)
+      const name = directory.subarray(at + 46, at + 46 + nameLength).toString('utf8')
+      at += 46 + nameLength + extra + comment
+      const target = resolve(root, ...name.split(/[/\\]/))
+      if (target !== root && !target.startsWith(root + sep)) throw new Error(`zip 里有一个文件要放到外面去：${name}`)
+      if (name.endsWith('/') || name.endsWith('\\')) {
+        mkdirSync(target, { recursive: true })
+        continue
+      }
+      const head = read(local, 30)
+      const raw = read(local + 30 + head.readUInt16LE(26) + head.readUInt16LE(28), packed)
+      const data = method === 0 ? raw : method === 8 ? inflateRawSync(raw) : undefined
+      if (data === undefined) throw new Error(`zip 里的 ${name} 用了读不了的压缩方式`)
+      mkdirSync(dirname(target), { recursive: true })
+      writeFileSync(target, data)
+      files++
+    }
+    return files
+  } finally {
+    closeSync(fd)
+  }
 }

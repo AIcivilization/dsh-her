@@ -90,3 +90,30 @@ test('an installer: the player is downloaded once and checked, her 设计包 and
     server.close()
   }
 })
+
+test('a zip is unpacked by our own code (Windows), UTF-8 names kept, nothing let outside', async () => {
+  const { extractZip } = await import('../src/core/zip.ts')
+  const { deflateRawSync } = await import('node:zlib')
+  const dir = mkdtempSync(join(tmpdir(), 'her-unzip-'))
+  writeFileSync(join(dir, 'a.zip'), makeZip([{ name: '真人桌宠/真人桌宠.exe', data: bytes('exe') }, { name: '真人桌宠/resources/app/package.json', data: bytes('{}') }]))
+  assert.equal(extractZip(join(dir, 'a.zip'), join(dir, 'out')), 2)
+  assert.equal(readFileSync(join(dir, 'out', '真人桌宠', '真人桌宠.exe'), 'utf8'), 'exe')
+  assert.equal(readFileSync(join(dir, 'out', '真人桌宠', 'resources', 'app', 'package.json'), 'utf8'), '{}')
+  // A deflated entry, as package.mjs writes most of them.
+  const zip = Buffer.from(makeZip([{ name: 'x.txt', data: bytes('hello hello hello hello') }]))
+  const packed = deflateRawSync(Buffer.from('hello hello hello hello'))
+  const deflated = Buffer.concat([zip.subarray(0, 30 + 5), packed])
+  // Rebuilt by hand: local header with method 8 and the packed size, then the directory pointing at it.
+  deflated.writeUInt16LE(8, 8)
+  deflated.writeUInt32LE(packed.length, 18)
+  const cd = Buffer.from(zip.subarray(30 + 5 + 23))
+  cd.writeUInt16LE(8, 10)
+  cd.writeUInt32LE(packed.length, 20)
+  const endAt = cd.length - 22
+  cd.writeUInt32LE(deflated.length, endAt + 16)
+  writeFileSync(join(dir, 'b.zip'), Buffer.concat([deflated, cd]))
+  extractZip(join(dir, 'b.zip'), join(dir, 'out2'))
+  assert.equal(readFileSync(join(dir, 'out2', 'x.txt'), 'utf8'), 'hello hello hello hello')
+  writeFileSync(join(dir, 'evil.zip'), makeZip([{ name: '../outside.txt', data: bytes('no') }]))
+  assert.throws(() => extractZip(join(dir, 'evil.zip'), join(dir, 'out3')), /外面/)
+})
