@@ -37,7 +37,7 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, st
 import { fileURLToPath } from 'node:url'
 import { basename, dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { buildSystemPrompt, cardText, DEFAULT_VOICE, extractCues, extractSounds, FALLBACK_LINES, herPaths, initiativePrompt, invalidCharacter, judgeBargeIn, loadCharacter, memoryContext, OWN_PREFIX, parseOpening, parsePersonaCard, parseTouchLines, performanceSection, personaCardPrompt, readingMs, saveCharacter, SentenceSplitter, serviceOf, SOUND_SECTION, speakable, touchClip, touchLinesPrompt, TouchTracker, withSounds, cleanSplit, lastLines, sizeText, splitReason, type Character, type Moment, type SplitSettings, type TalkLine, type TouchLines } from '../core/index.ts'
+import { buildSystemPrompt, cardText, DEFAULT_VOICE, extractCues, extractSounds, FALLBACK_LINES, herPaths, initiativePrompt, invalidCharacter, judgeBargeIn, loadCharacter, memoryContext, OWN_PREFIX, parseOpening, parsePersonaCard, parseTouchLines, performanceSection, personaCardPrompt, readingMs, saveCharacter, serviceOf, SOUND_SECTION, speakable, touchClip, touchLinesPrompt, TouchTracker, withSounds, cleanSplit, lastLines, sizeText, splitReason, type Character, type Moment, type SplitSettings, type TalkLine, type TouchLines } from '../core/index.ts'
 import { personaHash as linesHash } from '../core/lines.ts'
 import { digestPrompt, notePrompt, parseDigest, transcriptOf } from '../memory/digest.ts'
 import { dayOf, FileMemory } from '../memory/store.ts'
@@ -63,6 +63,7 @@ import { forOlderPlayers } from '../core/pixel-compat.ts'
 import { checkMaterial, cleanSvg } from '../pack/material-check.ts'
 import { StageStore } from '../engine/stage-store.ts'
 import { Characters } from '../engine/characters.ts'
+import { Conversation } from '../engine/conversation.ts'
 import { DesignPacks } from '../engine/design-packs.ts'
 import { Installers } from '../engine/installer.ts'
 import { BrainServer } from '../server/brain-server.ts'
@@ -75,7 +76,7 @@ import { assignClip, avatarIn, avatarOf, exampleFile, examples, exportProject, f
 import { removePackOrLook } from '../engine/pack-remove.ts'
 import type { HerConfig } from './config.ts'
 import { HerSession, type DshServices, type ModelRoute } from './her-session.ts'
-import { heardText, SpeechQueue } from '../voice/speech-queue.ts'
+import { SpeechQueue } from '../voice/speech-queue.ts'
 import { cleanScale, webShows, fileResponse, packFile, WEB_BASE, WebBody, type ShowMedia, type WebMode } from '../engine/web-body.ts'
 import { saveUpload, uploadAllowed, uploadTarget } from '../engine/uploads.ts'
 import { Initiative } from '../engine/initiative.ts'
@@ -187,13 +188,6 @@ const UPDATE_CHECK_MS = 6 * 60 * 60_000
 const STUCK_AFTER_MS = 20_000
 
 /** One reply as seen from the stream, for timing and for `/her`'s answer. */
-interface ReplyTrace {
-  attemptId: string
-  startedAt: number
-  firstSentenceAt?: number
-  sentences: string[]
-  outcome?: string
-}
 
 /**
  * Several characters (src/engine/characters.ts): the brain runs for the one
@@ -227,11 +221,6 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
   let services: DshServices | undefined
   let session: HerSession | undefined
   let server: BrainServer | undefined
-  let sentAt: number | undefined
-  let current: ReplyTrace | undefined
-  const finished: ReplyTrace[] = []
-  /** Resolves on the first sentence of the next reply. */
-  let onFirstSentence: (() => void) | undefined
   let voice: Voice | undefined
   /** The local Ming voice (made with the voice) and her own Ming voices. */
   let ming: MingVoice | undefined
@@ -239,9 +228,6 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
   const usesMing = () => serviceOf(character.voice.id) === 'ming'
   let speech: SpeechQueue | undefined
   let nextStream = 1
-  /** What you heard of her last cut-off reply; told to her before your next turn. */
-  let cutNote: string | undefined
-  let stuckTimer: NodeJS.Timeout | undefined
   const memory = new FileMemory(join(dir, 'memory'))
   /** Who she is: the "她" page's saved settings over the plugin config's defaults. */
   let character: Character = loadCharacter(dir, {
@@ -257,8 +243,6 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
   let digesting: Promise<string> | undefined
   /** A digest that failed is not tried again before this (it ran every few minutes against a model with no key). */
   let digestRetryAt = 0
-  /** The last reply that came out empty because her model failed; cleared by the next sentence she says. */
-  let problem: { text: string; at: number } | undefined
 
   /** Write her diary page for `day` and keep what is worth keeping; a short report. */
   const digest = (day: string): Promise<string> => {
@@ -341,7 +325,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
   }
 
   const noteTick = () => {
-    if (noting !== undefined || current !== undefined || lastTalkAt <= notedUntil || Date.now() - lastTalkAt < NOTE_QUIET_MS) return
+    if (noting !== undefined || conv.current !== undefined || lastTalkAt <= notedUntil || Date.now() - lastTalkAt < NOTE_QUIET_MS) return
     noting = runNote()
       .catch((error: Error) => ctx.logger.warn(`dsh-her: note failed (${error.message})`))
       .finally(() => { noting = undefined })
@@ -371,18 +355,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     const now = new Date()
     return memoryContext({ profile: memory.profile(), recent: memory.recent(now), due: memory.due(now) })
   }
-  /** What she said first and how you touched her, told to her session before your next words. */
-  let notes: string[] = []
-  const addNote = (note: string) => {
-    notes = [...notes, note].slice(-MAX_NOTES)
-  }
-  /** Her own line in progress (an opening, a touch line), outside her session. */
-  let ownLine: { uid: string; note: string } | undefined
-  let nextOwn = 1
-  /** Waiting for a reply to start, and until when her voice is still playing. */
-  let awaitingReply = false
-  let speakingUntil = 0
-  const herBusy = () => current !== undefined || awaitingReply || Date.now() < speakingUntil
+  const herBusy = () => conv.busy()
 
   /**
    * Switched off (the button on her page, or the body's menu): no picture,
@@ -454,22 +427,60 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     if (performed.text !== '' || performed.cues.length > 0) speech?.say(uid, seq, performed.text, performed.cues, spoken)
   }
 
-  /** She says something by herself, not as a reply: the session hears of it before your next words. */
-  const sayOwnLine = (text: string, note: string) => {
-    if (speech === undefined || herOff) return
-    voice?.warm()
-    const uid = `own-${Date.now().toString(36)}-${nextOwn++}`
-    ownLine = { uid, note }
-    addNote(note)
-    ownLines = [...ownLines, { who: 'her' as const, text, time: Date.now(), conversation: session?.sessionId ?? '' }].slice(-20)
-    broadcastTalk()
-    broadcast({ t: 'speak.begin', cid, uid })
-    const splitter = new SentenceSplitter()
-    const sentences = [...splitter.push(text), ...splitter.flush()]
-    sentences.forEach((sentence, seq) => saySentence(uid, seq, sentence))
-    speech.end(uid)
-    speakingUntil = Math.max(speakingUntil, Date.now() + readingMs(text))
-  }
+  /**
+   * Talking with her (src/engine/conversation.ts): what you say goes to her
+   * session, her reply comes back sentence by sentence, a cut-off is
+   * remembered, and her own lines go out. The same one 真人桌宠 runs.
+   */
+  const conv: Conversation = new Conversation({
+    cid,
+    brain: () => session,
+    speech: () => speech,
+    speak: (uid, seq, text) => saySentence(uid, seq, text),
+    broadcast: message => broadcast(message),
+    off: () => herOff,
+    log: entry => log(entry),
+    heardYou: at => initiative.heardYou(at),
+    warm: () => voice?.warm(),
+    beforeTurn: (text, at) => {
+      const her = session
+      lastTalkAt = at
+      const reason = her?.sessionId === undefined ? undefined : splitReason(talk.split, { lastAt: talk.lastAt, tokens: talk.tokens[her.sessionId] ?? 0, now: new Date(at), dayOf })
+      talk.lastAt = at
+      saveTalk()
+      return (reason === undefined ? Promise.resolve() : newConversation(reason).then(() => {
+        broadcast({ t: 'bubble', cid, text: `（新开了一段对话：${reason}）`, ttlMs: 4000 })
+      })).then(() => {
+        sessionLines = [...sessionLines, { who: 'you' as const, text, time: Date.now() }].slice(-12)
+        broadcastTalk()
+      })
+    },
+    emptyReply: (_trace, outcome) => {
+      // Stuck before a reply began: what the turn did instead goes to the log.
+      if (outcome === 'stuck') {
+        void logQuietTurn()
+        return
+      }
+      // No words at all: say why, on her and on the page (a model without a key used to fail silently).
+      const model = route()
+      void logQuietTurn().then(error => {
+        if (error === undefined && outcome === 'committed') return
+        const text = error === undefined ? '我刚才没说出话来，模型可能出错了' : explainModelError(error, model === undefined ? '没有模型' : `${model.provider} / ${model.model}`)
+        conv.problem = { text, at: Date.now() }
+        broadcast({ t: 'bubble', cid, text: `（${text}）`, ttlMs: 12_000 })
+      })
+    },
+    replyEnded: () => refreshTalkSoon(),
+    ownLine: text => {
+      ownLines = [...ownLines, { who: 'her' as const, text, time: Date.now(), conversation: session?.sessionId ?? '' }].slice(-20)
+      broadcastTalk()
+    },
+    stuckAfterMs: STUCK_AFTER_MS,
+    stuckText: '（我好像卡住了，没能开始回答。看看 dsh 里她的会话和模型设置？）',
+    maxNotes: MAX_NOTES,
+  })
+  const sayOwnLine = (text: string, note: string) => conv.sayOwnLine(text, note)
+  const addNote = (note: string) => conv.addNote(note)
 
   /** The last few lines you two said, for her opening. */
   const lastTalk = async (): Promise<string[]> => {
@@ -634,8 +645,6 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
   let presetState: { id: string; state: 'downloading' | 'failed'; done: number; total: number; error?: string } | undefined
   let presetDownload: AbortController | undefined
 
-  /** The last barge-in, to check the utterance that follows it for echo. */
-  let lastCut: { uid: string; at: number } | undefined
   /** The pack of the most recently connected body: what she can perform. */
   let bodyPack: PackSummary | undefined
   /** She can also live in DSH's own web page (VPS, no desktop). */
@@ -856,81 +865,11 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
   }
 
   /** Stop her current reply: generation, synthesis and every body's playback. */
-  const cut = () => {
-    if (ownLine !== undefined) {
-      speech?.cancel(ownLine.uid)
-      broadcast({ t: 'speak.cancel', cid, uid: ownLine.uid })
-      ownLine = undefined
-      speakingUntil = 0
-    }
-    if (current === undefined) return
-    session?.interrupt()
-    speech?.cancel(current.attemptId)
-    broadcast({ t: 'speak.cancel', cid, uid: current.attemptId })
-  }
-
+  const cut = () => conv.cut()
   /** You said something (typed or spoken): cut her off if she is talking, then pass it on. */
-  const hear = (text: string, via: 'text' | 'voice') => {
-    if (session === undefined) return
-    cut()
-    sentAt = Date.now()
-    lastTalkAt = sentAt
-    awaitingReply = true
-    speakingUntil = 0
-    initiative.heardYou(sentAt)
-    // A voice that has to start up (Ming after a quiet while) starts while she thinks.
-    voice?.warm()
-    broadcast({ t: 'state', cid, state: 'think' })
-    clearTimeout(stuckTimer)
-    stuckTimer = setTimeout(() => {
-      log({ event: 'stuck', text, waitedMs: STUCK_AFTER_MS })
-      awaitingReply = false
-      void logQuietTurn()
-      broadcast({ t: 'state', cid, state: 'idle' })
-      broadcast({ t: 'bubble', cid, text: '（我好像卡住了，没能开始回答。看看 dsh 里她的会话和模型设置？）', ttlMs: 8000 })
-    }, STUCK_AFTER_MS)
-    stuckTimer.unref()
-    const her = session
-    const note = [...notes, ...(cutNote === undefined ? [] : [cutNote])].join('\n')
-    cutNote = undefined
-    notes = []
-    const reason = her.sessionId === undefined ? undefined : splitReason(talk.split, { lastAt: talk.lastAt, tokens: talk.tokens[her.sessionId] ?? 0, now: new Date(), dayOf })
-    talk.lastAt = sentAt
-    saveTalk()
-    ;(reason === undefined ? Promise.resolve() : newConversation(reason).then(() => {
-      broadcast({ t: 'bubble', cid, text: `（新开了一段对话：${reason}）`, ttlMs: 4000 })
-    }))
-      .then(() => {
-        sessionLines = [...sessionLines, { who: 'you' as const, text, time: Date.now() }].slice(-12)
-        broadcastTalk()
-      })
-      .then(() => (note === '' ? undefined : her.note(note)))
-      .then(() => her.say(text, via))
-      .catch((error: Error) => {
-        awaitingReply = false
-        broadcast({ t: 'state', cid, state: 'idle' })
-        broadcast({ t: 'bubble', cid, text: `（我还没准备好：${error.message}）`, ttlMs: 6000 })
-      })
-  }
-
+  const hear = (text: string, via: 'text' | 'voice') => conv.hear(text, via)
   /** A body cut her off at `seq`, `playedMs` into it: remember what you heard and stop the rest. */
-  const interrupted = (uid: string, seq: number, playedMs: number) => {
-    const heard = heardText(speech?.sentOf(uid) ?? [], seq, playedMs)
-    cutNote = heard === ''
-      ? '（备注：你上一段话刚开口就被对方打断了，对方什么都没听到。）'
-      : `（备注：你上一段话只说到"${heard}"就被对方打断了，后面的部分对方没有听到。）`
-    log({ event: 'interrupted', uid, seq, playedMs, heard })
-    lastCut = { uid, at: Date.now() }
-    if (ownLine?.uid === uid) {
-      // What she said by herself was cut: the note above says how far she got, not the whole line.
-      const whole = ownLine.note
-      notes = notes.filter(n => n !== whole)
-      ownLine = undefined
-      speakingUntil = 0
-    }
-    if (current?.attemptId === uid) session?.interrupt()
-    speech?.cancel(uid)
-  }
+  const interrupted = (uid: string, seq: number, playedMs: number) => conv.interrupted(uid, seq, playedMs)
 
   const onBodyMessage = (message: BodyMessage, audio: Uint8Array | undefined, source: 'desktop' | 'web' = 'desktop') => {
     switch (message.t) {
@@ -988,19 +927,18 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
         const endedAt = Date.now()
         voice.recognize(audio, rate).then(({ text, ms }) => {
           // Right after a barge-in: was it you, or her own voice through the speakers?
-          const barge = lastCut !== undefined && endedAt - lastCut.at < 10_000 ? lastCut : undefined
-          lastCut = undefined
-          const verdict = barge === undefined ? 'you' : judgeBargeIn(text, (speech?.sentOf(barge.uid) ?? []).map(s => s.text).join(''))
+          const barge = conv.takeBargeIn(endedAt)
+          const verdict = barge === undefined ? 'you' : judgeBargeIn(text, barge.said)
           log({ event: 'heard', uttId: message.uttId, text, asrMs: ms, audioMs: message.durationMs, verdict })
           if (verdict !== 'you') {
-            cutNote = undefined
+            conv.cutNote = undefined
             broadcast({ t: 'heard', cid, uttId: message.uttId, text: '', ignored: verdict })
             return
           }
           broadcast({ t: 'heard', cid, uttId: message.uttId, text })
           lastHeard = { text, at: Date.now() }
           if (text !== '') hear(text, 'voice')
-          sentAt = endedAt
+          conv.sentAt = endedAt
         }, (error: Error) => {
           broadcast({ t: 'heard', cid, uttId: message.uttId, text: '' })
           broadcast({ t: 'bubble', cid, text: `（我没听清：${error.message}）`, ttlMs: 5000 })
@@ -1310,8 +1248,8 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     const now = Date.now()
     const got = resolveStage(stage, {
       hour: new Date(now).getHours(),
-      herSpeaking: now < speakingUntil,
-      thinking: awaitingReply,
+      herSpeaking: now < conv.speakingUntil,
+      thinking: conv.awaitingReply,
       youSpeaking: moments.youAt !== undefined && now - moments.youAt < 4000,
       ...(moments.touch !== undefined && now - moments.touch.at < 3000 ? { touched: { part: moments.touch.part, kind: moments.touch.kind } } : {}),
       ...(moments.user === undefined ? {} : { user: moments.user }),
@@ -1390,7 +1328,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
         },
         import: importStatus,
         ...(lastHeard === undefined ? {} : { heard: lastHeard }),
-        ...(problem === undefined ? {} : { problem }),
+        ...(conv.problem === undefined ? {} : { problem: conv.problem }),
         initiative: initiative.view(),
         talk: { ...talkView(), split: talk.split, current: session?.sessionId ?? null },
         presets: { list: presetList, ...(presetState === undefined ? {} : { active: presetState }) },
@@ -2106,52 +2044,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       get route() { return route() },
       services: () => services,
       logger: ctx.logger,
-      events: {
-        start(attemptId) {
-          clearTimeout(stuckTimer)
-          awaitingReply = false
-          // A reply means someone is talking to her, wherever from (dsh's own page, `/her`).
-          initiative.heardYou()
-          current = { attemptId, startedAt: Date.now(), sentences: [] }
-          log({ event: 'start', attemptId, sinceSendMs: sentAt === undefined ? null : current.startedAt - sentAt })
-          broadcast({ t: 'speak.begin', cid, uid: attemptId })
-        },
-        sentence(attemptId, text) {
-          const now = Date.now()
-          let seq = 0
-          if (current?.attemptId === attemptId) {
-            current.firstSentenceAt ??= now
-            current.sentences.push(text)
-            seq = current.sentences.length - 1
-          }
-          onFirstSentence?.()
-          onFirstSentence = undefined
-          problem = undefined
-          log({ event: 'sentence', attemptId, text, sinceSendMs: sentAt === undefined ? null : now - sentAt })
-          saySentence(attemptId, seq, text)
-        },
-        end(attemptId, outcome) {
-          log({ event: 'end', attemptId, outcome, sinceSendMs: sentAt === undefined ? null : Date.now() - sentAt })
-          if (current?.attemptId === attemptId) {
-            current.outcome = outcome
-            if (current.sentences.length === 0) {
-              // No words at all: say why, on her and on the page (a model without a key used to fail silently).
-              const model = route()
-              void logQuietTurn().then(error => {
-                if (error === undefined && outcome === 'committed') return
-                const text = error === undefined ? '我刚才没说出话来，模型可能出错了' : explainModelError(error, model === undefined ? '没有模型' : `${model.provider} / ${model.model}`)
-                problem = { text, at: Date.now() }
-                broadcast({ t: 'bubble', cid, text: `（${text}）`, ttlMs: 12_000 })
-              })
-            }
-            finished.push(current)
-            if (finished.length > 20) finished.shift()
-          }
-          speech?.end(attemptId)
-          current = undefined
-          refreshTalkSoon()
-        },
-      },
+      events: conv.events,
     } as ConstructorParameters<typeof HerSession>[0])
     if (services !== undefined) open()
 
@@ -2163,13 +2056,13 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     speech = new SpeechQueue((text, cues) => herVoice.synthesize(speakable(text), cues), {
       sentence(uid, seq, text, audio, cues) {
         const withCues = cues.length === 0 ? {} : { cues }
-        speakingUntil = Math.max(speakingUntil, Date.now()) + (audio?.durationMs ?? readingMs(text))
+        conv.playing(audio?.durationMs ?? readingMs(text))
         if (audio === undefined) {
           broadcast({ t: 'speak.seg', cid, uid, seq, text, durationMs: text === '' ? 300 : readingMs(text), ...withCues })
           return
         }
         const stream = nextStream++
-        if (seq === 0) log({ event: 'first-audio', uid, sinceSendMs: sentAt === undefined ? null : Date.now() - sentAt, durationMs: audio.durationMs })
+        if (seq === 0) log({ event: 'first-audio', uid, sinceSendMs: conv.sentAt === undefined ? null : Date.now() - conv.sentAt, durationMs: audio.durationMs })
         const seg: BrainMessage = { t: 'speak.seg', cid, uid, seq, text, durationMs: audio.durationMs, format: audio.format, stream, ...withCues }
         server?.broadcastWithAudio(seg, stream, audio.audio)
         webBody.sendWithAudio(seg, audio.audio)
@@ -2284,7 +2177,7 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       clearInterval(noteTimer)
       clearInterval(initiativeTimer)
       clearInterval(stageTimer)
-      clearTimeout(stuckTimer)
+      conv.dispose()
       herVoice.stop()
       voice = undefined
       ming = undefined
@@ -2510,8 +2403,8 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
     const query = services?.sessionQuery
     const id = her.sessionId
     const before = query === undefined || id === undefined ? -1 : Math.max(-1, ...(await query.readSession(id)).events.map(e => e.seq))
-    const first = new Promise<void>(resolve => { onFirstSentence = resolve })
-    sentAt = Date.now()
+    const first = new Promise<void>(resolve => { conv.onFirstSentence = resolve })
+    conv.sentAt = Date.now()
     const agent = await her.say(prompt, 'command')
     const timeout = new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), 60_000).unref())
     if (await Promise.race([first, timeout]) === 'timeout') return { kind: 'error', text: '60 秒内没有等到第一句' }
@@ -2618,12 +2511,13 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
         }
         const memoryReply = memoryCommand(text)
         if (memoryReply !== undefined) return memoryReply
-        sentAt = Date.now()
+        const sentAt = Date.now()
+        conv.sentAt = sentAt
         broadcast({ t: 'state', cid, state: 'think' })
-        const before = finished.length
+        const before = conv.finished.length
         const agent = await session.say(text, 'command')
         await agent.whenIdle()
-        const reply = finished.slice(before).at(-1)
+        const reply = conv.finished.slice(before).at(-1)
         if (reply === undefined) return { kind: 'error', text: '她没有回复（看 DSH 日志里的模型错误）' }
         const firstMs = reply.firstSentenceAt === undefined ? '—' : `${reply.firstSentenceAt - sentAt} ms`
         return {
