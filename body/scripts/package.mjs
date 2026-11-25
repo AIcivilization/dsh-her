@@ -29,7 +29,8 @@
 
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { closeSync, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs'
+import { crc32, deflateRawSync } from 'node:zlib'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ico } from './ico.mjs'
@@ -110,6 +111,76 @@ const playerNotice = [
   '',
 ].join('\n')
 
+/**
+ * Zip a folder: every file deflated (stored when that is not smaller), names
+ * as UTF-8 under `name(relative path)`, one file in memory at a time.
+ */
+function writeZip(out, root, name) {
+  const files = []
+  const walk = (dir, prefix) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`
+      if (entry.isDirectory()) walk(join(dir, entry.name), rel)
+      else if (entry.isFile()) files.push(rel)
+    }
+  }
+  walk(root, '')
+  const fd = openSync(out, 'w')
+  const central = []
+  let offset = 0
+  const put = (buffer) => { writeSync(fd, buffer); offset += buffer.length }
+  const now = new Date()
+  const time = (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2)
+  const date = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate()
+  for (const rel of files) {
+    const data = readFileSync(join(root, ...rel.split('/')))
+    const packed = deflateRawSync(data, { level: 9 })
+    const stored = packed.length >= data.length
+    const body = stored ? data : packed
+    const crc = crc32(data)
+    const nameBytes = Buffer.from(name(rel), 'utf8')
+    if (offset > 0xffffffff - body.length - 1024) throw new Error('包超过 4 GB 了')
+    const local = Buffer.alloc(30)
+    local.writeUInt32LE(0x04034b50, 0)
+    local.writeUInt16LE(20, 4)
+    local.writeUInt16LE(0x0800, 6)
+    local.writeUInt16LE(stored ? 0 : 8, 8)
+    local.writeUInt16LE(time, 10)
+    local.writeUInt16LE(date, 12)
+    local.writeUInt32LE(crc, 14)
+    local.writeUInt32LE(body.length, 18)
+    local.writeUInt32LE(data.length, 22)
+    local.writeUInt16LE(nameBytes.length, 26)
+    const head = Buffer.alloc(46)
+    head.writeUInt32LE(0x02014b50, 0)
+    head.writeUInt16LE(20, 4)
+    head.writeUInt16LE(20, 6)
+    head.writeUInt16LE(0x0800, 8)
+    head.writeUInt16LE(stored ? 0 : 8, 10)
+    head.writeUInt16LE(time, 12)
+    head.writeUInt16LE(date, 14)
+    head.writeUInt32LE(crc, 16)
+    head.writeUInt32LE(body.length, 20)
+    head.writeUInt32LE(data.length, 24)
+    head.writeUInt16LE(nameBytes.length, 28)
+    head.writeUInt32LE(offset, 42)
+    central.push(head, nameBytes)
+    put(local)
+    put(nameBytes)
+    put(body)
+  }
+  const cdStart = offset
+  for (const part of central) put(part)
+  const end = Buffer.alloc(22)
+  end.writeUInt32LE(0x06054b50, 0)
+  end.writeUInt16LE(files.length, 8)
+  end.writeUInt16LE(files.length, 10)
+  end.writeUInt32LE(offset - cdStart, 12)
+  end.writeUInt32LE(cdStart, 16)
+  put(end)
+  closeSync(fd)
+}
+
 const zipName = `${kind.asset}-${version}-${platform}-${arch}.zip`
 const zip = join(out, zipName)
 rmSync(zip, { force: true })
@@ -169,9 +240,12 @@ if (platform === 'darwin') {
   run('codesign', ['--force', '--deep', '--sign', '-', app])
   run('ditto', ['-c', '-k', '--keepParent', app, zip])
 } else {
-  const app = join(stage, kind.exe)
+  // Built under plain ASCII names: on Windows, Node's cpSync, tar.exe and rcedit all take a
+  // name like 真人桌宠 through the system code page and lose it. The zip gives it its real name.
+  const app = join(stage, PLAYER ? 'player' : kind.exe)
+  const exe = PLAYER ? 'player.exe' : `${kind.exe}.exe`
   cpSync(join(bodyDir, 'node_modules', 'electron', 'dist'), app, { recursive: true })
-  renameSync(join(app, 'electron.exe'), join(app, `${kind.exe}.exe`))
+  renameSync(join(app, 'electron.exe'), join(app, exe))
   const resources = join(app, 'resources')
   const appDir = putApp(resources)
   // koffi (and its Windows build) for the wallpaper layer: main.cjs keeps it external.
@@ -187,15 +261,20 @@ if (platform === 'darwin') {
   writeFileSync(icon, ico([16, 24, 32, 48, 64, 128, 256]))
   const { rcedit } = await import('rcedit')
   const numeric = version.replace(/-.*$/, '')
-  await rcedit(join(app, `${kind.exe}.exe`), {
+  await rcedit(join(app, exe), {
     icon,
     'file-version': numeric,
     'product-version': numeric,
     'version-string': { ProductName: kind.name, FileDescription: kind.description, CompanyName: 'AIcivilization', OriginalFilename: `${kind.exe}.exe`, InternalName: kind.exe },
   })
-  // The system's bsdtar writes zip with -a; named by path, not a Git tar from PATH.
-  const tar = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
-  run(tar, ['-a', '-c', '-f', zip, '-C', stage, kind.exe])
+  if (PLAYER) {
+    // Our own zip writer: UTF-8 names (flag 11), so 真人桌宠 comes out right on any Windows.
+    writeZip(zip, app, (path) => `${kind.exe}/${path === exe ? `${kind.exe}.exe` : path}`)
+  } else {
+    // The system's bsdtar writes zip with -a; named by path, not a Git tar from PATH.
+    const tar = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
+    run(tar, ['-a', '-c', '-f', zip, '-C', stage, kind.exe])
+  }
 }
 rmSync(stage, { recursive: true, force: true })
 

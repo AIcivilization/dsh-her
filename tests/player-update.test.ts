@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { makeZip } from '../src/core/zip.ts'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -82,27 +82,22 @@ test('once a day when on, never when off; a newer version is offered, the same o
 
 test('a download that does not match its checksum is thrown away; one that does is unpacked as the new program', async () => {
   const home = mkdtempSync(join(tmpdir(), 'her-update-'))
-  // A release zip with the program in it, made the way package.mjs does.
-  const made = mkdtempSync(join(tmpdir(), 'her-update-zip-'))
-  const app = process.platform === 'win32' ? '真人桌宠' : '真人桌宠.app'
-  mkdirSync(join(made, app, 'Contents'), { recursive: true })
-  writeFileSync(join(made, app, 'Contents', 'version.txt'), '0.9.0')
-  const zipPath = join(made, 'p.zip')
-  if (process.platform === 'darwin') execFileSync('ditto', ['-c', '-k', '--keepParent', join(made, app), zipPath])
-  else if (process.platform === 'win32') execFileSync(join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'), ['-a', '-c', '-f', zipPath, '-C', made, app])
-  else execFileSync('zip', ['-qr', zipPath, app], { cwd: made })
-  const zip = readFileSync(zipPath)
+  // A release zip with the program in it, its names in UTF-8 as package.mjs writes them.
+  const platform = process.platform === 'win32' ? 'win32' : 'darwin'
+  const app = platform === 'win32' ? '真人桌宠' : '真人桌宠.app'
+  const zip = makeZip([{ name: `${app}/Contents/version.txt`, data: new TextEncoder().encode('0.9.0') }])
   const good = { file: 'p.zip', size: zip.length, sha256: createHash('sha256').update(zip).digest('hex') }
-  const files: Record<string, string | Uint8Array> = { 'player-latest.json': manifest('0.9.0', { ...good, sha256: 'b'.repeat(64) }), 'p.zip': zip }
+  const key = `${platform}-${process.arch}`
+  const files: Record<string, string | Uint8Array> = { 'player-latest.json': manifest('0.9.0', { ...good, sha256: 'b'.repeat(64) }, key), 'p.zip': zip }
   const { base, server } = await release(files)
   try {
-    const updates = new PlayerUpdates({ home, version: '0.8.6', base, platform: process.platform === 'win32' ? 'win32' : 'darwin' })
+    const updates = new PlayerUpdates({ home, version: '0.8.6', base, platform })
     await updates.check()
     await assert.rejects(updates.download(), /校验不对/)
     assert.equal(existsSync(join(home, 'updates', 'p.zip')), false)
     assert.ok(updates.state().error !== undefined)
 
-    files['player-latest.json'] = manifest('0.9.0', good)
+    files['player-latest.json'] = manifest('0.9.0', good, key)
     await updates.check()
     if (process.platform !== 'darwin' && process.platform !== 'win32') return // unpacking uses ditto or the Windows tar
     const { version, app: next } = await updates.download()
