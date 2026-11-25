@@ -139,3 +139,36 @@ test('a login that expired: a reply with no words, and why in plain words; a con
     await b.dispose()
   }
 })
+
+test('a round of only tool calls is not an empty reply; a turn of only tools is one; a cut before her first word says nothing', async () => {
+  const { b, said, until } = brain()
+  try {
+    await b.say('跟我挥手', 'text')
+    await until(() => said.includes('end committed'))
+    assert.deepEqual(said.slice(1), ['挥挥手啦。', 'end committed'])
+
+    said.length = 0
+    await b.say('只用工具', 'text')
+    await until(() => said.includes('end committed'))
+    assert.deepEqual(said.map(x => x.replace(/^start .*/, 'start')), ['start', 'end committed'], 'one empty reply, so she is not left thinking')
+
+    said.length = 0
+    await b.say('不流式', 'text')
+    await until(() => said.includes('end committed'))
+    assert.deepEqual(said.slice(1), ['没有流式的话。', 'end committed'], 'words only in the result are still said')
+
+    said.length = 0
+    await b.say('想很久', 'text')
+    await new Promise(r => setTimeout(r, 100))
+    b.interrupt()
+    await new Promise(r => setTimeout(r, 300))
+    assert.ok(!said.includes('不该说的。'), 'a cut turn says nothing')
+    said.length = 0
+    await b.say('你好', 'text')
+    await until(() => said.includes('end committed'))
+    assert.deepEqual(said.slice(1), ['你好。', '我是小禾，很高兴认识你。', 'end committed'], "the next turn's words are hers again")
+  } finally {
+    await b.dispose()
+  }
+})
+

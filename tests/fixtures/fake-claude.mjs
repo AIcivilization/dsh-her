@@ -15,6 +15,7 @@ if (at('--resume') === 'gone') {
   process.exit(1)
 }
 let telling
+let pendingCut
 const delta = (text) => out({ type: 'stream_event', session_id: session, parent_tool_use_id: null, event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } } })
 const result = (extra) => out({ type: 'result', subtype: 'success', is_error: false, session_id: session, ...extra })
 createInterface({ input: process.stdin }).on('line', (line) => {
@@ -23,7 +24,11 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   if (message.type === 'control_request' && message.request.subtype === 'interrupt') {
     clearInterval(telling)
     telling = undefined
+    pendingCut?.()
+    pendingCut = undefined
     out({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: {} } })
+    // As the real one does: the message that was going on closes before the turn's result.
+    out({ type: 'stream_event', session_id: session, parent_tool_use_id: null, event: { type: 'message_stop' } })
     result({ subtype: 'error_during_execution', is_error: true, result: '' })
     return
   }
@@ -34,7 +39,27 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     result({ is_error: true, result: 'Failed to authenticate: OAuth session expired and could not be refreshed' })
     return
   }
-  out({ type: 'stream_event', session_id: session, parent_tool_use_id: null, event: { type: 'message_start', message: { id: 'm1' } } })
+  const start = () => out({ type: 'stream_event', session_id: session, parent_tool_use_id: null, event: { type: 'message_start', message: { id: 'm1' } } })
+  const stop = () => out({ type: 'stream_event', session_id: session, parent_tool_use_id: null, event: { type: 'message_stop' } })
+  if (text.includes('挥手') || text.includes('只用工具')) {
+    // A message of only a tool call, then (or not) one with words.
+    start(); stop()
+    if (text.includes('挥手')) { start(); delta('挥挥手啦。'); stop() }
+    result({})
+    return
+  }
+  if (text.includes('不流式')) {
+    start(); stop()
+    result({ result: '没有流式的话。' })
+    return
+  }
+  if (text.includes('想很久')) {
+    // Thinking, no words yet; cut off, a word still slips out before it stops.
+    start()
+    pendingCut = () => { delta('不该说的。'); stop() }
+    return
+  }
+  start()
   if (text.includes('长故事')) {
     let n = 0
     telling = setInterval(() => delta(`第${++n}句。`), 20)

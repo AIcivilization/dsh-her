@@ -80,9 +80,11 @@ export class ClaudeCodeBrain implements FrontBrain {
   private turn = 0
   private step = 0
   private run = randomUUID().slice(0, 8)
-  private wordsThisTurn = false
-  /** This turn was stopped by us: its end is an interruption, not an error. */
-  private cutting = false
+  /**
+   * The turns sent and not ended yet, oldest first (Claude Code answers them
+   * in order, one `result` each): whether it said anything, and whether we cut it.
+   */
+  private turns: Array<{ words: boolean; cut: boolean }> = []
   private requests = 0
   lastError: string | undefined
 
@@ -151,12 +153,19 @@ export class ClaudeCodeBrain implements FrontBrain {
     if (this.child !== child) return
     this.child = undefined
     this.runningPrompt = undefined
+    const owed = this.turns.some(t => !t.cut)
+    this.turns = []
     if (why !== undefined) {
       this.log({ event: 'exit', why: why.slice(0, 300) })
       if (/No conversation found|session.*not found/i.test(why)) writeFileSync(this.options.sessionFile, '{}\n')
       this.lastError = explainClaudeError(why)
     }
     if (this.stream.active) this.stream.end('error')
+    else if (owed) {
+      // It died before saying anything: an empty reply, so she is not left thinking.
+      this.stream.start(`${this.run}@${this.turn}.${this.step++}`)
+      this.stream.end('error')
+    }
   }
 
   private read(chunk: string): void {
@@ -185,16 +194,23 @@ export class ClaudeCodeBrain implements FrontBrain {
       const event = message.event as { type?: string; delta?: { type?: string; text?: string } } | undefined
       // Only her own words; a subagent's would not be hers (there are none: no tools for it).
       if (message.parent_tool_use_id !== null && message.parent_tool_use_id !== undefined) return
-      if (event?.type === 'message_start') this.stream.start(`${this.run}@${this.turn}.${this.step++}`)
-      else if (event?.type === 'content_block_delta' && event.delta?.type === 'text_delta' && typeof event.delta.text === 'string') {
-        if (event.delta.text !== '') this.wordsThisTurn = true
+      const head = this.turns[0]
+      // A turn we cut: nothing more of it is said.
+      if (head === undefined || head.cut) {
+        if (event?.type === 'message_stop' && this.stream.active) this.stream.end('interrupted')
+        return
+      }
+      // A reply begins with her first word: a message of only tool calls is not a reply with nothing in it.
+      if (event?.type === 'content_block_delta' && event.delta?.type === 'text_delta' && typeof event.delta.text === 'string' && event.delta.text !== '') {
+        if (!this.stream.active) this.stream.start(`${this.run}@${this.turn}.${this.step++}`)
+        head.words = true
         this.stream.delta(event.delta.text)
-      } else if (event?.type === 'message_stop') this.stream.end('committed')
+      } else if (event?.type === 'message_stop' && this.stream.active) this.stream.end('committed')
       return
     }
     if (message.type === 'result') {
-      if (this.cutting) {
-        this.cutting = false
+      const head = this.turns.shift() ?? { words: false, cut: false }
+      if (head.cut) {
         if (this.stream.active) this.stream.end('interrupted')
         return
       }
@@ -204,11 +220,17 @@ export class ClaudeCodeBrain implements FrontBrain {
         this.lastError = explainClaudeError(text)
         this.log({ event: 'error', text: text.slice(0, 300) })
       }
-      // A turn that ended (an error, an interruption) with a reply still open, or with no reply at all: closed, so she is not left thinking.
-      if (this.stream.active) this.stream.end(failed ? 'error' : 'interrupted')
-      else if (failed && !this.wordsThisTurn) {
+      if (this.stream.active) this.stream.end(failed ? 'error' : 'committed')
+      else if (!head.words && !failed && typeof message.result === 'string' && message.result.trim() !== '') {
+        // Words that never came as a stream (seen once, not again): said from the turn's result rather than lost.
+        this.log({ event: 'unstreamed' })
         this.stream.start(`${this.run}@${this.turn}.${this.step++}`)
-        this.stream.end('error')
+        this.stream.delta(message.result)
+        this.stream.end('committed')
+      } else if (!head.words) {
+        // A turn with no words at all (an error, or only tool calls): one empty reply, so she is not left thinking.
+        this.stream.start(`${this.run}@${this.turn}.${this.step++}`)
+        this.stream.end(failed ? 'error' : 'committed')
       }
     }
   }
@@ -225,8 +247,7 @@ export class ClaudeCodeBrain implements FrontBrain {
     this.pending = []
     this.turn++
     this.step = 0
-    this.wordsThisTurn = false
-    this.cutting = false
+    this.turns.push({ words: false, cut: false })
     this.lastError = undefined
     this.log({ event: 'say', via, notes: before.length })
     this.write(child, { type: 'user', message: { role: 'user', content: [{ type: 'text', text: [...before, text].join('\n') }] } })
@@ -239,8 +260,9 @@ export class ClaudeCodeBrain implements FrontBrain {
 
   interrupt(): void {
     this.stream.interrupt()
-    if (this.child === undefined || !this.stream.active) return
-    this.cutting = true
+    const open = this.turns.filter(t => !t.cut)
+    if (this.child === undefined || open.length === 0) return
+    for (const turn of open) turn.cut = true
     this.write(this.child, { type: 'control_request', request_id: `interrupt-${++this.requests}`, request: { subtype: 'interrupt' } })
   }
 
@@ -248,6 +270,9 @@ export class ClaudeCodeBrain implements FrontBrain {
     const child = this.child
     this.child = undefined
     this.runningPrompt = undefined
+    // What the old program still owed is not coming.
+    this.turns = []
+    if (this.stream.active) this.stream.end('interrupted')
     if (child === undefined) return
     child.stdin?.end()
     setTimeout(() => { if (child.exitCode === null) child.kill() }, 3000).unref()
