@@ -19,6 +19,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { buildSystemPrompt, SentenceSplitter, type Character } from '../core/index.ts'
 import type { MemoryProvider } from '../memory/store.ts'
+import type { FrontBrain, ReplyEvents } from '../engine/front-brain.ts'
 
 export interface ModelRoute {
   provider: string
@@ -93,15 +94,7 @@ export interface DshServices {
   sessionQuery?: { readSession(id: string): Promise<{ events: Array<{ seq: number; type: string; data: unknown }> }> }
 }
 
-/**
- * What her stream produces, per reply: one `start`, any number of `sentence`s,
- * one `end`. `replyId` is unique across turns.
- */
-export interface ReplyEvents {
-  start(replyId: string): void
-  sentence(replyId: string, text: string): void
-  end(replyId: string, outcome: string): void
-}
+export type { ReplyEvents }
 
 export interface HerSessionDeps {
   cid: string
@@ -140,7 +133,8 @@ interface SessionRecord {
   movedToTop?: boolean
 }
 
-export class HerSession {
+/** DSH's session as her front brain (src/engine/front-brain.ts). */
+export class HerSession implements FrontBrain {
   private handle: AgentHandleLike | undefined
   private opening: Promise<AgentHandleLike> | undefined
   private readonly splitter = new SentenceSplitter()
