@@ -19,6 +19,9 @@ import { MAX_DESIGN_BYTES } from '../../src/core/design-pack.ts'
 import type { DesignPreview } from '../../src/engine/design-packs.ts'
 import type { DeskPlaces } from '../../src/protocol/index.ts'
 import { PetBrain, type PetState } from '../../src/standalone/pet-brain.ts'
+import { FIRST_CHECK_AFTER_MS, PlayerUpdates, type UpdateState } from '../../src/standalone/player-update.ts'
+import { cannotReplace, goBack, replaceWith } from './update.ts'
+import { PACKAGED } from './packaged.ts'
 import { DESIGN_FILE, translocated } from './standalone-where.ts'
 
 export { designArg, insideZip, translocated } from './standalone-where.ts'
@@ -32,6 +35,8 @@ function packagedAsPet(): boolean {
     return false
   }
 }
+
+export { PACKAGED }
 
 /** This program is 真人桌宠: packaged as it (body/scripts/package.mjs), or started so in development (`--standalone`). */
 export const STANDALONE = process.argv.includes('--standalone') || process.env.DSH_HER_STANDALONE === '1' || packagedAsPet()
@@ -56,6 +61,8 @@ export interface PetView extends PetState {
   places: DeskPlaces
   petScale: number
   app: { name: string; version: string; packaged: boolean; autostart: boolean; translocated: boolean }
+  /** Updates: what was found, the download under way, why this copy cannot replace itself. */
+  update: UpdateState & { progress?: { done: number; total: number }; busy: boolean; cannot?: string }
   /** What just went wrong, in words. */
   error?: string
 }
@@ -70,10 +77,17 @@ export interface PetChange {
   introOn?: boolean
   introWhen?: 'every' | 'daily'
   autostart?: boolean
+  /** Look for a new version once a day. */
+  autoUpdate?: boolean
 }
+
+/** How often the daily look is considered (it goes out only once a day). */
+const UPDATE_TICK_MS = 3_600_000
 
 export class Standalone {
   readonly brain: PetBrain
+  readonly updates: PlayerUpdates
+  private updateTimer: NodeJS.Timeout | undefined
   private readonly hooks: BodyHooks
   private window: BrowserWindow | undefined
   private pending: DesignPreview | undefined
@@ -82,6 +96,7 @@ export class Standalone {
   constructor(home: string, hooks: BodyHooks) {
     this.hooks = hooks
     this.brain = new PetBrain({ home, version: app.getVersion(), log: entry => console.log(JSON.stringify(entry)) })
+    this.updates = new PlayerUpdates({ home, version: app.getVersion() })
     const answer = <T>(work: () => T | Promise<T>) => async (): Promise<PetView> => {
       this.error = undefined
       try {
@@ -105,15 +120,45 @@ export class Standalone {
     ipcMain.handle('pet:use', (_event, cid: string) => answer(() => this.brain.useCharacter(cid))())
     ipcMain.handle('pet:remove', (_event, cid: string) => answer(() => this.brain.removeCharacter(cid))())
     ipcMain.handle('pet:set', (_event, change: PetChange) => answer(() => this.set(change))())
+    ipcMain.handle('pet:update-check', () => answer(() => this.updates.check())())
+    ipcMain.handle('pet:update-get', () => answer(() => this.update())())
+    ipcMain.handle('pet:update-back', () => answer(() => goBack(this.updates))())
     ipcMain.on('pet:quit', () => app.quit())
+  }
+
+  /** Download the version offered, check it, put it in and start again (the window shows how far it is). */
+  async update(): Promise<void> {
+    const why = cannotReplace()
+    if (why !== undefined) throw new Error(why)
+    const { app: next } = await this.updates.download(() => this.refresh())
+    replaceWith(this.updates, next, app.getVersion())
+  }
+
+  /** The daily look, when it is on and due; a newer version shows in the tray. */
+  private async lookForUpdate(): Promise<void> {
+    if (!this.updates.due()) return
+    try {
+      await this.updates.check()
+    } catch (error) {
+      console.log(JSON.stringify({ event: 'update-check', error: (error as Error).message }))
+    }
+    this.hooks.changed()
   }
 
   async start(): Promise<void> {
     await this.brain.start()
-    if (app.isPackaged && process.platform === 'win32') registerDesignFiles()
+    if (PACKAGED && process.platform === 'win32') registerDesignFiles()
+    this.updates.tidy()
+    // Windows put the new version in after this program quit: what went wrong, if anything.
+    const failed = this.updates.takeWindowsError()
+    if (failed !== undefined) this.error = `上次没能换上新版本：${failed}`
+    setTimeout(() => void this.lookForUpdate(), FIRST_CHECK_AFTER_MS).unref()
+    this.updateTimer = setInterval(() => void this.lookForUpdate(), UPDATE_TICK_MS)
+    this.updateTimer.unref()
   }
 
   stop(): Promise<void> {
+    clearInterval(this.updateTimer)
     return this.brain.stop()
   }
 
@@ -124,9 +169,15 @@ export class Standalone {
       places: this.hooks.places(),
       petScale: this.hooks.petScale(),
       app: {
-        name: APP_NAME, version: app.getVersion(), packaged: app.isPackaged,
-        autostart: app.isPackaged && app.getLoginItemSettings().openAtLogin,
+        name: APP_NAME, version: app.getVersion(), packaged: PACKAGED,
+        autostart: PACKAGED && app.getLoginItemSettings().openAtLogin,
         translocated: translocated(),
+      },
+      update: {
+        ...this.updates.state(),
+        ...(this.updates.progress === undefined ? {} : { progress: this.updates.progress }),
+        busy: this.updates.busyNow(),
+        ...(cannotReplace() === undefined ? {} : { cannot: cannotReplace() }),
       },
       ...(this.error === undefined ? {} : { error: this.error }),
     }
@@ -143,7 +194,8 @@ export class Standalone {
       this.brain.setQuiet(change.quietFrom ?? quietFrom, change.quietTo ?? quietTo)
     }
     if (change.introOn !== undefined || change.introWhen !== undefined) this.brain.setIntro({ ...(change.introOn === undefined ? {} : { on: change.introOn }), ...(change.introWhen === undefined ? {} : { when: change.introWhen }) })
-    if (change.autostart !== undefined && app.isPackaged) app.setLoginItemSettings({ openAtLogin: change.autostart })
+    if (change.autostart !== undefined && PACKAGED) app.setLoginItemSettings({ openAtLogin: change.autostart })
+    if (change.autoUpdate !== undefined) this.updates.setAuto(change.autoUpdate)
     if (change.stage !== undefined) await this.brain.playStage(change.stage)
   }
 

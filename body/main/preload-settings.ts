@@ -13,6 +13,12 @@ export interface PetBridge {
   use(cid: string): Promise<PetView>
   remove(cid: string): Promise<PetView>
   set(change: PetChange): Promise<PetView>
+  /** Look for a new version now. */
+  checkUpdate(): Promise<PetView>
+  /** Download the version offered and start again with it. */
+  getUpdate(): Promise<PetView>
+  /** Go back to the version before. */
+  goBack(): Promise<PetView>
   quit(): void
   /** Something changed outside the window (the tray, a file double-clicked). */
   onChanged(listener: () => void): void
@@ -27,6 +33,9 @@ const bridge: PetBridge = {
   use: cid => ipcRenderer.invoke('pet:use', cid),
   remove: cid => ipcRenderer.invoke('pet:remove', cid),
   set: change => ipcRenderer.invoke('pet:set', change),
+  checkUpdate: () => ipcRenderer.invoke('pet:update-check'),
+  getUpdate: () => ipcRenderer.invoke('pet:update-get'),
+  goBack: () => ipcRenderer.invoke('pet:update-back'),
   quit: () => ipcRenderer.send('pet:quit'),
   onChanged: listener => { ipcRenderer.on('pet:changed', () => listener()) },
 }

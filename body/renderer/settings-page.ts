@@ -160,12 +160,49 @@ function settingsView(view: PetView): Child[] {
     h('h2', {}, '这个程序'),
     h('div', { class: 'card' },
       row('开机自动启动', view.app.packaged ? undefined : '开发版里不能设', check(view.app.autostart, on => void ask(() => window.pet.set({ autostart: on })), !view.app.packaged)),
-      row(`${view.app.name} ${view.app.version}`, '身体引擎：dsh-her。不要账号、不要 key，不联网。', h('button', { onclick: () => window.pet.quit() }, '退出')),
+      ...updateRows(view),
+      row(`${view.app.name} ${view.app.version}`, `身体引擎：dsh-her。不要账号、不要 key${view.update.auto ? '；除了每天看一次有没有新版，不联网' : '，不联网'}。`, h('button', { onclick: () => window.pet.quit() }, '退出')),
     ),
     view.designs.length === 0 ? undefined : h('h2', {}, '装过的设计包'),
     view.designs.length === 0 ? undefined : h('div', { class: 'card' },
       ...view.designs.map(d => row(`${d.name} ${d.version}`, `作者：${d.author} · 许可：${d.license}${d.homepage === undefined ? '' : ` · ${d.homepage}`}`, undefined))),
   ]
+}
+
+const when = (at: number): string => {
+  const d = new Date(at)
+  const today = new Date().toDateString() === d.toDateString()
+  return `${today ? '今天' : `${d.getMonth() + 1} 月 ${d.getDate()} 日`} ${clock(d.getHours() * 60 + d.getMinutes())}`
+}
+
+/** Updates (docs/独立安装包设计.md, decision 6): the daily look, a newer version, going back. */
+function updateRows(view: PetView): HTMLElement[] {
+  const u = view.update
+  const rows: HTMLElement[] = []
+  const status = u.progress !== undefined
+    ? `正在下载 ${megabytes(u.progress.done)} / ${megabytes(u.progress.total)}，下完会核对，然后重新打开`
+    : u.available !== undefined
+      ? `有新版本 ${u.available.version}（${megabytes(u.available.size)}）`
+      : u.checkedAt === undefined
+        ? '还没看过'
+        : `${u.latest !== undefined && u.error === undefined ? '已经是最新的' : '没看成'}（${when(u.checkedAt)}看的）`
+  rows.push(row('每天看一次有没有新版', status, check(u.auto, on => void ask(() => window.pet.set({ autoUpdate: on })))))
+  if (u.error !== undefined && u.progress === undefined) rows.push(row('上次没成', u.error, undefined))
+  const buttons: HTMLElement[] = [h('button', { disabled: u.busy, onclick: () => void ask(() => window.pet.checkUpdate()) }, '现在看看')]
+  if (u.available !== undefined) {
+    buttons.push(h('button', {
+      class: 'main', disabled: u.busy || u.cannot !== undefined,
+      onclick: () => { if (confirm(`下载 ${u.available!.version} 并换上？\n大约 ${megabytes(u.available!.size)}。换好以后会自己重新打开，她和设置都还在。`)) void ask(() => window.pet.getUpdate()) },
+    }, `更新到 ${u.available.version}`))
+  }
+  rows.push(row('更新', u.cannot, h('span', { style: 'display:flex;gap:6px' }, ...buttons)))
+  if (u.previous !== undefined) {
+    rows.push(row(`上一版 ${u.previous.version}`, '新版本用着不对，可以退回去', h('button', {
+      disabled: u.busy || u.cannot !== undefined,
+      onclick: () => { if (confirm(`退回 ${u.previous!.version}？会重新打开。`)) void ask(() => window.pet.goBack()) },
+    }, '退回')))
+  }
+  return rows
 }
 
 function draw(view: PetView): void {
@@ -179,6 +216,8 @@ function draw(view: PetView): void {
       h('h1', {}, view.app.name),
       dropZone('把她的设计包拖进来', '和这个程序一起收到的 .her 文件（或 .zip）。装之前会先给你看里面有什么。'),
       h('p', { class: 'note' }, '还没有人物，所以桌面上现在什么都没有。'),
+      h('h2', {}, `${view.app.name} ${view.app.version}`),
+      h('div', { class: 'card' }, ...updateRows(view)),
       h('div', { class: 'buttons' }, h('button', { onclick: () => window.pet.quit() }, '退出')),
     )
   } else parts.push(...settingsView(view))
@@ -192,5 +231,6 @@ window.addEventListener('drop', event => {
   const file = event.dataTransfer?.files[0]
   if (file !== undefined) void ask(() => window.pet.drop(file))
 })
-window.pet.onChanged(() => void ask(() => window.pet.state()))
+// Something changed outside the window (the tray, a file, a download moving along): drawn even while a click is still being answered.
+window.pet.onChanged(() => void window.pet.state().then(draw))
 void ask(() => window.pet.state())

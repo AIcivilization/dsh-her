@@ -219,8 +219,17 @@ export async function install(home: string, base: string, manifest: BodyManifest
   const downloads = downloadFolder(home)
   mkdirSync(downloads, { recursive: true })
   const zip = join(downloads, asset.file)
-  // From GitHub, or a mirror when GitHub cannot be reached: the size and SHA-256 below decide either way.
-  const res = await fetchChecked(at(base, asset.file), signal === undefined ? {} : { signal })
+  await downloadChecked(at(base, asset.file), asset, zip, onProgress, signal)
+  return unpack(home, manifest, zip)
+}
+
+/**
+ * Download a release file to `zip`, from GitHub or a mirror when GitHub
+ * cannot be reached: its size and SHA-256 decide either way. A file that
+ * does not match is thrown away. Progress in bytes.
+ */
+export async function downloadChecked(url: string, asset: { size: number; sha256: string }, zip: string, onProgress: (done: number, total: number) => void, signal?: AbortSignal): Promise<void> {
+  const res = await fetchChecked(url, signal === undefined ? {} : { signal })
   if (!res.ok || res.body === null) throw new Error(`下载失败（${res.status}）`)
   const hash = createHash('sha256')
   let done = 0
@@ -240,7 +249,6 @@ export async function install(home: string, base: string, manifest: BodyManifest
     throw new Error('下载的文件校验不对（可能没下完或被改过），已经删掉，再试一次')
   }
   renameSync(`${zip}.part`, zip)
-  return unpack(home, manifest, zip)
 }
 
 /** What the page shows for downloading by hand: the links, where the file goes, whether it is there yet. */

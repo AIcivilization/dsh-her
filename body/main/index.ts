@@ -37,7 +37,7 @@ import { listPacks, loadSettings, saveSettings, type BodySettings } from '../../
 import { iconPixels } from '../shared/icon.ts'
 import { importLook } from '../../src/pack/import-look.ts'
 import { attachToWallpaper } from './wallpaper-win.ts'
-import { APP_NAME, designArg, insideZip, STANDALONE, Standalone, standaloneHome, translocated } from './standalone.ts'
+import { APP_NAME, designArg, insideZip, PACKAGED, STANDALONE, Standalone, standaloneHome, translocated } from './standalone.ts'
 
 /** ⌃⌥Space / Ctrl+Alt+Space: talk to her. Alt+Space alone is taken by Windows' window menu. */
 const TALK_SHORTCUT = 'Control+Alt+Space'
@@ -647,8 +647,14 @@ function statusLabel(): string {
 /** 真人桌宠's menu: who she is, on or off, where she shows; nothing about talking or DSH. */
 function petMenu(): Electron.MenuItemConstructorOptions[] {
   const view = pet!.view()
+  const newer = view.update.available
   const last: Electron.MenuItemConstructorOptions[] = [
     { type: 'separator' },
+    // A newer version: shown here; a click opens the window (with its size and progress) and starts it.
+    ...(newer === undefined ? [] : [{
+      label: view.update.busy ? `正在下载 ${newer.version}…` : `更新到 ${newer.version}…`, enabled: !view.update.busy,
+      click: () => { openSettings(); void pet!.update().catch(error => console.log(JSON.stringify({ event: 'update', error: (error as Error).message }))).finally(() => refreshTray()) },
+    }]),
     { label: '设置…', click: () => openSettings() },
     { label: '退出', click: () => app.quit() },
   ]
@@ -737,9 +743,12 @@ function refreshTray(): void {
   if (tray === undefined) return
   tray.setContextMenu(Menu.buildFromTemplate(menuTemplate()))
   if (pet !== undefined) {
-    const name = pet.view().character?.name
-    if (process.platform === 'darwin') tray.setTitle(name === undefined ? '桌宠' : off ? `${[...name].slice(0, 4).join('')}·关` : [...name].slice(0, 4).join(''))
-    tray.setToolTip(name === undefined ? APP_NAME : `${APP_NAME} · ${name}`)
+    const view = pet.view()
+    const name = view.character?.name
+    // A dot when a newer version is waiting.
+    const dot = view.update.available === undefined ? '' : ' •'
+    if (process.platform === 'darwin') tray.setTitle(`${name === undefined ? '桌宠' : off ? `${[...name].slice(0, 4).join('')}·关` : [...name].slice(0, 4).join('')}${dot}`)
+    tray.setToolTip(`${name === undefined ? APP_NAME : `${APP_NAME} · ${name}`}${view.update.available === undefined ? '' : ` · 有新版本 ${view.update.available.version}`}`)
     pet.refresh()
     return
   }
@@ -983,7 +992,7 @@ if (STANDALONE) {
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()
-} else if (STANDALONE && app.isPackaged && insideZip()) {
+} else if (STANDALONE && PACKAGED && insideZip()) {
   // Windows shows a zip as a folder: a double click in there runs only this one file, out of Temp.
   app.whenReady().then(() => {
     dialog.showMessageBoxSync({ type: 'info', title: APP_NAME, message: '请先把压缩包解压出来，再打开', detail: `现在是在压缩包里直接打开的，这样运行不了。\n在压缩包上点右键 →"全部解压缩"，再打开解压出来的文件夹里的 ${APP_NAME}。`, buttons: ['好'] })
