@@ -158,6 +158,7 @@ export function readme(target: InstallerTarget, about: { her: string; name: stri
     `设计：${about.author || '（没写）'}　许可：${about.license}`,
     `程序：真人桌宠 ${about.version}（身体引擎 dsh-her，https://github.com/AIcivilization/dsh-her）`,
     '不要账号、不要 key。除了每天看一次有没有新版本，不联网（设置里能关）。',
+    '更多说明：https://github.com/AIcivilization/dsh-her/blob/main/docs/真人桌宠.md',
     '',
   ]
   const mac = [
