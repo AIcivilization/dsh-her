@@ -17,3 +17,18 @@ test('真人桌宠 knows when it was started from the wrong place, and what it w
   assert.equal(designArg(['electron', '.', '--standalone', '--home', '/tmp/x', '/tmp/小禾.ZIP']), '/tmp/小禾.ZIP')
   assert.equal(designArg(['/tmp/app.zip', '--standalone']), undefined)
 })
+
+test('真人桌宠 on Windows finds the 设计包 an installer put in its folder, only when there is one', async () => {
+  const { mkdtempSync, writeFileSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { designBeside } = await import('../body/main/standalone-where.ts')
+  const folder = mkdtempSync(join(tmpdir(), 'her-beside-'))
+  assert.equal(designBeside(folder), undefined)
+  writeFileSync(join(folder, '真人桌宠.exe'), '')
+  writeFileSync(join(folder, '小禾.her'), '')
+  assert.equal(designBeside(folder), join(folder, '小禾.her'))
+  writeFileSync(join(folder, '薄荷.HER'), '')
+  assert.equal(designBeside(folder), undefined, 'two: the person chooses')
+  assert.equal(designBeside(join(folder, 'nope')), undefined)
+})

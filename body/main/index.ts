@@ -24,7 +24,7 @@ import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage,
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { homedir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import type { BodyMessage, BrainMessage, DeskPlaces, PackSummary } from '../../src/protocol/index.ts'
 import { cleanPlace, pickScene, shouldSwitch, type Look, type LookPrefs } from '../../src/pack/look.ts'
 import type { BodyConfig, LinkStatus, MicMode, Mode, PackInfo } from '../shared/types.ts'
@@ -37,7 +37,7 @@ import { listPacks, loadSettings, saveSettings, type BodySettings } from '../../
 import { iconPixels } from '../shared/icon.ts'
 import { importLook } from '../../src/pack/import-look.ts'
 import { attachToWallpaper } from './wallpaper-win.ts'
-import { APP_NAME, designArg, insideZip, PACKAGED, STANDALONE, Standalone, standaloneHome, translocated } from './standalone.ts'
+import { APP_NAME, designArg, designBeside, insideZip, PACKAGED, STANDALONE, Standalone, standaloneHome, translocated } from './standalone.ts'
 
 /** ⌃⌥Space / Ctrl+Alt+Space: talk to her. Alt+Space alone is taken by Windows' window menu. */
 const TALK_SHORTCUT = 'Control+Alt+Space'
@@ -1055,6 +1055,8 @@ if (!app.requestSingleInstanceLock()) {
       globalShortcut.register(BAR_SHORTCUT, openBar)
       if (settings.holdKey === true) startHoldHook()
     } else if (!SMOKE) {
+      // Windows: the installer has her 设计包 in the program's folder; at the first start it is looked at (still not put in unasked).
+      if (designToOpen === undefined && nobody && PACKAGED && process.platform === 'win32') designToOpen = designBeside(dirname(process.execPath))
       // Nobody yet, or a 设计包 was what started the app: the window to put her in.
       if (designToOpen !== undefined) pet.openDesign(designToOpen)
       else if (nobody) pet.openSettings()

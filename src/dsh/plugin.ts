@@ -64,6 +64,7 @@ import { checkMaterial, cleanSvg } from '../pack/material-check.ts'
 import { StageStore } from '../engine/stage-store.ts'
 import { Characters } from '../engine/characters.ts'
 import { DesignPacks } from '../engine/design-packs.ts'
+import { Installers } from '../engine/installer.ts'
 import { BrainServer } from '../server/brain-server.ts'
 import { type AvatarView, API_BASE, apiHandlers, handle, type ApiRuntime } from './api.ts'
 import { bodyRunning, findDevBody, launchBody, type LaunchPlan } from '../engine/body-launcher.ts'
@@ -1345,6 +1346,8 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
   }
 
   /** 设计包 (docs/设计包格式.md): others' designs in, hers out. */
+  /** 生成安装包: 真人桌宠 from our release with her 设计包 beside it. */
+  const installers = new Installers(paths.root)
   const designs = new DesignPacks({
     home: paths.root, charactersDir: paths.characters, version: PLUGIN_VERSION, library, skins, people,
     current: () => ({ cid, dir, character }),
@@ -1839,6 +1842,19 @@ function run(ctx: Context, config: HerConfig, people: Characters, switchTo: (cid
       if (choice.switchTo && record.cid !== undefined) api.characterUse(record.cid)
       return { record, notes }
     },
+    installerPlan: targets => installers.plan(targets),
+    installerMake: request => {
+      // Her 设计包 first (anything wrong with it is said at once), then the long part in the background.
+      const id = request.id.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')
+      const { zip } = designs.export({
+        parts: new Set(request.parts), id: id.length >= 2 ? id : `her-${Date.now().toString(36)}`, name: request.name || character.name,
+        author: request.author, version: request.version || '1.0.0', license: request.license, description: request.description,
+      })
+      void installers.make({ targets: request.targets, design: zip, name: request.name || character.name, author: request.author, license: request.license, outDir: designDeps.exportDir?.() ?? join(paths.root, "exports") })
+        .then(files => log({ event: 'installer', files: files.length, targets: request.targets }))
+        .catch((error: Error) => log({ event: 'installer', error: error.message }))
+    },
+    installerJob: () => installers.job,
     chatScenes: () => {
       // 纯聊模式 goes round her scenes: those of what she wears, then every 桌面 picture or clip of the 素材库.
       const own = webBody.scenes()

@@ -26,6 +26,24 @@ import type { DesignChoice, DesignPacks, InstalledDesign } from '../engine/desig
 import type { ShowMedia, WebConfig, WebMode, WebPlace, WebScope, WebVeil } from '../engine/web-body.ts'
 
 /** 编排 for the page: the stage, what is wrong in it, the 素材库, the looks it can use whole, the versions to go back to. */
+/** What the page asks an installer to be made of: the parts of 导出设计包 (never the skin), and who made it under what licence. */
+export interface InstallerRequest {
+  targets: InstallerTarget[]
+  parts: Array<'character' | 'stage' | 'sheet' | 'intro'>
+  id: string
+  name: string
+  author: string
+  version: string
+  license: string
+  description: string
+}
+
+const installerTargets = (value: unknown): InstallerTarget[] => {
+  const targets = Array.isArray(value) ? value.filter((t): t is InstallerTarget => (INSTALLER_TARGETS as readonly unknown[]).includes(t)) : []
+  if (targets.length === 0) throw new ApiError('选一个系统：Mac 或 Windows')
+  return [...new Set(targets)]
+}
+
 export interface StageView {
   stage?: Stage
   problems: string[]
@@ -92,6 +110,7 @@ import type { MingSettings, OwnVoice } from '../voice/ming-voices.ts'
 import type { InitiativeSettings, PersonaFromCard, SplitSettings } from '../core/index.ts'
 import type { FocusChoice, InitiativeView } from '../engine/initiative.ts'
 import type { Preset } from '../engine/presets.ts'
+import { INSTALLER_TARGETS, type InstallerJob, type InstallerPlan, type InstallerTarget } from '../engine/installer.ts'
 
 export const API_BASE = '/api/dsh-her'
 
@@ -262,6 +281,10 @@ export interface ApiRuntime {
   designsList(): { installed: InstalledDesign[]; exportable: ReturnType<DesignPacks['exportable']> }
   /** Put in the parts chosen of a pack looked at before. */
   designApply(token: string, choice: DesignChoice): { record: InstalledDesign; notes: string[] }
+  /** 生成安装包 (docs/独立安装包设计.md §5): what has to be downloaded first; start making them; how far it is. */
+  installerPlan(targets: InstallerTarget[]): Promise<InstallerPlan>
+  installerMake(request: InstallerRequest): void
+  installerJob(): InstallerJob
   /** "移走" on the 形象 page: a 外形包 or 形象 (`look:<id>`) aside, kept in `.removed`; its name. */
   packRemove(id: string): string
   /** "移走" on the 形象工坊 page: a project's folder aside; its name. */
@@ -553,6 +576,15 @@ export function apiHandlers(rt: ApiRuntime): Record<string, Handler> {
     },
     '/chat/scenes': async () => ({ ...rt.chatScenes() }),
     '/designs/list': async () => ({ ...rt.designsList() }),
+    '/installer/plan': async body => ({ ...await rt.installerPlan(installerTargets(body.targets)) }),
+    '/installer/make': async body => {
+      if (body.confirm !== true) throw new ApiError('要先勾"我确认"')
+      const parts = Array.isArray(body.parts) ? body.parts.filter((p): p is InstallerRequest['parts'][number] => p === 'character' || p === 'stage' || p === 'sheet' || p === 'intro') : []
+      const text = (key: string, max: number) => (typeof body[key] === 'string' ? (body[key] as string).slice(0, max) : '')
+      rt.installerMake({ targets: installerTargets(body.targets), parts, id: text('id', 40), name: text('name', 40), author: text('author', 60), version: text('version', 20), license: text('license', 200), description: text('description', 400) })
+      return { job: rt.installerJob() }
+    },
+    '/installer/job': async () => ({ job: rt.installerJob() }),
     '/pack/remove': async body => {
       const name = rt.packRemove(str(body.id, '外形'))
       return { name, ...withState() }

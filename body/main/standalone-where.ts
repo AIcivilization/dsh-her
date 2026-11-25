@@ -3,7 +3,9 @@
  * Nothing of Electron in here, so it can be tested on its own.
  */
 
+import { readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 /** A 设计包 under a name of its own, so a double click opens this app (a `.zip` is one too). */
 export const DESIGN_FILE = /\.(her|zip)$/i
@@ -20,3 +22,14 @@ export const translocated = (exe: string = process.execPath): boolean => exe.inc
 
 /** A 设计包 among what the program was started with (a double click on Windows passes its path). */
 export const designArg = (argv: readonly string[]): string | undefined => argv.slice(1).find(a => !a.startsWith('-') && DESIGN_FILE.test(a))
+
+/** The 设计包 an installer put beside the program (Windows: in its folder), when there is exactly one. */
+export function designBeside(folder: string): string | undefined {
+  let found: string[]
+  try {
+    found = readdirSync(folder).filter(name => /\.her$/i.test(name))
+  } catch {
+    return undefined
+  }
+  return found.length === 1 ? join(folder, found[0]!) : undefined
+}

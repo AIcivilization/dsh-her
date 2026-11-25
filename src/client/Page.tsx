@@ -548,6 +548,9 @@ function Home({ state, apply, go }: { state: StateView; apply: Apply; go: (secti
       <Showcase state={state} onGo={target => (target === 'places' ? document.querySelector('.her-places')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) : go(target))} />
       <PlacesRow state={state} apply={apply} />
       <IntroAndBackground state={state} go={go} />
+      <section className="her-card">
+        <LinkRow icon="copy" title="生成安装包：把她送给不玩 dsh 的人" text="她和「真人桌宠」打成一个 zip，对方解压、打开，她就住到对方的桌面上。" onClick={() => { go('designs'); setTimeout(() => document.getElementById('her-installer')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300) }} />
+      </section>
       <AllSettings groups={groups} go={go} foot={`记得 ${state.memory.facts.length} 件关于你的事、${state.memory.episodes.length} 个事件，写了 ${state.memory.diary.length} 天日记。点一格进那一页；带开关的可以直接在这里开关。`} />
       <div>
         <section className="her-card her-quick">

@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { herApi, type DesignChoice, type DesignPreview, type DesignsList, type StateView } from './api.ts'
+import { herApi, type DesignChoice, type DesignPreview, type DesignsList, type InstallerJob, type InstallerTarget, type StateView } from './api.ts'
 import { uploadFile, type UploadProgress } from './upload.ts'
 import type { Apply } from './parts.tsx'
 
@@ -197,6 +197,85 @@ function ExportCard({ list, state }: { list: DesignsList; state: StateView }) {
         <a className={`her-btn primary${chosen.length === 0 ? ' disabled' : ''}`} aria-disabled={chosen.length === 0} href={chosen.length === 0 ? undefined : href} download={`${form.name || 'her'}.zip`}>导出（zip）</a>
         <span className="her-faint">之后可以照着标准文档再改 design.json，比如加一张封面 cover.png。</span>
       </div>
+      <InstallerBlock parts={chosen.filter(p => p !== 'skin')} form={{ ...form, id }} />
     </section>
+  )
+}
+
+/** A licence that does not let her be passed on (the same words the brain refuses, src/engine/installer.ts). */
+const keepsToOneself = (license: string) => /仅.{0,4}个人|不许转发|不得转发|不可转发|禁止转发|不许分享|personal use only|no redistribution/i.test(license)
+
+/**
+ * 生成安装包 (docs/独立安装包设计.md §5): the same parts and the same who-made-it
+ * as above, as 真人桌宠 with her beside it, for someone who has no DSH.
+ * The first time, 真人桌宠 itself comes from our release: its size is shown
+ * and asked about before anything is downloaded.
+ */
+function InstallerBlock({ parts, form }: { parts: string[]; form: { name: string; id: string; author: string; version: string; license: string; description: string } }) {
+  const [targets, setTargets] = useState<Record<InstallerTarget, boolean>>({ 'darwin-arm64': true, 'win32-x64': true })
+  const [sure, setSure] = useState(false)
+  const [job, setJob] = useState<InstallerJob>({ state: 'idle' })
+  const [error, setError] = useState<string>()
+  const [busy, setBusy] = useState(false)
+  const chosen = (Object.keys(targets) as InstallerTarget[]).filter(t => targets[t])
+  const closed = keepsToOneself(form.license)
+  // Follow a job under way (also one started before the page was opened).
+  useEffect(() => {
+    let stop = false
+    const poll = async () => {
+      const r = await herApi.installerJob()
+      if (stop || !r.ok) return
+      setJob(r.job)
+      if (r.job.state === 'running') setTimeout(() => void poll(), 800)
+    }
+    void poll()
+    return () => { stop = true }
+  }, [busy])
+  const start = async () => {
+    setError(undefined)
+    setBusy(true)
+    try {
+      const plan = await herApi.installerPlan(chosen)
+      if (!plan.ok) {
+        setError(plan.message)
+        return
+      }
+      const download = plan.targets.filter(t => !t.cached)
+      if (download.length > 0) {
+        const total = download.reduce((n, t) => n + t.size, 0)
+        const ok = window.confirm(`要先从我们的 GitHub 发布下载真人桌宠 ${plan.version}：\n${download.map(t => `${t.name}：${mb(t.size)}`).join('\n')}\n一共 ${mb(total)}，下载过的以后不用再下。现在下载吗？`)
+        if (!ok) return
+      }
+      const r = await herApi.installerMake({ targets: chosen, parts: parts as Array<'character' | 'stage' | 'sheet' | 'intro'>, ...form, confirm: sure })
+      if (!r.ok) setError(r.message)
+      else setJob(r.job)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const running = job.state === 'running'
+  return (
+    <div id="her-installer" className="her-installer">
+      <h2>生成安装包：给不玩 dsh 的人</h2>
+      <p className="her-muted">把上面选的这些（不带皮肤）和「真人桌宠」程序打成一个 zip，存到"下载"文件夹。对方不用装 dsh：解压、打开，双击里面的 .her，她就住到对方的桌面上了。这一版的她不会聊天，碰她会说设计包里写好的台词。</p>
+      <div className="her-row">
+        {(['darwin-arm64', 'win32-x64'] as const).map(t => (
+          <label key={t} className="her-check"><input type="checkbox" checked={targets[t]} onChange={ev => setTargets(x => ({ ...x, [t]: ev.target.checked }))} />{t === 'darwin-arm64' ? 'Mac（Apple 芯片）' : 'Windows（64 位）'}</label>
+        ))}
+      </div>
+      {closed && <p className="her-warn">许可是"{form.license}"：这样的她不能生成给别人。在上面换一个允许转发的许可。</p>}
+      <label className="her-check her-confirm">
+        <input type="checkbox" checked={sure} onChange={ev => setSure(ev.target.checked)} />
+        <span>我确认：<b>真人的脸和声音，本人同意</b>；图片、视频、字体如果是别人的，我有对方的许可，可以发给别人。</span>
+      </label>
+      <div className="her-row">
+        <button className="her-btn primary" disabled={!sure || closed || chosen.length === 0 || parts.length === 0 || running || busy} onClick={() => void start()}>{running ? '正在生成…' : '生成安装包'}</button>
+        <span className="her-faint">对方第一次打开会被系统拦一下（我们还没有苹果和微软的签名），怎么过写在包里的 说明.txt 里。</span>
+      </div>
+      {running && <p className="her-muted">{job.step}{job.progress === undefined ? '' : `：${mb(job.progress.done)} / ${mb(job.progress.total)}`}</p>}
+      {job.state === 'done' && job.files !== undefined && <p className="her-ok">做好了，在"下载"文件夹里：{job.files.map(f => f.split(/[/\\]/).pop()).join('、')}</p>}
+      {job.state === 'failed' && <p className="her-warn">没做成：{job.error}</p>}
+      {error !== undefined && <p className="her-warn">{error}</p>}
+    </div>
   )
 }

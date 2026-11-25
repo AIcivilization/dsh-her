@@ -414,6 +414,10 @@ label.her-setrow{display:flex!important;width:100%;cursor:pointer}
 .her-setrow.sub{padding-left:22px}
 .her-design-read{margin:8px 0}
 .her-design-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:12px 0}
+.her-installer{margin-top:18px;padding-top:14px;border-top:1px solid ${LINE}}
+.her-installer h2{margin-top:0}
+.her-confirm{align-items:flex-start;margin:8px 0;line-height:1.5}
+.her-confirm input{margin-top:3px}
 .her-design-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:${MUTED}}
 .her-design-form label.wide{grid-column:1/-1}
 .her-setrow.her-off{opacity:.55}

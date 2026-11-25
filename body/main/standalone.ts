@@ -24,7 +24,7 @@ import { cannotReplace, goBack, replaceWith } from './update.ts'
 import { PACKAGED } from './packaged.ts'
 import { DESIGN_FILE, translocated } from './standalone-where.ts'
 
-export { designArg, insideZip, translocated } from './standalone-where.ts'
+export { designArg, designBeside, insideZip, translocated } from './standalone-where.ts'
 
 export const APP_NAME = '真人桌宠'
 

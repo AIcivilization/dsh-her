@@ -1,10 +1,12 @@
 // Calls to the plugin's endpoints on DSH's own authenticated `/api` channel.
 
 import type { PixelsView, SkinsView, StageView, StateView, VoicesView } from '../dsh/api.ts'
+import type { InstallerRequest } from '../dsh/api.ts'
 import type { ManualInstall } from '../engine/body-install.ts'
 import type { DraftSummary, DraftView } from '../engine/pixel-drafts.ts'
 import type { ChatView } from '../dsh/pixel-chat.ts'
 import type { DesignChoice, DesignPreview, InstalledDesign } from '../engine/design-packs.ts'
+import type { InstallerJob, InstallerPlan, InstallerTarget } from '../engine/installer.ts'
 import { isRemotePage } from '../core/where.ts'
 import type { LookProject, WorkshopCard } from '../core/workshop.ts'
 import type { ProjectStatus } from '../engine/workshop.ts'
@@ -13,6 +15,7 @@ import type { ClipUse, ClipsView } from '../pack/types.ts'
 export type { PixelsView, SkinsView, StageView, StateView, VoicesView }
 export type { DraftSummary, DraftView, ChatView }
 export type { DesignChoice, DesignPreview, InstalledDesign }
+export type { InstallerJob, InstallerPlan, InstallerRequest, InstallerTarget }
 export type DesignsList = { installed: InstalledDesign[]; exportable: { character: string; stage?: { scenes: number; materials: number; skipped: string[] }; sheet?: string; skin?: string; intro?: string } }
 
 export interface FrameRegion {
@@ -129,6 +132,9 @@ export const herApi = {
   designSkin: (id?: string) => post<{ sessionId: string }>('/design/skin', id === undefined ? {} : { id }),
   designsList: () => post<DesignsList>('/designs/list'),
   designApply: (token: string, choice: DesignChoice) => post<{ record: InstalledDesign; notes: string[] }>('/designs/apply', { token, choice }),
+  installerPlan: (targets: InstallerTarget[]) => post<InstallerPlan>('/installer/plan', { targets }),
+  installerMake: (request: InstallerRequest & { confirm: boolean }) => post<{ job: InstallerJob }>('/installer/make', { ...request }),
+  installerJob: () => post<{ job: InstallerJob }>('/installer/job'),
   libraryUndo: (row: string, name: string) => post<StageView>('/library/undo', { row, name }),
   skinsGet: () => post<SkinsView>('/skins/get'),
   voicesGet: () => post<VoicesView>('/voices/get'),
