@@ -662,6 +662,7 @@ function petMenu(): Electron.MenuItemConstructorOptions[] {
   if (off) return [{ label: `${view.character!.name}（关着）`, enabled: false }, { label: '叫她出来', click: () => setOff(false, true) }, ...last]
   return [
     { label: view.character!.name, enabled: false },
+    ...(view.chat.choice.kind === 'none' ? [] : [{ label: `和她说话（${process.platform === 'darwin' ? '⌃⌥↩' : 'Ctrl+Alt+Enter'}）`, click: () => openBar() }]),
     { label: '关掉她', click: () => setOff(true, true) },
     ...(look === undefined ? [] : [sceneMenu(look)]),
     { type: 'separator' },
@@ -783,9 +784,12 @@ function barBounds(): Electron.Rectangle {
  * The talk bar (docs/对话入口设计.md), wherever she is, even over a full-screen
  * app: a window you called is allowed there; her own figure is not.
  */
+/** 真人桌宠 has a brain chosen: someone to talk to. */
+const petTalks = () => pet !== undefined && !pet.view().empty && pet.view().chat.choice.kind !== 'none'
+
 function openBar(): void {
   // 真人桌宠 without a brain has nobody to talk to.
-  if (off || STANDALONE) return
+  if (off || (STANDALONE && !petTalks())) return
   if (process.platform === 'darwin') app.focus({ steal: true })
   if (barWindow !== undefined && !barWindow.isDestroyed()) {
     barWindow.setBounds(barBounds())
@@ -1020,6 +1024,7 @@ if (!app.requestSingleInstanceLock()) {
         petScale: () => petScale(),
         setPetScale: next => setPetScale(next, true),
         changed: () => refreshTray(),
+        talk: () => openBar(),
       })
       await pet.start()
       nobody = pet.view().empty
@@ -1055,6 +1060,8 @@ if (!app.requestSingleInstanceLock()) {
       globalShortcut.register(BAR_SHORTCUT, openBar)
       if (settings.holdKey === true) startHoldHook()
     } else if (!SMOKE) {
+      // Typing to her (when a brain is chosen: openBar checks).
+      globalShortcut.register(BAR_SHORTCUT, openBar)
       // Windows: the installer has her 设计包 in the program's folder; at the first start it is looked at (still not put in unasked).
       if (designToOpen === undefined && nobody && PACKAGED && process.platform === 'win32') designToOpen = designBeside(dirname(process.execPath))
       // Nobody yet, or a 设计包 was what started the app: the window to put her in.

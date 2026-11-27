@@ -55,7 +55,7 @@ async function body(home: string) {
 }
 
 test('settings that cannot be are put right', () => {
-  assert.deepEqual(cleanPet({ quietFrom: 9999, petScale: 99, off: 'yes', wallpaper: true, nightDay: 'today' }), { off: false, quietFrom: 23 * 60 + 30, quietTo: 8 * 60 + 30, wallpaper: true, petScale: 3 })
+  assert.deepEqual(cleanPet({ quietFrom: 9999, petScale: 99, off: 'yes', wallpaper: true, nightDay: 'today' }), { off: false, quietFrom: 23 * 60 + 30, quietTo: 8 * 60 + 30, brain: { kind: 'none' }, voice: true, wallpaper: true, petScale: 3 })
 })
 
 test('the pet without a brain: nobody at first, a 设计包 brings her in, she answers a touch, says hello and good night', async () => {
@@ -142,6 +142,73 @@ test('the pet without a brain: nobody at first, a 设计包 brings her in, she a
     brain.removeCharacter(second.record.cid!)
     assert.equal(brain.state().characters.length, 1)
     again.close()
+  } finally {
+    await brain.stop()
+  }
+})
+
+test('真人桌宠 talking: no brain says how to get one; with one, what you type goes to it and her reply comes back sentence by sentence', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'her-pet-chat-'))
+  const { Secrets } = await import('../src/voice/secrets.ts')
+  const told: string[] = []
+  let events: import('../src/engine/front-brain.ts').ReplyEvents | undefined
+  const fake = {
+    say: async (text: string) => {
+      told.push(text)
+      // The brain answers a moment later, as a real one does.
+      setTimeout(() => {
+        events!.start('r1')
+        events!.sentence('r1', '在的。')
+        events!.sentence('r1', '你今天怎么样？')
+        events!.end('r1', 'committed')
+      }, 10)
+    },
+    note: async (text: string) => { told.push(`note ${text}`) },
+    interrupt: () => { told.push('interrupt') },
+    sessionId: 's1',
+    dispose: async () => {},
+  }
+  const brain = new PetBrain({ home, version: '0.9.0', preferredPort: 39500 + Math.floor(Math.random() * 400), random: () => 0, comeOutAfterMs: 20, chatBrain: fake, secrets: new Secrets(home, false) })
+  await brain.start()
+  try {
+    await brain.installDesign(brain.previewDesign(design()).token)
+    brain.setVoice(false)
+    const her = await body(home)
+    await her.wait('welcome')
+    her.say({ t: 'user.text', text: '在吗' })
+    assert.match((await her.wait('bubble')).text, /和她聊天/)
+    assert.equal(brain.state().chat.choice.kind, 'none')
+
+    await brain.setBrain({ kind: 'claude-code' })
+    assert.equal(brain.state().chat.choice.kind, 'claude-code')
+    // The fake brain takes the place of Claude Code; its events are the conversation's.
+    ;(brain as unknown as { ensureChat(): { conv: { events: typeof events } } }).ensureChat()
+    events = (brain as unknown as { chat: { conv: { events: typeof events } } }).chat.conv.events
+    her.say({ t: 'user.text', text: '在吗' })
+    assert.equal((await her.wait('state')).state, 'think')
+    const segs: string[] = []
+    for (let i = 0; i < 2; i++) segs.push((await her.wait('speak.seg')).text)
+    assert.deepEqual(segs, ['在的。', '你今天怎么样？'])
+    await her.wait('speak.end')
+    assert.deepEqual(told, ['在吗'])
+
+    // Her talk bar: the lines so far.
+    her.say({ t: 'talk.get' })
+    const talk = await her.wait('talk')
+    assert.deepEqual(talk.lines, [{ who: 'you', text: '在吗' }, { who: 'her', text: '在的。你今天怎么样？' }])
+
+    // Touched: her line out loud (not a bubble), and her brain hears of it with your next words.
+    her.say({ t: 'touch', cid: 'x', part: 'head', kind: 'tap' })
+    assert.equal((await her.wait('speak.seg')).text, '别闹。')
+    her.say({ t: 'user.text', text: '嘿嘿' })
+    await new Promise(r => setTimeout(r, 50))
+    assert.match(told.find(t => t.startsWith('note'))!, /点了点你的头.*别闹/)
+
+    // Her key goes to where keys are kept, not into her settings.
+    await brain.setKey('sk-secret')
+    assert.equal(brain.state().chat.key, true)
+    assert.doesNotMatch(readFileSync(join(home, 'pet.json'), 'utf8'), /sk-secret/)
+    her.close()
   } finally {
     await brain.stop()
   }

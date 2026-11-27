@@ -163,6 +163,8 @@ export interface TalkView {
   segments: Array<{ id: string; title: string; createdAt: string }>
   /** How big the conversation is, in plain words. */
   size?: string
+  /** One conversation and nothing to open elsewhere, and no listening (真人桌宠): the bar shows only the lines and the box. */
+  simple?: boolean
 }
 
 export type BrainMessage =

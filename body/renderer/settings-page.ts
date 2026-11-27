@@ -143,6 +143,8 @@ function settingsView(view: PetView): Child[] {
       row('浮在桌面上', '在所有窗口的上面，可以拖动、可以碰', check(view.places.overlay, on => void ask(() => window.pet.set({ overlay: on })))),
       row('大小', undefined, scale),
     ),
+    h('h2', {}, '和她聊天'),
+    h('div', { class: 'card' }, ...chatRows(view)),
     h('h2', {}, '她的日子'),
     h('div', { class: 'card' },
       view.stage.has
@@ -167,6 +169,54 @@ function settingsView(view: PetView): Child[] {
     view.designs.length === 0 ? undefined : h('div', { class: 'card' },
       ...view.designs.map(d => row(`${d.name} ${d.version}`, `作者：${d.author} · 许可：${d.license}${d.homepage === undefined ? '' : ` · ${d.homepage}`}`, undefined))),
   ]
+}
+
+/**
+ * Talking with her (src/standalone/pet-chat.ts): which brain, its key, her
+ * voice. A key typed here goes straight to where keys are kept (the keychain
+ * on a Mac); the field is emptied and never shows it again.
+ */
+function chatRows(view: PetView): HTMLElement[] {
+  const chat = view.chat
+  const choice = chat.choice
+  const set = (next: typeof choice) => void ask(() => window.pet.set({ brain: next }))
+  const pick = h('select', {
+    onchange: (event: Event) => {
+      const kind = (event.target as HTMLSelectElement).value
+      set(kind === 'claude-code' ? { kind: 'claude-code' } : kind === 'api-key' ? { kind: 'api-key' } : { kind: 'none' })
+    },
+  },
+  h('option', { value: 'none', selected: choice.kind === 'none' }, '不聊天'),
+  h('option', { value: 'claude-code', selected: choice.kind === 'claude-code' }, `Claude Code${chat.claude ? '' : '（没找到）'}`),
+  h('option', { value: 'api-key', selected: choice.kind === 'api-key' }, 'DeepSeek 或别的 API key'))
+  const rows: HTMLElement[] = [row('她用谁的脑子', choice.kind === 'none' ? '选一个，她就能和你聊天了；不选也能当桌宠' : undefined, pick)]
+  if (choice.kind === 'claude-code') {
+    rows.push(row('Claude Code', chat.claude
+      ? '用这台电脑上已经登录的 Claude Code。它的工具都关掉了，她只能聊天，碰不到你的文件'
+      : '这台电脑上没找到 claude。先装好 Claude Code 并登录，再回来选', undefined))
+    const model = h('select', { onchange: (event: Event) => { const m = (event.target as HTMLSelectElement).value; set(m === '' ? { kind: 'claude-code' } : { kind: 'claude-code', model: m }) } },
+      ...([['', 'Claude Code 自己的默认'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku（快、省）'], ['opus', 'Opus']] as const).map(([value, label]) => h('option', { value, selected: (choice.model ?? '') === value }, label)))
+    rows.push(row('模型', undefined, model))
+  }
+  if (choice.kind === 'api-key') {
+    const text = (value: string, placeholder: string, save: (v: string) => void) => h('input', {
+      type: 'text', value, placeholder, style: 'width:190px', class: 'field',
+      onchange: (event: Event) => save((event.target as HTMLInputElement).value.trim()),
+    })
+    rows.push(row('服务地址', '兼容 OpenAI 接口的都行；不填就是 DeepSeek', text(choice.base ?? '', 'https://api.deepseek.com/v1', v => set({ kind: 'api-key', ...(v === '' ? {} : { base: v }), ...(choice.model === undefined ? {} : { model: choice.model }) }))))
+    rows.push(row('模型', undefined, text(choice.model ?? '', 'deepseek-chat', v => set({ kind: 'api-key', ...(choice.base === undefined ? {} : { base: choice.base }), ...(v === '' ? {} : { model: v }) }))))
+    const key = h('input', { type: 'password', placeholder: chat.key ? '已经存好了（填新的就换掉）' : 'sk-…', style: 'width:190px', autocomplete: 'off' })
+    rows.push(row('API key', '存在系统钥匙串里（Windows：只有你能读的文件），不会写进她的文件，也不会发到别处', h('span', { style: 'display:flex;gap:6px' },
+      key,
+      h('button', { onclick: () => { const value = key.value; key.value = ''; if (value.trim() !== '') void ask(() => window.pet.setKey(value)) } }, '保存'),
+      chat.key ? h('button', { class: 'plain', onclick: () => { if (confirm('删掉存着的 API key？')) void ask(() => window.pet.setKey('')) } }, '删掉') : undefined)))
+  }
+  if (choice.kind !== 'none') {
+    rows.push(row('她出声', '微软 Edge 的声音，要联网；第一次用时会自己装一个小工具，装好之前她只出字', check(chat.voice, on => void ask(() => window.pet.set({ voice: on })))))
+    rows.push(row('和她说话', `${navigator.platform.startsWith('Mac') ? '⌃⌥↩' : 'Ctrl+Alt+Enter'}，或双击她。这一版只能打字，还听不见`, h('button', { onclick: () => window.pet.talk() }, '打开对话条')))
+    rows.push(row('用的是你自己的账号', '她每说一句都算在你的 Claude 或 API 账号上。各家更建议经常自动用的场合用 API key；个人订阅的额度主要是给人自己用的', undefined))
+  }
+  return rows
 }
 
 const when = (at: number): string => {

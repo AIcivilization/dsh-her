@@ -19,6 +19,10 @@ export interface PetBridge {
   getUpdate(): Promise<PetView>
   /** Go back to the version before. */
   goBack(): Promise<PetView>
+  /** Keep her API key (empty: forget it). */
+  setKey(key: string): Promise<PetView>
+  /** Open her talk bar. */
+  talk(): void
   quit(): void
   /** Something changed outside the window (the tray, a file double-clicked). */
   onChanged(listener: () => void): void
@@ -36,6 +40,8 @@ const bridge: PetBridge = {
   checkUpdate: () => ipcRenderer.invoke('pet:update-check'),
   getUpdate: () => ipcRenderer.invoke('pet:update-get'),
   goBack: () => ipcRenderer.invoke('pet:update-back'),
+  setKey: key => ipcRenderer.invoke('pet:key', key),
+  talk: () => ipcRenderer.send('pet:talk'),
   quit: () => ipcRenderer.send('pet:quit'),
   onChanged: listener => { ipcRenderer.on('pet:changed', () => listener()) },
 }

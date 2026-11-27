@@ -37,6 +37,10 @@ import { listPacks } from '../pack/settings.ts'
 import type { Scene, When } from '../pack/stage.ts'
 import { PROTOCOL_VERSION, type BodyMessage, type BrainMessage, type DeskPlaces, type LookView, type PackSummary } from '../protocol/index.ts'
 import { BrainServer, type BodyClient, type Discovery } from '../server/brain-server.ts'
+import { findClaude } from '../engine/brains/claude-code.ts'
+import type { FrontBrain } from '../engine/front-brain.ts'
+import { Secrets } from '../voice/secrets.ts'
+import { API_KEY_NAME, cleanBrainChoice, PetChat, type BrainChoice } from './pet-chat.ts'
 
 /** The id the list of characters is built around when nobody has come in yet. */
 const NOBODY = 'nobody'
@@ -61,14 +65,18 @@ export interface PetSettings {
   quietTo: number
   /** The day she last said good night (YYYY-MM-DD). */
   nightDay?: string
+  /** Who she talks with (pet-chat.ts): nobody until the user chooses. */
+  brain: BrainChoice
+  /** Her voice out loud when she talks (Edge); off: words only. */
+  voice: boolean
 }
 
-export const DEFAULT_PET: PetSettings = { off: false, quietFrom: 23 * 60 + 30, quietTo: 8 * 60 + 30 }
+export const DEFAULT_PET: PetSettings = { off: false, quietFrom: 23 * 60 + 30, quietTo: 8 * 60 + 30, brain: { kind: 'none' }, voice: true }
 
 export function cleanPet(value: unknown): PetSettings {
   const v = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>
   const minutes = (x: unknown, fallback: number) => (typeof x === 'number' && Number.isInteger(x) && x >= 0 && x < 24 * 60 ? x : fallback)
-  const out: PetSettings = { off: v.off === true, quietFrom: minutes(v.quietFrom, DEFAULT_PET.quietFrom), quietTo: minutes(v.quietTo, DEFAULT_PET.quietTo) }
+  const out: PetSettings = { off: v.off === true, quietFrom: minutes(v.quietFrom, DEFAULT_PET.quietFrom), quietTo: minutes(v.quietTo, DEFAULT_PET.quietTo), brain: cleanBrainChoice(v.brain), voice: v.voice !== false }
   for (const key of ['wallpaper', 'overlay', 'tray', 'holdKey'] as const) if (typeof v[key] === 'boolean') out[key] = v[key]
   if (typeof v.petScale === 'number' && Number.isFinite(v.petScale)) out.petScale = Math.min(3, Math.max(0.3, v.petScale))
   if (typeof v.nightDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.nightDay)) out.nightDay = v.nightDay
@@ -90,6 +98,10 @@ export interface PetBrainOptions {
   random?: () => number
   /** How long after a body is welcomed she comes out (her opening clip, hello); the body needs a moment to draw her. */
   comeOutAfterMs?: number
+  /** For tests: the brain she talks with, instead of the one chosen. */
+  chatBrain?: FrontBrain
+  /** Where her API key is kept (the keychain on a Mac); tests give a folder. */
+  secrets?: Secrets
 }
 
 /** What the small settings window shows. */
@@ -107,6 +119,8 @@ export interface PetState {
   /** What the opening clip is called (a 像素动画's name rather than its id). */
   introName?: string
   bodies: number
+  /** Talking with her: the brain chosen, whether Claude Code is on this computer, whether a key is kept. */
+  chat: { choice: BrainChoice; claude: boolean; key: boolean; voice: boolean }
 }
 
 export class PetBrain {
@@ -131,6 +145,12 @@ export class PetBrain {
   private readonly randomNext = new Map<string, number>()
   private chosenUntil = 0
   private actId = 0
+  /** Talking with her, while a brain is chosen and someone is here. */
+  private chat: PetChat | undefined
+  private readonly secrets: Secrets
+  private hasKey = false
+  /** Performances asked of the body, waiting for it to say they are done. */
+  private readonly pendingActs = new Map<string, (result: { ok: boolean; reason?: string }) => void>()
 
   constructor(options: PetBrainOptions) {
     this.options = options
@@ -143,6 +163,8 @@ export class PetBrain {
     this.library = new Library(this.paths.root)
     this.pixels = new Pixels(this.paths.root)
     this.settings = cleanPet(this.readJson('pet.json'))
+    this.secrets = options.secrets ?? new Secrets(this.paths.root)
+    void this.secrets.has(API_KEY_NAME).then(has => { this.hasKey = has }, () => undefined)
     this.designs = new DesignPacks({
       home: this.paths.root, charactersDir: this.paths.characters, version: options.version,
       library: this.library, skins: new Skins(this.paths.root), people: this.people,
@@ -307,7 +329,7 @@ export class PetBrain {
     this.log({ event: 'hello', line })
   }
 
-  private onMessage(_client: BodyClient, message: BodyMessage): void {
+  private onMessage(client: BodyClient, message: BodyMessage): void {
     switch (message.t) {
       case 'touch':
         this.touched(message)
@@ -324,10 +346,27 @@ export class PetBrain {
       case 'look.state':
         this.bodyLook = message.look ?? undefined
         break
-      case 'user.text':
+      case 'user.text': {
+        const chat = this.ensureChat()
+        if (chat !== undefined) chat.hear(message.text)
+        // No brain chosen: say so rather than seem broken.
+        else if (this.someone()) this.bubble('（我现在还不会聊天：在设置里的"和她聊天"选一个。）')
+        break
+      }
       case 'user.utterance':
-        // She has no brain here; say so once in a while rather than seem broken.
-        if (this.someone()) this.bubble('（我现在还不会聊天。）')
+        if (this.someone()) this.bubble(this.ensureChat() === undefined ? '（我现在还不会聊天。）' : '（我还听不见，打字和我说吧。）')
+        break
+      case 'interrupt':
+        this.chat?.interrupted(message.uid, message.seq, message.playedMs)
+        break
+      case 'talk.get': {
+        const chat = this.ensureChat()
+        if (chat !== undefined) client.send({ t: 'talk', ...chat.talkView() })
+        break
+      }
+      case 'act.done':
+        this.pendingActs.get(message.id)?.({ ok: message.ok, ...(message.reason === undefined ? {} : { reason: message.reason }) })
+        this.pendingActs.delete(message.id)
         break
       default:
         // Everything else belongs to a brain that talks.
@@ -347,7 +386,12 @@ export class PetBrain {
     if (mood === undefined) return
     const line = this.tracker.pick((this.lines().touch ?? FALLBACK_LINES)[mood], this.random)
     if (line === undefined) return
-    this.bubble(line)
+    const chat = this.ensureChat()
+    // With a brain, out loud and noted for her next turn; without one, a bubble.
+    if (chat !== undefined) {
+      const where = kind === 'long' ? '摸了摸你的头' : part === 'head' ? '点了点你的头' : '戳了你一下'
+      chat.sayOwnLine(line, `（备注：对方刚才${where}，你说了"${line}"。）`)
+    } else this.bubble(line)
     this.log({ event: 'touch', part, kind, line })
   }
 
@@ -428,6 +472,11 @@ export class PetBrain {
   async stop(): Promise<void> {
     clearInterval(this.timer)
     this.timer = undefined
+    const chat = this.chat
+    this.chat = undefined
+    await chat?.dispose()
+    for (const settle of this.pendingActs.values()) settle({ ok: false, reason: 'no body' })
+    this.pendingActs.clear()
     const server = this.server
     this.server = undefined
     await server?.stop()
@@ -462,7 +511,62 @@ export class PetBrain {
       intro: this.intro(),
       ...this.introName(),
       bodies: this.server?.bodies.length ?? 0,
+      chat: { choice: this.settings.brain, claude: findClaude() !== undefined, key: this.hasKey, voice: this.settings.voice },
     }
+  }
+
+  // ── talking ─────────────────────────────────────────────────────────────
+
+  /** The conversation with the character of now, when a brain is chosen. */
+  private ensureChat(): PetChat | undefined {
+    if (!this.someone() || this.settings.brain.kind === 'none') return undefined
+    if (this.chat !== undefined) return this.chat
+    const { cid, dir } = this.current()
+    this.chat = new PetChat({
+      home: this.paths.root, cid, dir,
+      character: () => this.current().character,
+      choice: this.settings.brain,
+      secrets: this.secrets,
+      voice: () => this.settings.voice,
+      broadcast: message => this.broadcast(message),
+      broadcastWithAudio: (message, stream, audio) => this.server?.broadcastWithAudio(message, stream, audio),
+      bodyPack: () => this.bodyPack,
+      playAction: action => this.playAction(action),
+      off: () => this.settings.off,
+      log: entry => this.log(entry),
+      ...(this.options.chatBrain === undefined ? {} : { brain: this.options.chatBrain }),
+    })
+    return this.chat
+  }
+
+  /** A longer performance by the body (her play_action tool): done when the body says so. */
+  private playAction(action: string): Promise<{ ok: boolean; reason?: string }> {
+    if ((this.server?.bodies.length ?? 0) === 0) return Promise.resolve({ ok: false, reason: 'no body' })
+    const id = `act-${++this.actId}`
+    return new Promise(resolve => {
+      const timer = setTimeout(() => { this.pendingActs.delete(id); resolve({ ok: false, reason: 'timeout' }) }, 60_000)
+      timer.unref()
+      this.pendingActs.set(id, result => { clearTimeout(timer); resolve(result) })
+      this.broadcast({ t: 'act', cid: this.current().cid, id, action })
+    })
+  }
+
+  /** Who she talks with; the conversation so far is kept by each brain. */
+  async setBrain(choice: BrainChoice): Promise<void> {
+    this.saveSettings({ brain: cleanBrainChoice(choice) })
+    const chat = this.chat
+    this.chat = undefined
+    await chat?.dispose()
+  }
+
+  /** Keep her API key (empty: forget it). Never logged, never in a file anyone else can read. */
+  async setKey(key: string): Promise<void> {
+    await this.secrets.set(API_KEY_NAME, key)
+    this.hasKey = key.trim() !== ''
+  }
+
+  setVoice(on: boolean): void {
+    this.saveSettings({ voice: on })
   }
 
   /** Look at a 设计包: nothing is written but the zip, kept for `installDesign`. */

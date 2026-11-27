@@ -82,6 +82,7 @@ export class TalkBar {
   private readonly input: HTMLInputElement
   private readonly mic: HTMLButtonElement | undefined
   private readonly where: HTMLSpanElement
+  private readonly foot: HTMLDivElement
   private readonly earlier: HTMLSelectElement
   private readonly note: HTMLDivElement
   private readonly host: BarHost
@@ -140,6 +141,7 @@ export class TalkBar {
     if (this.mic !== undefined) row.append(this.mic)
     row.append(this.sendButton)
     const foot = make('div', 'her-bar-foot')
+    this.foot = foot
     this.where = make('span', 'grow')
     this.earlier = make('select', 'her-bar-select')
     this.earlier.title = '接着之前的一段说'
@@ -305,6 +307,9 @@ export class TalkBar {
     // What was pending and is in the conversation now is shown from there (see `fresh`); old leftovers go.
     this.pending = this.pending.filter(line => Date.now() - line.at < 90_000)
     this.draw()
+    // 真人桌宠: no other conversations, nothing in DSH to open, nothing to hold to talk yet.
+    this.foot.style.display = view.simple === true ? 'none' : ''
+    if (this.mic !== undefined) this.mic.style.display = view.simple === true ? 'none' : ''
     this.where.textContent = `${view.segment?.title ?? '还没有对话'}${view.size === undefined ? '' : ` · ${view.size}`}`
     const doc = this.element.ownerDocument
     const placeholder = doc.createElement('option')

@@ -19,6 +19,7 @@ import { MAX_DESIGN_BYTES } from '../../src/core/design-pack.ts'
 import type { DesignPreview } from '../../src/engine/design-packs.ts'
 import type { DeskPlaces } from '../../src/protocol/index.ts'
 import { PetBrain, type PetState } from '../../src/standalone/pet-brain.ts'
+import type { BrainChoice } from '../../src/standalone/pet-chat.ts'
 import { FIRST_CHECK_AFTER_MS, PlayerUpdates, type UpdateState } from '../../src/standalone/player-update.ts'
 import { cannotReplace, goBack, replaceWith } from './update.ts'
 import { PACKAGED } from './packaged.ts'
@@ -52,6 +53,8 @@ export interface BodyHooks {
   setPetScale(next: number): void
   /** After anything the tray shows has changed. */
   changed(): void
+  /** Open her talk bar. */
+  talk(): void
 }
 
 /** What the settings window shows. */
@@ -79,6 +82,9 @@ export interface PetChange {
   autostart?: boolean
   /** Look for a new version once a day. */
   autoUpdate?: boolean
+  /** Who she talks with (pet-chat.ts), and whether out loud. */
+  brain?: BrainChoice
+  voice?: boolean
 }
 
 /** How often the daily look is considered (it goes out only once a day). */
@@ -123,6 +129,9 @@ export class Standalone {
     ipcMain.handle('pet:update-check', () => answer(() => this.updates.check())())
     ipcMain.handle('pet:update-get', () => answer(() => this.update())())
     ipcMain.handle('pet:update-back', () => answer(() => goBack(this.updates))())
+    // Her API key: from the settings window straight to where keys are kept (never into a file of hers or a log).
+    ipcMain.handle('pet:key', (_event, key: string) => answer(() => this.brain.setKey(typeof key === 'string' ? key : ''))())
+    ipcMain.on('pet:talk', () => this.hooks.talk())
     ipcMain.on('pet:quit', () => app.quit())
   }
 
@@ -196,6 +205,8 @@ export class Standalone {
     if (change.introOn !== undefined || change.introWhen !== undefined) this.brain.setIntro({ ...(change.introOn === undefined ? {} : { on: change.introOn }), ...(change.introWhen === undefined ? {} : { when: change.introWhen }) })
     if (change.autostart !== undefined && PACKAGED) app.setLoginItemSettings({ openAtLogin: change.autostart })
     if (change.autoUpdate !== undefined) this.updates.setAuto(change.autoUpdate)
+    if (change.brain !== undefined) await this.brain.setBrain(change.brain)
+    if (change.voice !== undefined) this.brain.setVoice(change.voice)
     if (change.stage !== undefined) await this.brain.playStage(change.stage)
   }
 
