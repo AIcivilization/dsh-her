@@ -36,6 +36,7 @@ test('where claude is: on PATH, else where its installers put it', () => {
   assert.equal(findClaude({ PATH: '/usr/bin:/opt/homebrew/bin', HOME: '/home/b' }, 'darwin', exists), '/opt/homebrew/bin/claude')
   assert.equal(findClaude({ PATH: '/usr/bin:/bin', HOME: '/home/a' }, 'darwin', exists), '/home/a/.local/bin/claude', 'an app from the Dock has a bare PATH')
   assert.equal(findClaude({ PATH: '/usr/bin', HOME: '/home/c' }, 'linux', path => path === '/home/a/.local/bin/claude'), undefined)
+  assert.equal(findClaude({ Path: 'C:\\tools;C:\\Windows', USERPROFILE: 'C:\\Users\\a' }, 'win32', exists), 'C:\\Users\\a\\.local\\bin\\claude.exe')
   assert.match(explainClaudeError('Failed to authenticate: OAuth session expired'), /\/login/)
   assert.match(explainClaudeError('429 rate limit'), /上限/)
 })

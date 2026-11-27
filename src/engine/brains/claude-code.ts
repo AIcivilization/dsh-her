@@ -22,7 +22,7 @@ import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { delimiter, dirname, join } from 'node:path'
+import { dirname, join, posix, win32 } from 'node:path'
 import type { FrontBrain, ReplyEvents } from '../front-brain.ts'
 import type { HerTool } from '../her-tools.ts'
 import { startHerMcp, type HerMcp } from '../her-mcp.ts'
@@ -31,11 +31,13 @@ import { ReplyStream } from '../reply-stream.ts'
 /** Where `claude` is: on PATH, else where its installers put it (an app started from the Dock has a bare PATH). */
 export function findClaude(env: NodeJS.ProcessEnv = process.env, platform: string = process.platform, exists: (path: string) => boolean = existsSync): string | undefined {
   const name = platform === 'win32' ? 'claude.exe' : 'claude'
-  const home = env.HOME ?? env.USERPROFILE ?? homedir()
-  const onPath = (env.PATH ?? env.Path ?? '').split(platform === 'win32' ? ';' : delimiter).filter(Boolean).map(dir => join(dir, name))
+  // The paths of the system asked about, whichever this runs on.
+  const paths = platform === 'win32' ? win32 : posix
+  const home = (platform === 'win32' ? env.USERPROFILE ?? env.HOME : env.HOME) ?? homedir()
+  const onPath = (env.PATH ?? env.Path ?? '').split(paths.delimiter).filter(Boolean).map(dir => paths.join(dir, name))
   const usual = platform === 'win32'
-    ? [join(home, '.local', 'bin', name)]
-    : [join(home, '.local', 'bin', name), join(home, '.claude', 'local', name), '/opt/homebrew/bin/claude', '/usr/local/bin/claude']
+    ? [paths.join(home, '.local', 'bin', name)]
+    : [paths.join(home, '.local', 'bin', name), paths.join(home, '.claude', 'local', name), '/opt/homebrew/bin/claude', '/usr/local/bin/claude']
   return [...onPath, ...usual].find(path => exists(path))
 }
 
