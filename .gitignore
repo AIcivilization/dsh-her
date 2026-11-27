@@ -6,6 +6,7 @@ lib/
 
 # Electron body build output, and packaged bodies (body/scripts/package.mjs).
 body/dist/
+body/vendor/
 body/out/
 release/
 

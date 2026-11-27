@@ -1182,6 +1182,8 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll()
   stopHoldHook()
   link?.stop()
+  // agent-autoloop is a child of this program: it goes now, not after an exit that would leave it behind.
+  pet?.loop.killNow()
   void pet?.stop()
 })
 // Closing her window ends the program, unless she was switched off: then only the tray stays, to call her back.

@@ -55,7 +55,7 @@ async function body(home: string) {
 }
 
 test('settings that cannot be are put right', () => {
-  assert.deepEqual(cleanPet({ quietFrom: 9999, petScale: 99, off: 'yes', wallpaper: true, nightDay: 'today' }), { off: false, quietFrom: 23 * 60 + 30, quietTo: 8 * 60 + 30, brain: { kind: 'none' }, voice: true, wallpaper: true, petScale: 3 })
+  assert.deepEqual(cleanPet({ quietFrom: 9999, petScale: 99, off: 'yes', wallpaper: true, nightDay: 'today' }), { off: false, quietFrom: 23 * 60 + 30, quietTo: 8 * 60 + 30, brain: { kind: 'none' }, voice: true, loop: false, wallpaper: true, petScale: 3 })
 })
 
 test('the pet without a brain: nobody at first, a 设计包 brings her in, she answers a touch, says hello and good night', async () => {

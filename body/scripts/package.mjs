@@ -99,7 +99,12 @@ const putApp = (resources) => {
   }
   // `standalone`: the body knows it is 真人桌宠 (main/standalone.ts).
   writeFileSync(join(appDir, 'package.json'), `${JSON.stringify({ name: pkg.name, productName: kind.name, version, main: pkg.main, license: pkg.license, ...(PLAYER ? { standalone: true } : {}) }, null, 2)}\n`)
-  if (PLAYER) writeFileSync(join(resources, 'NOTICE.txt'), playerNotice)
+  if (PLAYER) {
+    writeFileSync(join(resources, 'NOTICE.txt'), playerNotice)
+    // agent-autoloop (docs/实施计划.md step 12): the pinned copy, fetched and checked by scripts/fetch-autoloop.mjs.
+    run(process.execPath, [join(bodyDir, '..', 'scripts', 'fetch-autoloop.mjs')])
+    cpSync(join(bodyDir, 'vendor', 'agent-autoloop'), join(resources, 'agent-autoloop'), { recursive: true })
+  }
   return appDir
 }
 
@@ -107,7 +112,8 @@ const putApp = (resources) => {
 const playerNotice = [
   '真人桌宠 — 身体引擎 dsh-her（https://github.com/AIcivilization/dsh-her），MIT 许可。',
   '设计包（.her）是各自作者的作品，许可写在设计包里，装之前会给你看。',
-  '这一版不要账号、不要 API key，不联网。',
+  '不聊天时不要账号、不要 key；聊天时只和你选的那一家说话；除了每天看一次有没有新版，不联网。',
+  '接活用的 agent-autoloop（https://github.com/KKKKhazix/agent-autoloop）是 MIT 许可，作者 数字生命卡兹克，许可全文在 agent-autoloop/LICENSE。',
   '',
 ].join('\n')
 

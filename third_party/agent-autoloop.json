@@ -1,0 +1,19 @@
+{
+  "about": "agent-autoloop, run inside 真人桌宠 (docs/实施计划.md step 12). MIT, Copyright (c) 2026 数字生命卡兹克. Not copied into this repository: scripts/fetch-autoloop.mjs downloads this commit and checks its files against contentSha256.",
+  "repo": "KKKKhazix/agent-autoloop",
+  "tag": "v1.10.4",
+  "commit": "c53448c3c6a2ff7c0943d982496516f588967cff",
+  "keep": [
+    "bin",
+    "cli",
+    "host",
+    "kernel",
+    "protocol",
+    "worker",
+    "plugins",
+    "skills",
+    "package.json",
+    "LICENSE"
+  ],
+  "contentSha256": "78fb44cb8d370fc8cc35d83bfae3f5ea9872a89c329856d322b89271e587dd26"
+}

@@ -69,14 +69,16 @@ export interface PetSettings {
   brain: BrainChoice
   /** Her voice out loud when she talks (Edge); off: words only. */
   voice: boolean
+  /** She takes on work through agent-autoloop (autoloop.ts); off by default while it is being built. */
+  loop: boolean
 }
 
-export const DEFAULT_PET: PetSettings = { off: false, quietFrom: 23 * 60 + 30, quietTo: 8 * 60 + 30, brain: { kind: 'none' }, voice: true }
+export const DEFAULT_PET: PetSettings = { off: false, quietFrom: 23 * 60 + 30, quietTo: 8 * 60 + 30, brain: { kind: 'none' }, voice: true, loop: false }
 
 export function cleanPet(value: unknown): PetSettings {
   const v = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>
   const minutes = (x: unknown, fallback: number) => (typeof x === 'number' && Number.isInteger(x) && x >= 0 && x < 24 * 60 ? x : fallback)
-  const out: PetSettings = { off: v.off === true, quietFrom: minutes(v.quietFrom, DEFAULT_PET.quietFrom), quietTo: minutes(v.quietTo, DEFAULT_PET.quietTo), brain: cleanBrainChoice(v.brain), voice: v.voice !== false }
+  const out: PetSettings = { off: v.off === true, quietFrom: minutes(v.quietFrom, DEFAULT_PET.quietFrom), quietTo: minutes(v.quietTo, DEFAULT_PET.quietTo), brain: cleanBrainChoice(v.brain), voice: v.voice !== false, loop: v.loop === true }
   for (const key of ['wallpaper', 'overlay', 'tray', 'holdKey'] as const) if (typeof v[key] === 'boolean') out[key] = v[key]
   if (typeof v.petScale === 'number' && Number.isFinite(v.petScale)) out.petScale = Math.min(3, Math.max(0.3, v.petScale))
   if (typeof v.nightDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.nightDay)) out.nightDay = v.nightDay
@@ -567,6 +569,10 @@ export class PetBrain {
 
   setVoice(on: boolean): void {
     this.saveSettings({ voice: on })
+  }
+
+  setLoop(on: boolean): void {
+    this.saveSettings({ loop: on })
   }
 
   /** Look at a 设计包: nothing is written but the zip, kept for `installDesign`. */

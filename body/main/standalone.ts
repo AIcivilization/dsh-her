@@ -21,6 +21,7 @@ import type { DeskPlaces } from '../../src/protocol/index.ts'
 import { PetBrain, type PetState } from '../../src/standalone/pet-brain.ts'
 import type { BrainChoice } from '../../src/standalone/pet-chat.ts'
 import { FIRST_CHECK_AFTER_MS, PlayerUpdates, type UpdateState } from '../../src/standalone/player-update.ts'
+import { Autoloop, type AutoloopState } from '../../src/standalone/autoloop.ts'
 import { cannotReplace, goBack, replaceWith } from './update.ts'
 import { PACKAGED } from './packaged.ts'
 import { DESIGN_FILE, translocated } from './standalone-where.ts'
@@ -64,6 +65,8 @@ export interface PetView extends PetState {
   places: DeskPlaces
   petScale: number
   app: { name: string; version: string; packaged: boolean; autostart: boolean; translocated: boolean }
+  /** The loop she lives by (agent-autoloop): on or off, and which one. */
+  loop: AutoloopState & { on: boolean }
   /** Updates: what was found, the download under way, why this copy cannot replace itself. */
   update: UpdateState & { progress?: { done: number; total: number }; busy: boolean; cannot?: string }
   /** What just went wrong, in words. */
@@ -85,6 +88,9 @@ export interface PetChange {
   /** Who she talks with (pet-chat.ts), and whether out loud. */
   brain?: BrainChoice
   voice?: boolean
+  /** She takes on work (agent-autoloop); and which one, when the user was asked. */
+  loop?: boolean
+  loopUse?: 'own' | 'bundled'
 }
 
 /** How often the daily look is considered (it goes out only once a day). */
@@ -93,6 +99,7 @@ const UPDATE_TICK_MS = 3_600_000
 export class Standalone {
   readonly brain: PetBrain
   readonly updates: PlayerUpdates
+  readonly loop: Autoloop
   private updateTimer: NodeJS.Timeout | undefined
   private readonly hooks: BodyHooks
   private window: BrowserWindow | undefined
@@ -103,6 +110,14 @@ export class Standalone {
     this.hooks = hooks
     this.brain = new PetBrain({ home, version: app.getVersion(), log: entry => console.log(JSON.stringify(entry)) })
     this.updates = new PlayerUpdates({ home, version: app.getVersion() })
+    // Ours runs in this program's own Node (Electron as Node); its code is in the app, or in body/vendor while developing.
+    this.loop = new Autoloop({
+      home,
+      root: PACKAGED ? join(process.resourcesPath, 'agent-autoloop') : join(app.getAppPath(), 'vendor', 'agent-autoloop'),
+      node: process.execPath,
+      nodeEnv: { ELECTRON_RUN_AS_NODE: '1' },
+      log: entry => console.log(JSON.stringify(entry)),
+    })
     const answer = <T>(work: () => T | Promise<T>) => async (): Promise<PetView> => {
       this.error = undefined
       try {
@@ -164,11 +179,13 @@ export class Standalone {
     setTimeout(() => void this.lookForUpdate(), FIRST_CHECK_AFTER_MS).unref()
     this.updateTimer = setInterval(() => void this.lookForUpdate(), UPDATE_TICK_MS)
     this.updateTimer.unref()
+    if (this.brain.state().settings.loop) void this.loop.start().then(() => this.hooks.changed())
   }
 
-  stop(): Promise<void> {
+  async stop(): Promise<void> {
     clearInterval(this.updateTimer)
-    return this.brain.stop()
+    await this.loop.stop()
+    await this.brain.stop()
   }
 
   view(): PetView {
@@ -182,6 +199,7 @@ export class Standalone {
         autostart: PACKAGED && app.getLoginItemSettings().openAtLogin,
         translocated: translocated(),
       },
+      loop: { ...this.loop.state(), on: this.brain.state().settings.loop },
       update: {
         ...this.updates.state(),
         ...(this.updates.progress === undefined ? {} : { progress: this.updates.progress }),
@@ -207,6 +225,12 @@ export class Standalone {
     if (change.autoUpdate !== undefined) this.updates.setAuto(change.autoUpdate)
     if (change.brain !== undefined) await this.brain.setBrain(change.brain)
     if (change.voice !== undefined) this.brain.setVoice(change.voice)
+    if (change.loop !== undefined) {
+      this.brain.setLoop(change.loop)
+      if (change.loop) await this.loop.start()
+      else await this.loop.off()
+    }
+    if (change.loopUse !== undefined) await this.loop.choose(change.loopUse)
     if (change.stage !== undefined) await this.brain.playStage(change.stage)
   }
 

@@ -145,6 +145,8 @@ function settingsView(view: PetView): Child[] {
     ),
     h('h2', {}, '和她聊天'),
     h('div', { class: 'card' }, ...chatRows(view)),
+    h('h2', {}, '让她接活（实验）'),
+    h('div', { class: 'card' }, ...loopRows(view)),
     h('h2', {}, '她的日子'),
     h('div', { class: 'card' },
       view.stage.has
@@ -163,7 +165,7 @@ function settingsView(view: PetView): Child[] {
     h('div', { class: 'card' },
       row('开机自动启动', view.app.packaged ? undefined : '开发版里不能设', check(view.app.autostart, on => void ask(() => window.pet.set({ autostart: on })), !view.app.packaged)),
       ...updateRows(view),
-      row(`${view.app.name} ${view.app.version}`, `身体引擎：dsh-her。不要账号、不要 key${view.update.auto ? '；除了每天看一次有没有新版，不联网' : '，不联网'}。`, h('button', { onclick: () => window.pet.quit() }, '退出')),
+      row(`${view.app.name} ${view.app.version}`, `身体引擎：dsh-her。${view.loop.kind === 'bundled' ? `接活用的是 agent-autoloop ${view.loop.version}（MIT，作者 数字生命卡兹克）。` : ''}${view.chat.choice.kind === 'none' ? '不要账号、不要 key' : '聊天时只和你选的那一家说话'}${view.update.auto ? '；除此之外只每天看一次有没有新版' : ''}。`, h('button', { onclick: () => window.pet.quit() }, '退出')),
     ),
     view.designs.length === 0 ? undefined : h('h2', {}, '装过的设计包'),
     view.designs.length === 0 ? undefined : h('div', { class: 'card' },
@@ -215,6 +217,25 @@ function chatRows(view: PetView): HTMLElement[] {
     rows.push(row('她出声', '微软 Edge 的声音，要联网；第一次用时会自己装一个小工具，装好之前她只出字', check(chat.voice, on => void ask(() => window.pet.set({ voice: on })))))
     rows.push(row('和她说话', `${navigator.platform.startsWith('Mac') ? '⌃⌥↩' : 'Ctrl+Alt+Enter'}，或双击她。这一版只能打字，还听不见`, h('button', { onclick: () => window.pet.talk() }, '打开对话条')))
     rows.push(row('用的是你自己的账号', '她每说一句都算在你的 Claude 或 API 账号上。各家更建议经常自动用的场合用 API key；个人订阅的额度主要是给人自己用的', undefined))
+  }
+  return rows
+}
+
+/**
+ * The loop she lives by (src/standalone/autoloop.ts): agent-autoloop, the
+ * user's own when they run one, else the copy that comes with the app.
+ */
+function loopRows(view: PetView): HTMLElement[] {
+  const loop = view.loop
+  const status = !loop.on ? '关着。打开以后，她用 agent-autoloop 在后台接活、跟进，拿不准才来问你（还在做，现在只是把它启动起来）'
+    : loop.kind === 'own' ? `用的是你自己装的 agent-autoloop（${loop.url}）`
+      : loop.kind === 'bundled' ? `用的是自带的 agent-autoloop ${loop.version}${loop.running ? '，在运行' : '，没在运行'}；数据在她自己的文件夹里，不碰 ~/.agent-autoloop`
+        : loop.kind === 'none' ? loop.why : '正在启动…'
+  const rows = [row('让她接活', status, check(loop.on, on => void ask(() => window.pet.set({ loop: on }))))]
+  if (loop.kind === 'bundled' && loop.ownAppeared) {
+    rows.push(row('你自己也装了 agent-autoloop', '一台电脑上跑一份就够了。要改用你自己装的那份吗？自带的那份会停掉', h('span', { style: 'display:flex;gap:6px' },
+      h('button', { class: 'main', onclick: () => void ask(() => window.pet.set({ loopUse: 'own' })) }, '改用我的'),
+      h('button', { onclick: () => void ask(() => window.pet.set({ loopUse: 'bundled' })) }, '还用自带的'))))
   }
   return rows
 }
